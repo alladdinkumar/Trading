@@ -49,7 +49,7 @@ No source code is written yet — this phase only sets the table. Subsequent pha
 **Files:**
 - Create: `.python-version`
 
-- [ ] **Step 1.1: Create `.python-version`**
+- [x] **Step 1.1: Create `.python-version`**
 
 Create `D:\Projects\Trading\.python-version` with exactly this content (single line, no trailing characters):
 
@@ -57,7 +57,7 @@ Create `D:\Projects\Trading\.python-version` with exactly this content (single l
 3.11
 ```
 
-- [ ] **Step 1.2: Verify uv recognises the pin**
+- [x] **Step 1.2: Verify uv recognises the pin**
 
 Run from `D:\Projects\Trading\`:
 
@@ -74,7 +74,7 @@ Expected: prints a path that ends in `python3.11.exe` or `python.exe` from a 3.1
 **Files:**
 - Create: `pyproject.toml`
 
-- [ ] **Step 2.1: Write `pyproject.toml`**
+- [x] **Step 2.1: Write `pyproject.toml`**
 
 Create `D:\Projects\Trading\pyproject.toml` with this exact content:
 
@@ -215,7 +215,7 @@ markers = [
 
 The `<2.0` ceiling on numpy is **load-bearing** — pandas-ta is incompatible with numpy 2.x as of writing.
 
-- [ ] **Step 2.2: No verification yet**
+- [x] **Step 2.2: No verification yet**
 
 We verify after `uv sync` in Task 3 — pyproject.toml is just a manifest at this stage.
 
@@ -225,7 +225,7 @@ We verify after `uv sync` in Task 3 — pyproject.toml is just a manifest at thi
 
 **Files:** (no edits — `uv` writes `uv.lock` and `.venv/`)
 
-- [ ] **Step 3.1: Run `uv sync`**
+- [x] **Step 3.1: Run `uv sync`**
 
 From `D:\Projects\Trading\`:
 
@@ -244,7 +244,7 @@ This creates `.venv/` and writes `uv.lock`. Expect 3-10 minutes on first run bec
 
 If `uv` complains it cannot find Python 3.11, run `uv python install 3.11` first then retry.
 
-- [ ] **Step 3.2: Confirm `uv.lock` exists**
+- [x] **Step 3.2: Confirm `uv.lock` exists**
 
 ```powershell
 Test-Path uv.lock
@@ -252,7 +252,7 @@ Test-Path uv.lock
 
 Expected: `True`.
 
-- [ ] **Step 3.3: Confirm we can run Python from the venv**
+- [x] **Step 3.3: Confirm we can run Python from the venv**
 
 ```powershell
 uv run python --version
@@ -278,7 +278,7 @@ Expected: `Python 3.11.x` (any patch level).
 - Create: `src/trading/ui/__init__.py`
 - Create: `src/trading/ui/pages/__init__.py`
 
-- [ ] **Step 4.1: Create the package root `__init__.py`**
+- [x] **Step 4.1: Create the package root `__init__.py`**
 
 Create `D:\Projects\Trading\src\trading\__init__.py` with:
 
@@ -288,7 +288,7 @@ Create `D:\Projects\Trading\src\trading\__init__.py` with:
 __version__ = "0.1.0"
 ```
 
-- [ ] **Step 4.2: Create each sub-package `__init__.py` as an empty file**
+- [x] **Step 4.2: Create each sub-package `__init__.py` as an empty file**
 
 For each of the following paths, create an empty file (zero bytes):
 
@@ -327,7 +327,7 @@ foreach ($p in $paths) {
 }
 ```
 
-- [ ] **Step 4.3: Verify the import path works**
+- [x] **Step 4.3: Verify the import path works**
 
 ```powershell
 uv run python -c "import trading; print(trading.__version__)"
@@ -345,11 +345,11 @@ Expected: `0.1.0`.
 - Create: `tests/fixtures/.gitkeep`
 - Create: `tests/test_smoke.py`
 
-- [ ] **Step 5.1: Create `tests/__init__.py` (empty file)**
+- [x] **Step 5.1: Create `tests/__init__.py` (empty file)**
 
 Create `D:\Projects\Trading\tests\__init__.py` as an empty file.
 
-- [ ] **Step 5.2: Create `tests/conftest.py`**
+- [x] **Step 5.2: Create `tests/conftest.py`**
 
 Create `D:\Projects\Trading\tests\conftest.py` with:
 
@@ -367,11 +367,11 @@ def fixtures_dir() -> Path:
     return Path(__file__).parent / "fixtures"
 ```
 
-- [ ] **Step 5.3: Create `tests/fixtures/.gitkeep`**
+- [x] **Step 5.3: Create `tests/fixtures/.gitkeep`**
 
 Create `D:\Projects\Trading\tests\fixtures\.gitkeep` as an empty file (so the directory is tracked even though it's empty).
 
-- [ ] **Step 5.4: Create `tests/test_smoke.py`**
+- [x] **Step 5.4: Create `tests/test_smoke.py`**
 
 Create `D:\Projects\Trading\tests\test_smoke.py` with:
 
@@ -392,7 +392,7 @@ def test_fixtures_dir_resolves(fixtures_dir: Path) -> None:
     assert fixtures_dir.is_dir()
 ```
 
-- [ ] **Step 5.5: Run the smoke test**
+- [x] **Step 5.5: Run the smoke test**
 
 ```powershell
 uv run pytest tests/test_smoke.py -v
@@ -415,7 +415,7 @@ If a test fails, the most likely cause is a typo in `__init__.py` — re-check T
 **Files:**
 - Create: `.env.example`
 
-- [ ] **Step 6.1: Write `.env.example`**
+- [x] **Step 6.1: Write `.env.example`**
 
 Create `D:\Projects\Trading\.env.example` with:
 
@@ -450,7 +450,7 @@ NEWS_USER_AGENT=trading-bot/0.1
 **Files:**
 - Modify: `.gitignore`
 
-- [ ] **Step 7.1: Append project-specific section to `.gitignore`**
+- [x] **Step 7.1: Append project-specific section to `.gitignore`**
 
 The existing `.gitignore` is the generic Python template. Append the following block at the end of `D:\Projects\Trading\.gitignore`:
 
@@ -488,7 +488,7 @@ Thumbs.db
 
 Note: do NOT ignore `uv.lock` (we commit it for reproducibility) and do NOT ignore `.python-version` (we commit it to pin the interpreter).
 
-- [ ] **Step 7.2: Verify ignores apply**
+- [x] **Step 7.2: Verify ignores apply**
 
 ```powershell
 git status --ignored
@@ -500,7 +500,7 @@ Expected: under "Ignored files" you should see `.env` (when present), `.venv/`, 
 
 ## Task 8: Verify the toolchain runs clean
 
-- [ ] **Step 8.1: Run ruff lint**
+- [x] **Step 8.1: Run ruff lint**
 
 ```powershell
 uv run ruff check .
@@ -512,7 +512,7 @@ If failures appear, fix and re-run. Common issues at this stage:
 - Unused imports in `__init__.py` files (shouldn't happen — they're empty)
 - Format issues in `conftest.py` — run `uv run ruff format .` to auto-fix
 
-- [ ] **Step 8.2: Run ruff format check**
+- [x] **Step 8.2: Run ruff format check**
 
 ```powershell
 uv run ruff format --check .
@@ -520,7 +520,7 @@ uv run ruff format --check .
 
 Expected: `N files already formatted` with no diffs proposed. If diffs are proposed, run `uv run ruff format .` to apply them, then re-run with `--check`.
 
-- [ ] **Step 8.3: Run mypy**
+- [x] **Step 8.3: Run mypy**
 
 ```powershell
 uv run mypy src/
@@ -530,7 +530,7 @@ Expected: `Success: no issues found in N source files`.
 
 If mypy complains about missing imports for third-party libs without stubs, that's already handled via `ignore_missing_imports = true` in pyproject. If it surfaces, double-check the `[tool.mypy]` block.
 
-- [ ] **Step 8.4: Run the full pytest suite**
+- [x] **Step 8.4: Run the full pytest suite**
 
 ```powershell
 uv run pytest -q
@@ -543,7 +543,7 @@ Expected:
 2 passed in ...s
 ```
 
-- [ ] **Step 8.5: Verify the `trading` CLI script entry point resolves**
+- [x] **Step 8.5: Verify the `trading` CLI script entry point resolves**
 
 The `pyproject.toml` declares a `trading` entry point that targets `trading.cli:app`. That module doesn't exist yet — verify the entry is registered but expect an import error if invoked:
 
@@ -560,7 +560,7 @@ Expected: an `ModuleNotFoundError: No module named 'trading.cli'` (or similar). 
 **Files:**
 - Modify: `PROGRESS.md`
 
-- [ ] **Step 9.1: Mark all Phase 0 sub-tasks as complete**
+- [x] **Step 9.1: Mark all Phase 0 sub-tasks as complete**
 
 In `D:\Projects\Trading\PROGRESS.md`:
 
@@ -597,7 +597,7 @@ And the Phase 0 task list becomes:
 
 **Files:** (no edits — git operation only)
 
-- [ ] **Step 10.1: Stage the new files**
+- [x] **Step 10.1: Stage the new files**
 
 From `D:\Projects\Trading\`:
 
@@ -605,7 +605,7 @@ From `D:\Projects\Trading\`:
 git add .python-version pyproject.toml uv.lock .env.example .gitignore src/ tests/ PROGRESS.md
 ```
 
-- [ ] **Step 10.2: Verify staged contents**
+- [x] **Step 10.2: Verify staged contents**
 
 ```powershell
 git status
@@ -615,7 +615,7 @@ Expected: changes to `.gitignore` and `PROGRESS.md`; new files for `.python-vers
 
 **Do NOT stage** `.env`, `.venv/`, or any file matching gitignore patterns.
 
-- [ ] **Step 10.3: Commit**
+- [x] **Step 10.3: Commit**
 
 ```powershell
 git commit -m "chore: scaffold project (Phase 0)
@@ -633,7 +633,7 @@ Closes: Phase 0 of docs/superpowers/specs/2026-05-11-trading-system-design.md"
 
 **Wait for the user's explicit go-ahead before running this commit** — per project policy (CLAUDE.md / repo convention), commits are only created when the user asks. If the user has not explicitly approved committing, leave the work staged and surface the diff for review instead.
 
-- [ ] **Step 10.4: Confirm the working tree is clean**
+- [x] **Step 10.4: Confirm the working tree is clean**
 
 ```powershell
 git status

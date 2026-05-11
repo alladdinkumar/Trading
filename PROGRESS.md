@@ -16,7 +16,7 @@ Granular task tracker for the trading system build. Update as work completes.
 
 | | Phase | State |
 |---|---|---|
-| 0 | Project setup | `[ ]` |
+| 0 | Project setup | `[x]` |
 | 1 | Config + SQLite schema | `[ ]` |
 | 2 | Historical OHLCV (yfinance) | `[ ]` |
 | 3 | Kite MCP wrapper | `[ ]` |
@@ -36,24 +36,24 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 0 — Project Setup_
-**Next up:** _Phase 1 — Config + SQLite schema_
+**Currently working on:** _Phase 1 — Config + SQLite schema_
+**Next up:** _Phase 2 — Historical OHLCV (yfinance)_
 
 ---
 
 ## Phase 0 — Project Setup
 
-- [ ] 0.1 `uv init` in repo root; pin Python 3.11 via `.python-version`
-- [ ] 0.2 Author `pyproject.toml` with prod + dev dependency groups (see spec Section 12)
-- [ ] 0.3 Configure `ruff` rules in `pyproject.toml`
-- [ ] 0.4 Configure `mypy` (strict on `src/trading/`)
-- [ ] 0.5 Configure `pytest` (markers: `live`, `integration`, `slow`)
-- [ ] 0.6 Create `src/trading/` module tree per spec Section 11 (empty `__init__.py` files)
-- [ ] 0.7 Create `tests/` with `conftest.py` and `fixtures/` placeholder
-- [ ] 0.8 Author `.env.example` with all keys from spec Section 12
-- [ ] 0.9 Extend `.gitignore` for `data/app.db`, `data/parquet/`, `data/cache/`, `.env`, `models/*.pkl`
-- [ ] 0.10 Verify clean: `pytest -q` · `ruff check .` · `mypy src/`
-- [ ] 0.11 Update PROGRESS.md → commit `chore: scaffold project`
+- [x] 0.1 `uv init` in repo root; pin Python 3.11 via `.python-version`
+- [x] 0.2 Author `pyproject.toml` with prod + dev dependency groups (see spec Section 12)
+- [x] 0.3 Configure `ruff` rules in `pyproject.toml`
+- [x] 0.4 Configure `mypy` (strict on `src/trading/`)
+- [x] 0.5 Configure `pytest` (markers: `live`, `integration`, `slow`)
+- [x] 0.6 Create `src/trading/` module tree per spec Section 11 (empty `__init__.py` files)
+- [x] 0.7 Create `tests/` with `conftest.py` and `fixtures/` placeholder
+- [x] 0.8 Author `.env.example` with all keys from spec Section 12
+- [x] 0.9 Extend `.gitignore` for `data/app.db`, `data/parquet/`, `data/cache/`, `.env`, `models/*.pkl`
+- [x] 0.10 Verify clean: `pytest -q` · `ruff check .` · `mypy src/`
+- [x] 0.11 Update PROGRESS.md → commit `chore: scaffold project`
 
 ## Phase 1 — Config + SQLite schema
 

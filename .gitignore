@@ -216,3 +216,30 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ============================================================
+# Project-specific
+# ============================================================
+
+# Local databases & caches (regeneratable)
+data/app.db
+data/app.db-journal
+data/parquet/
+data/cache/
+data/logs/
+
+# ML model artifacts (large, regeneratable)
+models/*.pkl
+models/*.joblib
+models/*.bin
+
+# Hugging Face cache (FinBERT lives here once downloaded)
+.cache/huggingface/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
