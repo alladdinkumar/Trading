@@ -20,7 +20,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 1 | Config + SQLite schema | `[x]` |
 | 2 | Historical OHLCV (yfinance) | `[x]` |
 | 3 | Kite MCP wrapper | `[x]` |
-| 4 | Technical indicators | `[ ]` |
+| 4 | Technical indicators | `[x]` |
 | 5 | Rule scanner (Layer A) | `[ ]` |
 | 6 | Sizing + exits | `[ ]` |
 | 7 | Backtest engine | `[ ]` |
@@ -36,8 +36,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 4 — Technical indicators_
-**Next up:** _Phase 5 — Rule scanner (Layer A)_
+**Currently working on:** _Phase 5 — Rule scanner (Layer A)_
+**Next up:** _Phase 6 — Sizing + exits_
 
 ---
 
@@ -87,10 +87,10 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 4 — Technical indicators
 
-- [ ] 4.1 `src/trading/features/technicals.py`: pandas-ta wrappers for RSI, MACD, ATR, EMA, SMA, BB, ADX, VWAP, OBV, returns
-- [ ] 4.2 Add helpers: `add_indicators(df)` enriches an OHLCV DataFrame with all default indicators
-- [ ] 4.3 Tests: known-input/known-output for each indicator
-- [ ] 4.4 Update PROGRESS.md → commit `feat(features): technical indicators`
+- [x] 4.1 `src/trading/features/technicals.py`: wrappers over the `ta` library (Phase 0 swap) for RSI, MACD, ATR, EMA, SMA, BB, ADX, VWAP, OBV, returns
+- [x] 4.2 `add_indicators(df)` enriches an OHLCV DataFrame with the full default suite
+- [x] 4.3 Tests: 22 covering exact reference values (SMA, returns), NaN-warmup patterns, monotonic RSI bounds, MACD identity (signal = EMA of line), BB ordering, ATR non-negative, ADX bounds, OBV directionality, add_indicators preserves originals
+- [x] 4.4 Smoke test on RELIANCE parquet: indicators computed cleanly; PROGRESS.md updated → commit `feat(features): technical indicators`
 
 ## Phase 5 — Rule scanner (Layer A)
 
