@@ -3,6 +3,8 @@ name = "trading"
 version = "0.1.0"
 description = "AI-assisted trading & portfolio intelligence for the Indian market"
 readme = "README.md"
+# Pinned to 3.11 only: `ta` and other deps currently lack reliable 3.12 wheels
+# on Windows. Revisit when Phase 4 (technical indicators) confirms 3.12 works.
 requires-python = ">=3.11,<3.12"
 license = { text = "Proprietary" }
 authors = [{ name = "Sandeep Kumar" }]
@@ -49,6 +51,7 @@ dependencies = [
 ]
 
 [project.scripts]
+# trading.cli is added in Phase 5; running `uv run trading` before then errors.
 trading = "trading.cli:app"
 
 [dependency-groups]
@@ -60,8 +63,8 @@ dev = [
     "pytest-mock>=3.14",
     "syrupy>=4.6",
     "freezegun>=1.5",
-    "pandas-stubs",
-    "types-requests",
+    "pandas-stubs>=2.2",
+    "types-requests>=2.31",
 ]
 
 [build-system]
@@ -97,8 +100,8 @@ ignore = [
     "E501",   # line too long (formatter handles it)
 ]
 
-[tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]   # asserts are fine in tests
+# (per-file-ignores removed — was suppressing S101 without selecting S.
+#  Re-add a `tests/** = [...]` entry if/when bandit-style rules are enabled.)
 
 [tool.ruff.format]
 quote-style = "double"
