@@ -19,7 +19,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 0 | Project setup | `[x]` |
 | 1 | Config + SQLite schema | `[x]` |
 | 2 | Historical OHLCV (yfinance) | `[x]` |
-| 3 | Kite MCP wrapper | `[ ]` |
+| 3 | Kite MCP wrapper | `[x]` |
 | 4 | Technical indicators | `[ ]` |
 | 5 | Rule scanner (Layer A) | `[ ]` |
 | 6 | Sizing + exits | `[ ]` |
@@ -36,8 +36,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 3 — Kite MCP wrapper_
-**Next up:** _Phase 4 — Technical indicators_
+**Currently working on:** _Phase 4 — Technical indicators_
+**Next up:** _Phase 5 — Rule scanner (Layer A)_
 
 ---
 
@@ -78,12 +78,12 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 3 — Kite MCP / Connect wrapper
 
-- [ ] 3.1 `src/trading/data/kite.py`: thin wrapper over `kiteconnect` SDK — `get_holdings`, `get_positions`, `get_gtts`, `get_quotes`, `get_ltp`, `get_margins`
-- [ ] 3.2 Daily token-rotation handler: detect 401 → print login URL → prompt for new access token; persist to `.env`
-- [ ] 3.3 Typed return shapes (Pydantic or TypedDict)
-- [ ] 3.4 Tests: mock the SDK, verify shape mapping
-- [ ] 3.5 `@pytest.mark.live` integration: live fetch of user's holdings (manual run)
-- [ ] 3.6 Update PROGRESS.md → commit `feat(data): Kite Connect wrapper`
+- [x] 3.1 `src/trading/data/kite.py`: thin wrapper over `kiteconnect` SDK — `get_holdings`, `get_positions`, `get_gtts`, `get_quotes`, `get_ltp`, `get_margins`
+- [x] 3.2 Daily token-rotation handler: `KiteAuthError` raised on `TokenException`; `trading kite-login` CLI command writes fresh token to `.env`
+- [x] 3.3 Typed return shapes — frozen `@dataclass` per resource (Holding, Position, GttOrder, Quote, Margin)
+- [x] 3.4 Tests: 15 mocked-SDK tests verify shape mapping + auth-error propagation
+- [x] 3.5 `@pytest.mark.live` integration: `test_live_get_holdings_against_real_kite` (self-skips when token missing)
+- [x] 3.6 Update PROGRESS.md → commit `feat(data): Kite Connect wrapper`
 
 ## Phase 4 — Technical indicators
 

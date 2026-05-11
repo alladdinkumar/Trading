@@ -1,9 +1,9 @@
-"""Tests for trading.cli — typer CLI smoke + ingest-history."""
+"""Tests for trading.cli — typer CLI smoke + ingest-history + kite-login."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 from typer.testing import CliRunner
@@ -31,7 +31,9 @@ def _fake_ohlcv(rows: int = 5) -> pd.DataFrame:
 def test_app_help_runs() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "ingest-history" in result.stdout.replace("\n", " ")
+    flat = result.stdout.replace("\n", " ")
+    assert "ingest-history" in flat
+    assert "kite-login" in flat
 
 
 def test_ingest_history_writes_parquet(tmp_path: Path, monkeypatch) -> None:
@@ -110,3 +112,66 @@ def test_ingest_history_skip_existing(tmp_path: Path, monkeypatch) -> None:
         )
     assert result.exit_code == 0
     mock_fetch.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# kite-login
+# ---------------------------------------------------------------------------
+
+
+def _settings_with_kite_creds(**overrides):
+    """Build a fake Settings populated with Kite creds; overrides win."""
+    from trading.config import Settings
+
+    defaults = {
+        "anthropic_api_key": None,
+        "kite_api_key": "test-api-key",
+        "kite_api_secret": "test-api-secret",
+        "kite_access_token": None,
+        "log_level": "INFO",
+        "news_user_agent": "test/0",
+    }
+    defaults.update(overrides)
+    return Settings(**defaults)
+
+
+def test_kite_login_missing_creds_exits_1(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    bad_settings = _settings_with_kite_creds(kite_api_key=None, kite_api_secret=None)
+    with patch("trading.cli.get_settings", return_value=bad_settings):
+        result = runner.invoke(app, ["kite-login", "--request-token", "rt"])
+    assert result.exit_code == 1
+    assert "KITE_API_KEY" in result.stdout
+
+
+def test_kite_login_writes_token_to_env(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    fake_client = MagicMock()
+    fake_client.profile.return_value = {"user_name": "Sandeep"}
+    with (
+        patch("trading.cli.get_settings", return_value=_settings_with_kite_creds()),
+        patch("trading.cli.make_client", return_value=fake_client),
+        patch("trading.cli.login_url", return_value="https://kite/login?x=1"),
+        patch("trading.cli.generate_session", return_value="fresh-token-123"),
+    ):
+        result = runner.invoke(app, ["kite-login", "--request-token", "rt-456"])
+    assert result.exit_code == 0, result.stdout
+    env_path = tmp_path / ".env"
+    assert env_path.is_file()
+    assert "KITE_ACCESS_TOKEN=fresh-token-123" in env_path.read_text(encoding="utf-8")
+    assert "Sandeep" in result.stdout
+
+
+def test_kite_login_auth_error_exits_1(tmp_path: Path, monkeypatch) -> None:
+    from trading.data.kite import KiteAuthError
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    with (
+        patch("trading.cli.get_settings", return_value=_settings_with_kite_creds()),
+        patch("trading.cli.make_client", return_value=MagicMock()),
+        patch("trading.cli.login_url", return_value="https://kite/login?x=1"),
+        patch("trading.cli.generate_session", side_effect=KiteAuthError("bad request_token")),
+    ):
+        result = runner.invoke(app, ["kite-login", "--request-token", "bogus"])
+    assert result.exit_code == 1
+    assert "bad request_token" in result.stdout

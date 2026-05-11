@@ -106,3 +106,29 @@ def get_settings(*, load_dotenv: bool = True) -> Settings:
 def _load_env_file(path: Path) -> None:
     """Indirection so we can stub `python-dotenv` if needed in tests."""
     load_dotenv(dotenv_path=path, override=False)
+
+
+def update_env_var(path: Path, key: str, value: str) -> None:
+    """Idempotently set `KEY=VALUE` in a dotenv file.
+
+    Creates the file if missing. If `KEY=` already exists, replaces that line
+    in place. Otherwise appends a new line. Preserves all unrelated lines
+    (comments, blanks, other keys) verbatim.
+    """
+    new_line = f"{key}={value}"
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(new_line + "\n", encoding="utf-8")
+        return
+    body = path.read_text(encoding="utf-8")
+    lines = body.splitlines()
+    prefix = f"{key}="
+    replaced = False
+    for i, line in enumerate(lines):
+        if line.startswith(prefix):
+            lines[i] = new_line
+            replaced = True
+            break
+    if not replaced:
+        lines.append(new_line)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")

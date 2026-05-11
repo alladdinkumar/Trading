@@ -15,7 +15,14 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from trading.config import get_paths
+from trading.config import get_paths, get_settings, update_env_var
+from trading.data.kite import (
+    KiteAuthError,
+    generate_session,
+    is_authenticated,
+    login_url,
+    make_client,
+)
 from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
 from trading.store.ohlcv import parquet_path, write_ohlcv
@@ -109,6 +116,53 @@ def ingest_history(
         console.print("\n[red]Failures:[/red]")
         for sym, reason in failed:
             console.print(f"  [red]{sym}[/red]: {reason}")
+
+
+@app.command("kite-login")
+def kite_login(
+    request_token: Annotated[
+        str | None,
+        typer.Option(
+            "--request-token",
+            "-t",
+            help="Skip the interactive prompt and pass the request_token directly.",
+        ),
+    ] = None,
+) -> None:
+    """Interactive Kite Connect login. Prints the URL, accepts the request_token,
+    fetches a fresh access token, and writes it to `.env`."""
+    settings = get_settings()
+    if not settings.kite_api_key or not settings.kite_api_secret:
+        console.print("[red]KITE_API_KEY and KITE_API_SECRET must be set in .env first.[/red]")
+        raise typer.Exit(code=1)
+
+    client = make_client(settings.kite_api_key)
+    url = login_url(client)
+    console.print(
+        f"\n[bold]1. Open this URL in your browser and complete login:[/bold]\n  {url}\n"
+        f"[bold]2. After redirect, copy the [cyan]request_token[/cyan] from the URL.[/bold]"
+    )
+    token_input = request_token or typer.prompt("\nPaste request_token")
+
+    try:
+        access_token = generate_session(client, token_input, settings.kite_api_secret)
+    except KiteAuthError as exc:
+        console.print(f"[red]Kite rejected the request_token: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+    except Exception as exc:
+        console.print(f"[red]Login failed: {type(exc).__name__}: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    env_path = get_paths().project_root / ".env"
+    update_env_var(env_path, "KITE_ACCESS_TOKEN", access_token)
+    console.print(f"\n[green]Login successful.[/green] Token written to {env_path}")
+
+    if is_authenticated(client):
+        try:
+            profile = client.profile()
+            console.print(f"Logged in as: [bold]{profile.get('user_name', '?')}[/bold]")
+        except Exception:  # profile is just informational
+            pass
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry
