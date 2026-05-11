@@ -1,0 +1,70 @@
+# Trading universe — NSE symbols, one per line.
+# Lines starting with `#` are comments; blank lines ignored.
+# Add/remove symbols here. Phase 2 (`trading ingest-history`) reads this file.
+#
+# Current contents: Nifty 50 + the account holder's existing holdings.
+# To expand to Nifty 200, append the additional ~150 symbols.
+
+# --- Nifty 50 ---
+ADANIENT
+ADANIPORTS
+APOLLOHOSP
+ASIANPAINT
+AXISBANK
+BAJAJ-AUTO
+BAJFINANCE
+BAJAJFINSV
+BEL
+BHARTIARTL
+BPCL
+BRITANNIA
+CIPLA
+COALINDIA
+DRREDDY
+EICHERMOT
+GRASIM
+HCLTECH
+HDFCBANK
+HDFCLIFE
+HEROMOTOCO
+HINDALCO
+HINDUNILVR
+ICICIBANK
+INDUSINDBK
+INFY
+ITC
+JSWSTEEL
+KOTAKBANK
+LT
+LTIM
+M&M
+MARUTI
+NESTLEIND
+NTPC
+ONGC
+POWERGRID
+RELIANCE
+SBILIFE
+SBIN
+SHRIRAMFIN
+SUNPHARMA
+TATACONSUM
+TATAMOTORS
+TATASTEEL
+TCS
+TECHM
+TITAN
+TRENT
+ULTRACEMCO
+WIPRO
+
+# --- User holdings (non-Nifty-50) ---
+RVNL
+TATAPOWER
+IRB
+PFC
+RECLTD
+IDFCFIRSTB
+IREDA
+JIOFIN
+MAZDOCK

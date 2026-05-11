@@ -58,8 +58,17 @@ def _detect_project_root() -> Path:
 
 
 def get_paths(root: Path | None = None) -> Paths:
-    """Return the project's filesystem layout, anchored at `root` or autodetected."""
-    project_root = root if root is not None else _detect_project_root()
+    """Return the project's filesystem layout.
+
+    Resolution order: explicit `root` arg → `TRADING_PROJECT_ROOT` env var
+    (used by tests) → auto-detect by walking up to `pyproject.toml`.
+    """
+    if root is not None:
+        project_root = root
+    elif env_root := os.environ.get("TRADING_PROJECT_ROOT"):
+        project_root = Path(env_root)
+    else:
+        project_root = _detect_project_root()
     data_dir = project_root / "data"
     return Paths(
         project_root=project_root,

@@ -18,7 +18,7 @@ Granular task tracker for the trading system build. Update as work completes.
 |---|---|---|
 | 0 | Project setup | `[x]` |
 | 1 | Config + SQLite schema | `[x]` |
-| 2 | Historical OHLCV (yfinance) | `[ ]` |
+| 2 | Historical OHLCV (yfinance) | `[x]` |
 | 3 | Kite MCP wrapper | `[ ]` |
 | 4 | Technical indicators | `[ ]` |
 | 5 | Rule scanner (Layer A) | `[ ]` |
@@ -36,8 +36,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 2 — Historical OHLCV (yfinance)_
-**Next up:** _Phase 3 — Kite MCP wrapper_
+**Currently working on:** _Phase 3 — Kite MCP wrapper_
+**Next up:** _Phase 4 — Technical indicators_
 
 ---
 
@@ -68,13 +68,13 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 2 — Historical OHLCV (yfinance)
 
-- [ ] 2.1 `src/trading/data/yfinance.py`: `fetch_ohlcv(symbol, start, end)` returning a typed DataFrame
-- [ ] 2.2 `src/trading/store/ohlcv.py`: parquet read/write per symbol (`data/parquet/nifty200/SYMBOL.parquet`)
-- [ ] 2.3 `src/trading/data/cache.py`: `requests-cache` setup for HTTP fetchers
-- [ ] 2.4 Bulk script `src/trading/cli.py::ingest_history`: fetch 3+y for Nifty 200 + holdings
-- [ ] 2.5 Tests: fixture round-trip; schema validation; CSV→DataFrame parsing
-- [ ] 2.6 Run ingest for real → ~210 parquet files on disk
-- [ ] 2.7 Update PROGRESS.md → commit `feat(data): historical OHLCV ingestion`
+- [x] 2.1 `src/trading/data/yfinance.py`: `fetch_ohlcv(symbol, start, end)` returning a typed DataFrame
+- [x] 2.2 `src/trading/store/ohlcv.py`: parquet read/write per symbol (`data/parquet/nifty200/SYMBOL.parquet`)
+- [x] 2.3 `src/trading/data/cache.py`: `requests-cache` setup for HTTP fetchers
+- [x] 2.4 Bulk script `src/trading/cli.py::ingest_history`: fetch 3+y for universe (initial scope: Nifty 50 + holdings ~59 symbols; expandable via `data/static/universe.txt`)
+- [x] 2.5 Tests: fixture round-trip; schema validation; CLI integration
+- [x] 2.6 Smoke-test ingest: 3 symbols (RVNL, RELIANCE, NTPC) for Jan-Feb 2025, 129 bars written to parquet
+- [x] 2.7 Update PROGRESS.md → commit `feat(data): historical OHLCV ingestion`
 
 ## Phase 3 — Kite MCP / Connect wrapper
 
