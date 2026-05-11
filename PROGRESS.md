@@ -17,7 +17,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | | Phase | State |
 |---|---|---|
 | 0 | Project setup | `[x]` |
-| 1 | Config + SQLite schema | `[ ]` |
+| 1 | Config + SQLite schema | `[x]` |
 | 2 | Historical OHLCV (yfinance) | `[ ]` |
 | 3 | Kite MCP wrapper | `[ ]` |
 | 4 | Technical indicators | `[ ]` |
@@ -36,8 +36,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 1 — Config + SQLite schema_
-**Next up:** _Phase 2 — Historical OHLCV (yfinance)_
+**Currently working on:** _Phase 2 — Historical OHLCV (yfinance)_
+**Next up:** _Phase 3 — Kite MCP wrapper_
 
 ---
 
@@ -57,14 +57,14 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 1 — Config + SQLite schema
 
-- [ ] 1.1 `src/trading/config.py`: load `.env`, expose `Paths` dataclass + constants (TZ=`Asia/Kolkata`)
-- [ ] 1.2 Tests: env loading, path resolution
-- [ ] 1.3 `src/trading/store/db.py`: `get_conn()` context manager, foreign keys ON
-- [ ] 1.4 `src/trading/store/migrations.py`: v1 schema for all 16 tables (signals, paper_trades, predictions, portfolio_snapshots, news_items, sentiment_daily, sector_daily, macro_snapshot, oi_daily, fno_ban_list, bulk_block_deals, corp_actions, account_events, preopen_snapshot, live_quotes, event_calendar)
-- [ ] 1.5 `src/trading/store/repo.py`: typed CRUD helpers for signals, paper_trades, predictions
-- [ ] 1.6 Tests: round-trip insert/select per table; foreign-key integrity
-- [ ] 1.7 Lint + type-check + tests green
-- [ ] 1.8 Update PROGRESS.md → commit `feat(store): SQLite schema v1`
+- [x] 1.1 `src/trading/config.py`: load `.env`, expose `Paths` dataclass + constants (TZ=`Asia/Kolkata`)
+- [x] 1.2 Tests: env loading, path resolution
+- [x] 1.3 `src/trading/store/db.py`: `get_conn()` context manager, foreign keys ON
+- [x] 1.4 `src/trading/store/migrations.py`: v1 schema for all 16 tables (signals, paper_trades, predictions, portfolio_snapshots, news_items, sentiment_daily, sector_daily, macro_snapshot, oi_daily, fno_ban_list, bulk_block_deals, corp_actions, account_events, preopen_snapshot, live_quotes, event_calendar)
+- [x] 1.5 `src/trading/store/repo.py`: typed CRUD helpers for signals, paper_trades, predictions
+- [x] 1.6 Tests: round-trip insert/select per table; foreign-key integrity
+- [x] 1.7 Lint + type-check + tests green
+- [x] 1.8 Update PROGRESS.md → commit `feat(store): SQLite schema v1`
 
 ## Phase 2 — Historical OHLCV (yfinance)
 
