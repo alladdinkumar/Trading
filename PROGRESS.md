@@ -22,7 +22,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 3 | Kite MCP wrapper | `[x]` |
 | 4 | Technical indicators | `[x]` |
 | 5 | Rule scanner (Layer A) | `[x]` |
-| 6 | Sizing + exits | `[ ]` |
+| 6 | Sizing + exits | `[x]` |
 | 7 | Backtest engine | `[ ]` |
 | 8 | News + sentiment | `[ ]` |
 | 9 | Macro + regime | `[ ]` |
@@ -36,8 +36,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 6 — Sizing + exits_
-**Next up:** _Phase 7 — Backtest engine_
+**Currently working on:** _Phase 7 — Backtest engine_
+**Next up:** _Phase 8 — News + sentiment_
 
 ---
 
@@ -102,11 +102,11 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 6 — Sizing + exits
 
-- [ ] 6.1 `src/trading/strategy/sizing.py`: `position_size(capital, risk_pct, entry, stop)` with concurrency caps
-- [ ] 6.2 `src/trading/strategy/exits.py`: state machine returning `(action, new_stop)` given (trade, today's bar)
-- [ ] 6.3 Implement: stop hit, target hit, time stop (25 trading days), trailing (+10% → breakeven, +15% → 1×ATR trail)
-- [ ] 6.4 Tests: scenario per branch (target, stop, time, trail-up, trail-protect)
-- [ ] 6.5 Update PROGRESS.md → commit `feat(strategy): sizing + exits`
+- [x] 6.1 `src/trading/strategy/sizing.py`: `position_size(SizingInput)` returns `SizingResult` with risk budget × regime multiplier (RISK_ON/NEUTRAL/RISK_OFF), per-stock cap (≤25%), per-sector cap (≤30%). Floors qty at 0, names the binding constraint in `reasons`.
+- [x] 6.2 `src/trading/strategy/exits.py`: `evaluate_exit(trade, bar)` returns `ExitDecision(action, new_stop, exit_price, reason)`. Pure function — one bar at a time; caller threads `new_stop` and bumps `days_held`.
+- [x] 6.3 Branches: EXIT_STOP (`low ≤ current_stop`), EXIT_TARGET (`high ≥ min(+20%, 2.5×R/R)`), EXIT_TIME (`days_held ≥ 25 ∧ close ≤ entry`), HOLD + trail (+10% → breakeven, +15% → close − 1×ATR). Stop wins same-bar tie (spec §8 conservative fills).
+- [x] 6.4 Tests: 19 sizing (formula, regime, stock/sector caps, validation, edge cases) + 22 exits (each branch, both target paths, trail ratchet, never-lowers, tie-break, full-winner-sequence) = 41 new tests.
+- [x] 6.5 Smoke test on RELIANCE: at ₹1195 + 1.5×ATR stop, 25%-cap binds (qty=20, capital-at-risk only ₹646), R/R target +6.8% fires on +10% bar — confirms tight-ATR-stop ⇒ small-but-frequent wins by design. PROGRESS.md updated → commit `feat(strategy): sizing + exits`
 
 ## Phase 7 — Backtest engine
 
