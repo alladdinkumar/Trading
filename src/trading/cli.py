@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import asdict
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -14,6 +16,7 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
+from rich.table import Table
 
 from trading.config import get_paths, get_settings, update_env_var
 from trading.data.kite import (
@@ -25,7 +28,8 @@ from trading.data.kite import (
 )
 from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
-from trading.store.ohlcv import parquet_path, write_ohlcv
+from trading.store.ohlcv import list_symbols, parquet_path, read_ohlcv, write_ohlcv
+from trading.strategy.rules import ScanContext, passing, scan
 
 app = typer.Typer(help="Trading — research and paper-trading CLI.", add_completion=False)
 console = Console()
@@ -163,6 +167,101 @@ def kite_login(
             console.print(f"Logged in as: [bold]{profile.get('user_name', '?')}[/bold]")
         except Exception:  # profile is just informational
             pass
+
+
+@app.command("scan")
+def scan_cmd(
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--date",
+            help="Scan date (YYYY-MM-DD). Defaults to the latest bar on disk.",
+        ),
+    ] = None,
+    show_all: Annotated[
+        bool,
+        typer.Option("--show-all", help="Include candidates that failed at least one rule."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON instead of a table."),
+    ] = False,
+) -> None:
+    """Run Layer A rules across the universe and print passing candidates."""
+    paths = get_paths()
+    if as_of is None:
+        # Default: use the latest date present in any parquet
+        symbols_on_disk = list_symbols(paths)
+        if not symbols_on_disk:
+            console.print("[red]No parquet data on disk. Run `trading ingest-history` first.[/red]")
+            raise typer.Exit(code=1)
+        latest = max(read_ohlcv(s, paths).index.max() for s in symbols_on_disk)
+        scan_date = latest.date()
+    else:
+        scan_date = date.fromisoformat(as_of)
+
+    ctx = ScanContext(scan_date=scan_date)
+    candidates = scan(paths, scan_date, ctx=ctx)
+    surfaced = candidates if show_all else passing(candidates)
+
+    if json_output:
+        payload = [_candidate_to_dict(c) for c in surfaced]
+        typer.echo(json.dumps(payload, indent=2, default=str))
+        return
+
+    console.print(
+        f"\n[bold]Scan {scan_date.isoformat()}[/bold]: "
+        f"{len(candidates)} evaluated, {len(passing(candidates))} passed all rules."
+    )
+    if not surfaced:
+        console.print("[yellow]Nothing surfaces.[/yellow]")
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Symbol")
+    table.add_column("Close", justify="right")
+    table.add_column("RSI", justify="right")
+    table.add_column("vs SMA20%", justify="right")
+    table.add_column("vs SMA50%", justify="right")
+    table.add_column("ATR", justify="right")
+    if show_all:
+        table.add_column("Rules passed")
+        table.add_column("First failure")
+
+    for c in surfaced:
+        sma20_pct = f"{(c.close - c.sma_20) / c.sma_20 * 100:+.1f}" if c.sma_20 == c.sma_20 else "-"
+        sma50_pct = f"{(c.close - c.sma_50) / c.sma_50 * 100:+.1f}" if c.sma_50 == c.sma_50 else "-"
+        row = [
+            c.symbol,
+            f"{c.close:.2f}",
+            f"{c.rsi_14:.1f}" if c.rsi_14 == c.rsi_14 else "-",
+            sma20_pct,
+            sma50_pct,
+            f"{c.atr_14:.2f}" if c.atr_14 == c.atr_14 else "-",
+        ]
+        if show_all:
+            n_passed = sum(1 for r in c.rules if r.passed)
+            row.append(f"{n_passed}/{len(c.rules)}")
+            first_fail = next((r for r in c.rules if not r.passed), None)
+            row.append(f"{first_fail.name}: {first_fail.reason}" if first_fail else "")
+        table.add_row(*row)
+    console.print(table)
+
+
+def _candidate_to_dict(c: Any) -> dict[str, Any]:
+    """Compact JSON representation of a Candidate."""
+    return {
+        "symbol": c.symbol,
+        "scan_date": c.scan_date.isoformat(),
+        "close": c.close,
+        "rsi_14": c.rsi_14,
+        "sma_20": c.sma_20,
+        "sma_50": c.sma_50,
+        "sma_200": c.sma_200,
+        "atr_14": c.atr_14,
+        "all_passed": c.all_passed,
+        "rules": [asdict(r) for r in c.rules],
+    }
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry

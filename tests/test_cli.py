@@ -34,6 +34,7 @@ def test_app_help_runs() -> None:
     flat = result.stdout.replace("\n", " ")
     assert "ingest-history" in flat
     assert "kite-login" in flat
+    assert "scan" in flat
 
 
 def test_ingest_history_writes_parquet(tmp_path: Path, monkeypatch) -> None:
@@ -175,3 +176,56 @@ def test_kite_login_auth_error_exits_1(tmp_path: Path, monkeypatch) -> None:
         result = runner.invoke(app, ["kite-login", "--request-token", "bogus"])
     assert result.exit_code == 1
     assert "bad request_token" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# scan
+# ---------------------------------------------------------------------------
+
+
+def _seed_parquet(tmp_path: Path, symbol: str = "TEST", n: int = 250) -> None:
+    """Write a 250-bar parquet for a single test symbol."""
+    from trading.config import get_paths
+    from trading.store.ohlcv import write_ohlcv
+
+    paths = get_paths(root=tmp_path)
+    df = pd.DataFrame(
+        {
+            "open": [100.0 + 0.1 * i for i in range(n)],
+            "high": [101.0 + 0.1 * i for i in range(n)],
+            "low": [99.0 + 0.1 * i for i in range(n)],
+            "close": [100.0 + 0.1 * i for i in range(n)],
+            "volume": [2_000_000] * n,
+        },
+        index=pd.date_range("2024-01-01", periods=n, freq="B", name="date"),
+    )
+    write_ohlcv(df, symbol, paths)
+
+
+def test_scan_runs_on_fixture(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _seed_parquet(tmp_path)
+    result = runner.invoke(app, ["scan", "--date", "2024-12-15", "--show-all"])
+    assert result.exit_code == 0, result.stdout
+    assert "TEST" in result.stdout
+
+
+def test_scan_json_output(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _seed_parquet(tmp_path, symbol="FOO")
+    result = runner.invoke(app, ["scan", "--date", "2024-12-15", "--show-all", "--json"])
+    assert result.exit_code == 0
+    import json as _json
+
+    payload = _json.loads(result.stdout)
+    assert isinstance(payload, list)
+    assert len(payload) == 1
+    assert payload[0]["symbol"] == "FOO"
+    assert "rules" in payload[0]
+
+
+def test_scan_no_parquet_exits_1(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    result = runner.invoke(app, ["scan"])
+    assert result.exit_code == 1
+    assert "ingest-history" in result.stdout

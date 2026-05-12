@@ -97,7 +97,9 @@ select = [
     "RUF",  # ruff-specific
 ]
 ignore = [
-    "E501",   # line too long (formatter handles it)
+    "E501",    # line too long (formatter handles it)
+    "RUF002",  # ambiguous unicode in docstrings — we use ×/− deliberately
+    "RUF003",  # same, for comments
 ]
 
 # (per-file-ignores removed — was suppressing S101 without selecting S.

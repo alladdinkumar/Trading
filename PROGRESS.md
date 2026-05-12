@@ -21,7 +21,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 2 | Historical OHLCV (yfinance) | `[x]` |
 | 3 | Kite MCP wrapper | `[x]` |
 | 4 | Technical indicators | `[x]` |
-| 5 | Rule scanner (Layer A) | `[ ]` |
+| 5 | Rule scanner (Layer A) | `[x]` |
 | 6 | Sizing + exits | `[ ]` |
 | 7 | Backtest engine | `[ ]` |
 | 8 | News + sentiment | `[ ]` |
@@ -36,8 +36,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 5 — Rule scanner (Layer A)_
-**Next up:** _Phase 6 — Sizing + exits_
+**Currently working on:** _Phase 6 — Sizing + exits_
+**Next up:** _Phase 7 — Backtest engine_
 
 ---
 
@@ -94,11 +94,11 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 5 — Rule scanner (Layer A)
 
-- [ ] 5.1 `src/trading/strategy/rules.py`: function per filter from spec Section 4.1
-- [ ] 5.2 `scan(date)` orchestrator: loads parquet for universe, applies all filters, returns candidates
-- [ ] 5.3 CLI `trading scan --date YYYY-MM-DD`: outputs ranked candidates as table + JSON
-- [ ] 5.4 Tests: synthetic DataFrames triggering and failing each filter
-- [ ] 5.5 Update PROGRESS.md → commit `feat(strategy): rule scanner`
+- [x] 5.1 `src/trading/strategy/rules.py`: function per Section 4.1 filter — `passes_uptrend`, `passes_pullback`, `passes_rsi_band`, `passes_volume_exhaustion`, `passes_liquidity`, `passes_no_recent_breakdown`, `passes_regime`, `passes_not_fno_banned`, `passes_not_t2t`, `passes_no_critical_event`
+- [x] 5.2 `scan()` orchestrator + `evaluate_symbol()` — loads enriched parquet, runs all rules, returns `Candidate(rules=...)`. Skips symbols with <200 bars (SMA-200 needs the history).
+- [x] 5.3 CLI `trading scan --date YYYY-MM-DD [--show-all] [--json]` — Rich table and JSON output
+- [x] 5.4 Tests: 32 covering pass/fail per rule, history-insufficient handling, context-empty defaults, scan orchestrator skipping behavior, CLI happy path
+- [x] 5.5 Smoke test: live scan of 5 PSU/infra symbols (RVNL, RELIANCE, NTPC, TATAPOWER, IRB) over 2yr+ history — all failed `uptrend` filter (correct: late Feb 2025 was a correction). PROGRESS.md updated → commit `feat(strategy): rule scanner`
 
 ## Phase 6 — Sizing + exits
 
