@@ -227,6 +227,8 @@ data/app.db-journal
 data/parquet/
 data/cache/
 data/logs/
+data/research/
+data/raw/
 
 # ML model artifacts (large, regeneratable)
 models/*.pkl

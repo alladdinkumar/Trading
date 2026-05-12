@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime
+from pathlib import Path
 from typing import Annotated, Any
 
+import pandas as pd
 import typer
 from rich.console import Console
 from rich.progress import (
@@ -18,6 +20,13 @@ from rich.progress import (
 )
 from rich.table import Table
 
+from trading.backtest import (
+    BacktestConfig,
+    BacktestResult,
+    MetricsBundle,
+    compute_metrics,
+    run_backtest,
+)
 from trading.config import get_paths, get_settings, update_env_var
 from trading.data.kite import (
     KiteAuthError,
@@ -28,6 +37,7 @@ from trading.data.kite import (
 )
 from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
+from trading.features.technicals import add_indicators
 from trading.store.ohlcv import list_symbols, parquet_path, read_ohlcv, write_ohlcv
 from trading.strategy.rules import ScanContext, passing, scan
 
@@ -262,6 +272,153 @@ def _candidate_to_dict(c: Any) -> dict[str, Any]:
         "all_passed": c.all_passed,
         "rules": [asdict(r) for r in c.rules],
     }
+
+
+@app.command("backtest")
+def backtest_cmd(
+    start: Annotated[
+        str,
+        typer.Option(help="Inclusive backtest start date (YYYY-MM-DD)."),
+    ] = "2023-01-01",
+    end: Annotated[
+        str | None,
+        typer.Option(help="Inclusive end date (defaults to latest bar on disk)."),
+    ] = None,
+    capital: Annotated[
+        float,
+        typer.Option(help="Initial capital in ₹."),
+    ] = 500_000.0,
+    risk_pct: Annotated[
+        float,
+        typer.Option(help="Per-trade risk as fraction of capital (e.g. 0.02 = 2%)."),
+    ] = 0.02,
+    report: Annotated[
+        str | None,
+        typer.Option(help="Path to write the markdown report (default: data/research/...)."),
+    ] = None,
+) -> None:
+    """Run a rules-only backtest over the ingested universe and emit a markdown report."""
+    paths = get_paths()
+    symbols = list_symbols(paths)
+    if not symbols:
+        console.print("[red]No parquet data on disk. Run `trading ingest-history` first.[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"[bold]Loading + enriching {len(symbols)} symbols…[/bold]")
+    enriched: dict[str, pd.DataFrame] = {}
+    progress = Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TimeElapsedColumn(),
+        console=console,
+    )
+    with progress:
+        task = progress.add_task("Enriching", total=len(symbols))
+        for sym in symbols:
+            try:
+                raw = read_ohlcv(sym, paths)
+                if len(raw) >= 200:
+                    enriched[sym] = add_indicators(raw)
+            except FileNotFoundError:
+                pass
+            progress.advance(task)
+
+    if not enriched:
+        console.print("[red]No symbol had ≥200 bars after enrichment.[/red]")
+        raise typer.Exit(code=1)
+
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end) if end else max(df.index.max() for df in enriched.values())
+    console.print(
+        f"[bold]Running backtest:[/bold] {start_ts.date()} to {end_ts.date()} "
+        f"on {len(enriched)} symbols (Rs {capital:,.0f} capital, {risk_pct:.0%} risk)"
+    )
+
+    config = BacktestConfig(initial_capital=capital, risk_pct=risk_pct)
+    result = run_backtest(enriched, config, start_ts, end_ts)
+    metrics = compute_metrics(result)
+
+    _print_metrics_table(metrics, result)
+
+    report_path = Path(report) if report else paths.data_dir / "research" / _default_report_name()
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(_render_report(metrics, result, start_ts, end_ts), encoding="utf-8")
+    console.print(f"\n[green]Report written to[/green] {report_path}")
+
+
+def _default_report_name() -> str:
+    return f"backtest_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+
+
+def _print_metrics_table(metrics: MetricsBundle, result: BacktestResult) -> None:
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("CAGR", f"{metrics.cagr * 100:.2f}%")
+    table.add_row("Sharpe", f"{metrics.sharpe:.2f}")
+    table.add_row("Sortino", f"{metrics.sortino:.2f}")
+    table.add_row("Max drawdown", f"{metrics.max_drawdown * 100:.2f}%")
+    table.add_row("Hit rate", f"{metrics.hit_rate * 100:.1f}%")
+    pf = "∞" if metrics.profit_factor == float("inf") else f"{metrics.profit_factor:.2f}"
+    table.add_row("Profit factor", pf)
+    table.add_row("Expectancy / trade", f"Rs {metrics.expectancy:,.0f}")
+    table.add_row("Avg R-multiple", f"{metrics.avg_r_multiple:.2f}")
+    table.add_row("Total trades", str(metrics.total_trades))
+    table.add_row("Total costs paid", f"Rs {metrics.total_costs:,.0f}")
+    table.add_row("Final cash", f"Rs {result.final_cash:,.0f}")
+    if result.equity_curve.size:
+        table.add_row("Final equity", f"Rs {result.equity_curve.iloc[-1]:,.0f}")
+    console.print(table)
+
+
+def _render_report(
+    metrics: MetricsBundle,
+    result: BacktestResult,
+    start_ts: pd.Timestamp,
+    end_ts: pd.Timestamp,
+) -> str:
+    lines: list[str] = []
+    lines.append(f"# Backtest report — {start_ts.date()} to {end_ts.date()}")
+    lines.append("")
+    lines.append(f"Initial capital: ₹{result.config.initial_capital:,.0f}")
+    lines.append(f"Risk per trade: {result.config.risk_pct:.1%}")
+    lines.append(f"Regime: {result.config.regime}")
+    lines.append("")
+    lines.append("## Metrics")
+    lines.append("")
+    lines.append("| Metric | Value |")
+    lines.append("|---|---|")
+    lines.append(f"| CAGR | {metrics.cagr * 100:.2f}% |")
+    lines.append(f"| Sharpe | {metrics.sharpe:.2f} |")
+    lines.append(f"| Sortino | {metrics.sortino:.2f} |")
+    lines.append(f"| Max drawdown | {metrics.max_drawdown * 100:.2f}% |")
+    lines.append(f"| Hit rate | {metrics.hit_rate * 100:.1f}% |")
+    pf = "∞" if metrics.profit_factor == float("inf") else f"{metrics.profit_factor:.2f}"
+    lines.append(f"| Profit factor | {pf} |")
+    lines.append(f"| Expectancy / trade | ₹{metrics.expectancy:,.0f} |")
+    lines.append(f"| Avg R-multiple | {metrics.avg_r_multiple:.2f} |")
+    lines.append(f"| Total trades | {metrics.total_trades} |")
+    lines.append(f"| Total costs paid | ₹{metrics.total_costs:,.0f} |")
+    lines.append(
+        f"| Final equity | ₹{result.equity_curve.iloc[-1]:,.0f} |"
+        if result.equity_curve.size
+        else "| Final equity | — |"
+    )
+    lines.append("")
+    lines.append("## Trades (first 20)")
+    lines.append("")
+    lines.append("| Symbol | Entry | Exit | Qty | Entry ₹ | Exit ₹ | Reason | Net P&L |")
+    lines.append("|---|---|---|---:|---:|---:|---|---:|")
+    for t in result.trades[:20]:
+        lines.append(
+            f"| {t.symbol} | {t.entry_date.date()} | {t.exit_date.date()} | {t.qty} "
+            f"| {t.entry_price:.2f} | {t.exit_price:.2f} | {t.exit_reason} | "
+            f"₹{t.net_pnl:+,.0f} |"
+        )
+    if len(result.trades) > 20:
+        lines.append(f"\n_… {len(result.trades) - 20} more trades._")
+    return "\n".join(lines) + "\n"
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry

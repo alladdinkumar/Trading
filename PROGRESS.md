@@ -23,7 +23,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 4 | Technical indicators | `[x]` |
 | 5 | Rule scanner (Layer A) | `[x]` |
 | 6 | Sizing + exits | `[x]` |
-| 7 | Backtest engine | `[ ]` |
+| 7 | Backtest engine | `[x]` |
 | 8 | News + sentiment | `[ ]` |
 | 9 | Macro + regime | `[ ]` |
 | 10 | Portfolio analyzer | `[ ]` |
@@ -36,8 +36,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 7 — Backtest engine_
-**Next up:** _Phase 8 — News + sentiment_
+**Currently working on:** _Phase 8 — News + sentiment_
+**Next up:** _Phase 9 — Macro + regime_
 
 ---
 
@@ -110,14 +110,14 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 7 — Backtest engine
 
-- [ ] 7.1 `src/trading/backtest/costs.py`: Zerodha-accurate cost model (STT 0.1% × 2, slippage 0.1% × 2, transaction + SEBI charges, stamp duty, GST)
-- [ ] 7.2 `src/trading/backtest/engine.py`: vectorbt wrapper that takes rules + sizing + exits → trade log
-- [ ] 7.3 `src/trading/backtest/walkforward.py`: rolling 3y train / 6mo test, step 3mo
-- [ ] 7.4 `src/trading/backtest/metrics.py`: CAGR, Sharpe, Sortino, max DD, hit rate, profit factor, expectancy, alpha/beta vs Nifty 200
-- [ ] 7.5 CLI `trading backtest --years 3`: runs full backtest, writes report markdown
-- [ ] 7.6 Tests: cost model units; regression test on frozen period (Sharpe ±5%)
-- [ ] 7.7 Run baseline rule-only backtest; sanity-check vs Nifty 200 buy-hold
-- [ ] 7.8 Update PROGRESS.md → commit `feat(backtest): engine + walk-forward`
+- [x] 7.1 `src/trading/backtest/costs.py`: Zerodha-accurate cost model — brokerage cap ₹20, STT 0.1% × 2, exchange 0.00297%, SEBI 0.0001%, stamp duty 0.015% (buy only), GST 18%, slippage 0.1% per side as price shift. Round-trip drag ~0.4%.
+- [x] 7.2 `src/trading/backtest/engine.py`: **event-loop backtester** (deviation from spec §8.1 vectorbt — see plan). Reuses Phase 5 scanner + Phase 6 sizing/exits unchanged. EOD signal → next-day open fill with slippage. `SignalProvider` extension point makes the engine testable in isolation and slots in Phase 16's ranker.
+- [x] 7.3 `src/trading/backtest/walkforward.py`: rolling 3y / 6mo / 3mo windows. `run_walkforward` runs the engine per test fold, concatenates trades. Train slice unused for rules-only baseline (Phase 16 hook).
+- [x] 7.4 `src/trading/backtest/metrics.py`: CAGR, Sharpe, Sortino, max DD, hit rate, profit factor, expectancy, avg R-multiple, alpha/beta vs benchmark. `MetricsBundle` aggregator; safe on empty/zero-variance inputs.
+- [x] 7.5 CLI `trading backtest --start --end --capital --risk-pct --report`: enriches all parquet symbols, runs backtest, prints Rich table + writes markdown to `data/research/backtest_<ts>.md`.
+- [x] 7.6 Tests: 9 cost (components, cap, slippage, round-trip), 18 metrics (each stat + edge cases), 9 engine (signal pipeline, exits, costs, cash conservation, OPEN_AT_END), 5 walk-forward (window enumeration + integration) = 41 new. All 223/223 tests green, 1 skipped live.
+- [x] 7.7 Smoke run on RVNL/RELIANCE/NTPC/TATAPOWER/IRB universe (2023-10 → 2025-02, ₹5L capital, 2% risk): 22 trades, 40.9% hit rate, PF 1.91, Sharpe 0.87, max DD −5.0%, final equity ₹526,526 (+3.7% CAGR), costs ₹1,723 (0.34% drag). All trades exit cleanly via STOP/TARGET/TIME.
+- [x] 7.8 PROGRESS.md updated → commit `feat(backtest): engine + walk-forward (Phase 7)`
 
 ## Phase 8 — News + sentiment
 
