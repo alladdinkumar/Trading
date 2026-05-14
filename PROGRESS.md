@@ -25,7 +25,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 6 | Sizing + exits | `[x]` |
 | 7 | Backtest engine | `[x]` |
 | 8 | News + sentiment | `[x]` |
-| 9 | Macro + regime | `[ ]` |
+| 9 | Macro + regime | `[x]` |
 | 10 | Portfolio analyzer | `[ ]` |
 | 11 | Paper-trade ledger | `[ ]` |
 | 12 | LLM analyst | `[ ]` |
@@ -36,8 +36,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 9 — Macro + regime_
-**Next up:** _Phase 10 — Portfolio analyzer_
+**Currently working on:** _Phase 10 — Portfolio analyzer_
+**Next up:** _Phase 11 — Paper-trade ledger_
 
 ---
 
@@ -130,12 +130,12 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 9 — Macro + regime
 
-- [ ] 9.1 `src/trading/data/macro.py`: yfinance fetchers for SGX/GIFT, S&P/Nasdaq/Dow, USDINR, BZ=F, ^TNX, India VIX
-- [ ] 9.2 NSE daily FII/DII flow scraper
-- [ ] 9.3 `src/trading/features/regime.py`: weighted composite → RISK_ON / NEUTRAL / RISK_OFF
-- [ ] 9.4 Pre-open snapshot job writes `macro_snapshot`
-- [ ] 9.5 Tests: regime classifier rules with synthetic inputs
-- [ ] 9.6 Update PROGRESS.md → commit `feat(features): macro + regime`
+- [x] 9.1 `src/trading/data/macro.py`: yfinance fetchers for S&P/Nasdaq/Dow (^GSPC/^IXIC/^DJI), USDINR (INR=X), Brent (BZ=F), US 10y (^TNX), India VIX (^INDIAVIX). `fetch_yf_quote` returns latest close + 1-day pct change; tolerates multi-index columns, rate-limits, weekends (`lookback_days=10`).
+- [x] 9.2 `fetch_fii_dii()` wraps `nsepython.nse_fiidii` with graceful degradation. Tolerant of modern (`category`/`netValue`) **and** legacy (`type`/`netVal`) schemas; falls back to `(None, None)` on import error, unknown shape, or empty response.
+- [x] 9.3 `src/trading/features/regime.py`: pure 4-axis voter (VIX / global-futures mean / FII flow / USDINR change). Each axis votes -1/0/+1 with named thresholds (`VIX_LOW`, `VIX_HIGH`, `FUTURES_UP/DOWN_PCT`, `FII_UP/DOWN_CR`, `USDINR_*`). Sum ≥+2 → RISK_ON, ≤-2 → RISK_OFF, else NEUTRAL. Returns per-axis votes + reasons; `position_size_multiplier` returns 1.0 / 0.75 / 0.5 per spec §4.5.
+- [x] 9.4 `snapshot_and_classify(as_of)` fetches once, builds `MacroSnapshot`, runs classifier, returns row with `regime` filled in. `upsert_macro_snapshot` (`store/macro_store.py`) does idempotent INSERT ON CONFLICT. CLI `trading macro [--date YYYY-MM-DD] [--dry-run]` prints the Rich table + regime + reasoning, then UPSERTs.
+- [x] 9.5 42 new tests across `test_regime.py` (25 — per-axis voters, every bucket boundary, position-size policy, adapter) and `test_macro.py` (17 — mocked-yfinance shape, multi-index handling, FII/DII modern+legacy parsing, import-failure paths, snapshot orchestration, DB round-trip + REGIME CHECK constraint). Suite **321 passed**, 2 deselected.
+- [x] 9.6 Live smoke confirmed: today's snapshot persisted (VIX 19.4, USDINR 95.76, FII +Rs 187 cr → NEUTRAL, score +1). PROGRESS.md updated, commit `feat(features): macro + regime (Phase 9)`, pushed to origin/main.
 
 ## Phase 10 — Portfolio analyzer
 

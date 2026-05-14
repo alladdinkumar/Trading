@@ -35,12 +35,14 @@ from trading.data.kite import (
     login_url,
     make_client,
 )
+from trading.data.macro import snapshot_and_classify
 from trading.data.news import DEFAULT_ALIASES, fetch_all_news
 from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
 from trading.store.db import get_conn
+from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import insert_news_items
 from trading.store.ohlcv import list_symbols, parquet_path, read_ohlcv, write_ohlcv
@@ -502,6 +504,65 @@ def ingest_news(
                     "[red]YES[/red]" if r.has_critical else "no",
                 )
             console.print(table)
+
+
+@app.command("macro")
+def macro_cmd(
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--date",
+            help="Snapshot date (YYYY-MM-DD). Defaults to today.",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Print the snapshot without writing to SQLite."),
+    ] = False,
+) -> None:
+    """Pull macro indicators, classify the risk regime, write macro_snapshot."""
+    paths = get_paths()
+    target_date = date.fromisoformat(as_of) if as_of else date.today()
+
+    console.print(f"[bold]Pulling macro snapshot for {target_date}…[/bold]")
+    snap, result = snapshot_and_classify(target_date)
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Indicator")
+    table.add_column("Value", justify="right")
+    table.add_row("S&P 500", _fmt(snap.sp500))
+    table.add_row("Nasdaq", _fmt(snap.nasdaq_fut))
+    table.add_row("Dow", _fmt(snap.dow_fut))
+    table.add_row("USDINR", _fmt(snap.usdinr))
+    table.add_row("Brent", _fmt(snap.crude))
+    table.add_row("India VIX", _fmt(snap.vix))
+    table.add_row("US 10y yield", _fmt(snap.us_10y))
+    table.add_row("FII flow (Rs cr)", _fmt(snap.fii_flow_cr))
+    table.add_row("DII flow (Rs cr)", _fmt(snap.dii_flow_cr))
+    console.print(table)
+
+    color = {"RISK_ON": "green", "NEUTRAL": "yellow", "RISK_OFF": "red"}[result.regime]
+    console.print(
+        f"\n[bold {color}]Regime: {result.regime}[/bold {color}]  "
+        f"(composite score {result.composite_score:+d})"
+    )
+    for reason in result.reasons:
+        console.print(f"  - {reason}")
+
+    if dry_run:
+        console.print("\n[yellow]Dry run — nothing written.[/yellow]")
+        return
+
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        upsert_macro_snapshot(conn, snap)
+    console.print(f"\n[green]macro_snapshot written for {snap.date}.[/green]")
+
+
+def _fmt(v: float | None) -> str:
+    if v is None:
+        return "-"
+    return f"{v:,.2f}"
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry
