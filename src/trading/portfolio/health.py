@@ -334,22 +334,26 @@ def technicals_from_history(history: object) -> TechnicalsSnapshot:
     if not isinstance(history, pd.DataFrame) or history.empty:
         return TechnicalsSnapshot()
 
-    last = history.iloc[-1]
-    close = float(last.get("close", float("nan")))
-    if close != close:  # NaN check without numpy
+    # yfinance sometimes appends an empty bar for an incomplete trading day —
+    # find the most recent row whose close is populated.
+    valid = history.dropna(subset=["close"]) if "close" in history.columns else history
+    if valid.empty:
         return TechnicalsSnapshot()
 
-    sma_200 = float(last["sma_200"]) if "sma_200" in history.columns and last["sma_200"] == last["sma_200"] else None
+    last = valid.iloc[-1]
+    close = float(last["close"])
+
+    sma_200 = float(last["sma_200"]) if "sma_200" in valid.columns and last["sma_200"] == last["sma_200"] else None
     above = (close > sma_200) if sma_200 is not None else None
 
-    ath = float(history["high"].max()) if "high" in history.columns else None
+    ath = float(valid["high"].max()) if "high" in valid.columns else None
     dd = ((ath - close) / ath * 100.0) if ath and ath > 0 else None
 
-    rsi = float(last["rsi_14"]) if "rsi_14" in history.columns and last["rsi_14"] == last["rsi_14"] else None
+    rsi = float(last["rsi_14"]) if "rsi_14" in valid.columns and last["rsi_14"] == last["rsi_14"] else None
 
-    # 52w high: last 252 trading bars
-    if "high" in history.columns and len(history) >= 1:
-        recent = history["high"].tail(252)
+    # 52w high: last 252 valid trading bars
+    if "high" in valid.columns and len(valid) >= 1:
+        recent = valid["high"].tail(252)
         hi52 = float(recent.max())
         dist_52 = ((hi52 - close) / hi52 * 100.0) if hi52 > 0 else None
     else:

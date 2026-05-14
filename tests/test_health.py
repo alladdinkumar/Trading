@@ -321,3 +321,17 @@ def test_technicals_from_history_handles_short_history() -> None:
     df = _history(n=50)
     snap = technicals_from_history(df)
     assert snap.above_200dma is None
+
+
+def test_technicals_from_history_skips_trailing_nan_close() -> None:
+    """yfinance occasionally appends an empty bar for an incomplete trading
+    day; the snapshot must use the last *valid* close instead of None-ing out.
+    Regression: caught on real Kite data 2026-05-15."""
+    df = _history(n=300)
+    # Add an empty bar at the end (close=NaN), as if today's bar isn't done
+    next_day = df.index[-1] + pd.Timedelta(days=1)
+    df.loc[next_day] = {col: np.nan for col in df.columns}
+    snap = technicals_from_history(df)
+    assert snap.above_200dma is not None  # not skipped
+    assert snap.dist_to_52w_high_pct is not None
+    assert snap.rsi_14 == pytest.approx(55.0)
