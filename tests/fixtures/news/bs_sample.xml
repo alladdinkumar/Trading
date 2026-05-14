@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Business Standard Markets</title>
+    <link>https://www.business-standard.com/markets</link>
+    <description>BS Markets feed</description>
+    <item>
+      <title>Reliance Industries Q4 results beat estimates as refining margins improve</title>
+      <link>https://www.moneycontrol.com/news/business/markets/reliance-q4-results-12345.html</link>
+      <description>Duplicate of MC story — should dedupe.</description>
+      <pubDate>Tue, 13 May 2026 09:35:00 +0530</pubDate>
+    </item>
+    <item>
+      <title>Indian markets close 1.2% higher on FII inflows</title>
+      <link>https://www.business-standard.com/markets/close-44444.html</link>
+      <description>Banks and IT led the rally.</description>
+      <pubDate>Tue, 13 May 2026 15:40:00 +0530</pubDate>
+    </item>
+  </channel>
+</rss>

@@ -1,0 +1,270 @@
+"""News aggregation: RSS feeds + NSE corporate events.
+
+Each source is wrapped behind an adapter so adding/removing feeds is local.
+A single failing source must not abort the whole pull — markets news
+infrastructure changes frequently (per spec §18 risk row).
+
+The output is a list of `NewsItem` rows ready for the `news_items` SQLite
+table. `sentiment` / `category` / `is_critical` are populated later by
+`features.sentiment`, not here.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any, Protocol
+
+import feedparser
+
+from trading.config import get_settings
+from trading.data.cache import get_cached_session
+
+# ---------------------------------------------------------------------------
+# Datatypes
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RawHeadline:
+    """A headline as it came off a source feed (pre-symbol-attribution)."""
+
+    ts: datetime  # tz-aware UTC
+    source: str
+    headline: str
+    url: str
+    summary: str | None = None
+
+
+@dataclass(frozen=True)
+class NewsItem:
+    """One row of the `news_items` table.
+
+    `sentiment` / `category` / `is_critical` are filled by the scorer in a
+    later pass — we keep them as Optional fields so the news fetch and
+    scoring steps stay independently testable.
+    """
+
+    ts: str  # ISO 8601 with tz
+    symbol: str | None
+    source: str
+    headline: str
+    url: str | None
+    sentiment: float | None = None
+    category: str | None = None
+    is_critical: bool = False
+
+
+class NewsSource(Protocol):
+    """Strategy interface — anything with a `fetch()` method works.
+
+    Each implementation also exposes a `name` (set on the dataclass), but
+    we don't put it in the Protocol because frozen-dataclass attributes
+    can't satisfy a Protocol's settable-attribute declaration.
+    """
+
+    def fetch(self) -> list[RawHeadline]: ...
+
+
+# ---------------------------------------------------------------------------
+# RSS source
+# ---------------------------------------------------------------------------
+
+RSS_FEEDS: dict[str, str] = {
+    "moneycontrol_markets": "https://www.moneycontrol.com/rss/marketsnews.xml",
+    "et_markets": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms",
+    "bs_markets": "https://www.business-standard.com/rss/markets-106.rss",
+}
+
+
+@dataclass(frozen=True)
+class RssFeed:
+    """One RSS source. Pulls via the shared cached HTTP session."""
+
+    name: str
+    url: str
+    timeout: int = 15
+
+    def fetch(self) -> list[RawHeadline]:
+        session = get_cached_session()
+        ua = get_settings(load_dotenv=False).news_user_agent
+        resp = session.get(self.url, headers={"User-Agent": ua}, timeout=self.timeout)
+        resp.raise_for_status()
+        return parse_rss(resp.text, self.name)
+
+
+def parse_rss(xml_text: str, source: str) -> list[RawHeadline]:
+    """Parse an RSS/Atom feed body into RawHeadlines. Tolerant of missing fields."""
+    parsed = feedparser.parse(xml_text)
+    out: list[RawHeadline] = []
+    for entry in parsed.entries:
+        headline = (entry.get("title") or "").strip()
+        url = (entry.get("link") or "").strip()
+        if not headline or not url:
+            continue
+        out.append(
+            RawHeadline(
+                ts=_entry_timestamp(entry),
+                source=source,
+                headline=headline,
+                url=url,
+                summary=(entry.get("summary") or None),
+            )
+        )
+    return out
+
+
+def _entry_timestamp(entry: Any) -> datetime:
+    """Best-effort UTC timestamp from a feedparser entry; falls back to `now()`."""
+    for key in ("published_parsed", "updated_parsed"):
+        parsed = entry.get(key)
+        if parsed:
+            try:
+                y, m, d, hh, mm, ss = (int(x) for x in parsed[:6])
+                return datetime(y, m, d, hh, mm, ss, tzinfo=UTC)
+            except (TypeError, ValueError):
+                continue
+    return datetime.now(UTC)
+
+
+# ---------------------------------------------------------------------------
+# NSE corporate events
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class NseEventsSource:
+    """NSE corporate event calendar via nsepython.
+
+    Returned headlines look like "RVNL: Board Meeting on 2026-05-20".
+    Best-effort: any failure (rate-limit, schema change, import) yields []
+    rather than killing the wider pull. Mitigates spec §18 ("News RSS sources
+    go down or change format").
+    """
+
+    name: str = "nse_events"
+
+    def fetch(self) -> list[RawHeadline]:
+        try:
+            from nsepython import nse_events
+
+            df = nse_events()
+        except Exception:
+            return []
+        if df is None or df.empty:
+            return []
+        out: list[RawHeadline] = []
+        for _, row in df.iterrows():
+            symbol = (row.get("symbol") or "").strip()
+            purpose = (row.get("purpose") or row.get("subject") or "").strip()
+            date_str = (row.get("date") or row.get("BMDate") or "").strip()
+            if not symbol or not purpose:
+                continue
+            headline = f"{symbol}: {purpose}" + (f" on {date_str}" if date_str else "")
+            ts = _parse_event_date(date_str) or datetime.now(UTC)
+            out.append(
+                RawHeadline(
+                    ts=ts,
+                    source=self.name,
+                    headline=headline,
+                    url=f"https://www.nseindia.com/companies-listing/corporate-filings-event-calendar?symbol={symbol}",
+                )
+            )
+        return out
+
+
+def _parse_event_date(s: str) -> datetime | None:
+    """NSE returns dates in mixed formats; try the common ones."""
+    if not s:
+        return None
+    for fmt in ("%d-%b-%Y", "%Y-%m-%d", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=UTC)
+        except ValueError:
+            continue
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Symbol attribution
+# ---------------------------------------------------------------------------
+
+# Holdings + the smoke-test universe. Extend freely — the matcher is whole-word
+# and case-insensitive, so adding "TCS": ["Tata Consultancy"] is enough.
+DEFAULT_ALIASES: dict[str, list[str]] = {
+    "RELIANCE": ["Reliance", "RIL", "Reliance Industries"],
+    "TATAPOWER": ["Tata Power"],
+    "NTPC": ["NTPC"],
+    "RVNL": ["RVNL", "Rail Vikas"],
+    "IRB": ["IRB Infra", "IRB Infrastructure"],
+    "PFC": ["Power Finance", "PFC Ltd"],
+    "RECLTD": ["REC Ltd", "REC Limited"],
+    "COALINDIA": ["Coal India"],
+    "IDFCFIRSTB": ["IDFC First Bank", "IDFC First"],
+    "IREDA": ["IREDA"],
+    "JIOFIN": ["Jio Financial", "Jio Fin"],
+    "MAZDOCK": ["Mazagon Dock", "MDL"],
+}
+
+
+def attribute_symbol(headline: str, aliases: dict[str, list[str]]) -> str | None:
+    """Return the first symbol whose ticker or alias appears as a whole word
+    in `headline`. Case-insensitive. Returns None when nothing matches."""
+    upper = headline.upper()
+    for symbol, alias_list in aliases.items():
+        for needle in (symbol, *alias_list):
+            if re.search(rf"\b{re.escape(needle.upper())}\b", upper):
+                return symbol
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+
+
+def default_sources(include_nse: bool = True) -> list[NewsSource]:
+    """The built-in source list. Tests pass a custom list to stub network."""
+    sources: list[NewsSource] = [RssFeed(name=k, url=v) for k, v in RSS_FEEDS.items()]
+    if include_nse:
+        sources.append(NseEventsSource())
+    return sources
+
+
+def fetch_all_news(
+    *,
+    sources: Iterable[NewsSource] | None = None,
+    aliases: dict[str, list[str]] | None = None,
+) -> list[NewsItem]:
+    """Pull every source, dedup by URL, attribute symbols, return DB-ready rows.
+
+    Sources are isolated: a raising adapter contributes nothing but doesn't
+    abort the others. Symbol attribution leaves `symbol=None` when no alias
+    matches — those rows still feed sector/macro narrative downstream.
+    """
+    src_list = list(sources) if sources is not None else default_sources()
+    alias_map = aliases if aliases is not None else DEFAULT_ALIASES
+
+    seen: set[str] = set()
+    out: list[NewsItem] = []
+    for src in src_list:
+        try:
+            raws = src.fetch()
+        except Exception:
+            continue
+        for raw in raws:
+            if raw.url in seen:
+                continue
+            seen.add(raw.url)
+            out.append(
+                NewsItem(
+                    ts=raw.ts.isoformat(),
+                    symbol=attribute_symbol(raw.headline, alias_map),
+                    source=raw.source,
+                    headline=raw.headline,
+                    url=raw.url,
+                )
+            )
+    return out

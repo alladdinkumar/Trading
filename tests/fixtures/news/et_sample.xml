@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Economic Times Markets</title>
+    <link>https://economictimes.indiatimes.com/markets</link>
+    <description>ET Markets news feed</description>
+    <item>
+      <title>Tata Power eyes 4 GW battery storage by FY28, CFO says</title>
+      <link>https://economictimes.indiatimes.com/markets/stocks/news/tata-power-battery-storage-22222.cms</link>
+      <description>The CFO spoke at a Mumbai investor event.</description>
+      <pubDate>Tue, 13 May 2026 10:00:00 +0530</pubDate>
+    </item>
+    <item>
+      <title>Auditor of XYZ Ltd resigns citing differences with management</title>
+      <link>https://economictimes.indiatimes.com/markets/stocks/news/auditor-resigns-33333.cms</link>
+      <description>Shares fell sharply on the news.</description>
+      <pubDate>Tue, 13 May 2026 12:30:00 +0530</pubDate>
+    </item>
+  </channel>
+</rss>

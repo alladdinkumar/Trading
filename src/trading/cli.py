@@ -35,9 +35,14 @@ from trading.data.kite import (
     login_url,
     make_client,
 )
+from trading.data.news import DEFAULT_ALIASES, fetch_all_news
 from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
+from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
+from trading.store.db import get_conn
+from trading.store.migrations import run_migrations
+from trading.store.news_store import insert_news_items
 from trading.store.ohlcv import list_symbols, parquet_path, read_ohlcv, write_ohlcv
 from trading.strategy.rules import ScanContext, passing, scan
 
@@ -419,6 +424,84 @@ def _render_report(
     if len(result.trades) > 20:
         lines.append(f"\n_… {len(result.trades) - 20} more trades._")
     return "\n".join(lines) + "\n"
+
+
+@app.command("ingest-news")
+def ingest_news(
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--date",
+            help="Aggregation date (YYYY-MM-DD). Defaults to today.",
+        ),
+    ] = None,
+    skip_score: Annotated[
+        bool,
+        typer.Option(
+            "--skip-score",
+            help="Insert raw headlines without running FinBERT (fast, no model load).",
+        ),
+    ] = False,
+    skip_aggregate: Annotated[
+        bool,
+        typer.Option(
+            "--skip-aggregate",
+            help="Don't write the daily sentiment_daily rollups after insert.",
+        ),
+    ] = False,
+) -> None:
+    """Fetch news from all sources, score with FinBERT, write news_items and sentiment_daily."""
+    paths = get_paths()
+    target_date = date.fromisoformat(as_of) if as_of else date.today()
+
+    console.print("[bold]Fetching news from all sources…[/bold]")
+    items = fetch_all_news()
+    if not items:
+        console.print("[yellow]No headlines retrieved.[/yellow]")
+        raise typer.Exit(code=0)
+    console.print(f"  Retrieved {len(items)} headline(s) after dedup.")
+
+    if skip_score:
+        console.print("[yellow]Skipping FinBERT (--skip-score).[/yellow]")
+        scored = items
+    else:
+        console.print("[bold]Scoring with FinBERT (this loads ~440MB on first run)…[/bold]")
+        scored = score_news_items(items)
+        console.print(f"  Scored {len(scored)} headline(s).")
+
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        n = insert_news_items(conn, scored)
+        console.print(f"[green]Inserted {n} row(s) into news_items.[/green]")
+
+        if skip_aggregate:
+            console.print("[yellow]Skipping daily aggregation (--skip-aggregate).[/yellow]")
+            return
+
+        watched = sorted(DEFAULT_ALIASES.keys())
+        rollups = aggregate_daily(conn, watched, target_date)
+        console.print(
+            f"[green]Wrote sentiment_daily for {len(rollups)} symbol(s) "
+            f"as of {target_date.isoformat()}.[/green]"
+        )
+        if rollups:
+            table = Table(show_header=True, header_style="bold")
+            table.add_column("Symbol")
+            table.add_column("7d", justify="right")
+            table.add_column("30d", justify="right")
+            table.add_column("News", justify="right")
+            table.add_column("Neg", justify="right")
+            table.add_column("Critical")
+            for r in rollups:
+                table.add_row(
+                    r.symbol,
+                    f"{r.score_7d:+.2f}" if r.score_7d is not None else "-",
+                    f"{r.score_30d:+.2f}" if r.score_30d is not None else "-",
+                    str(r.news_count),
+                    str(r.negative_news_count),
+                    "[red]YES[/red]" if r.has_critical else "no",
+                )
+            console.print(table)
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry

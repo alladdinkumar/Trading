@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Moneycontrol Markets News</title>
+    <link>https://www.moneycontrol.com/news/business/markets/</link>
+    <description>Latest markets news</description>
+    <language>en-us</language>
+    <item>
+      <title>Reliance Industries Q4 results beat estimates as refining margins improve</title>
+      <link>https://www.moneycontrol.com/news/business/markets/reliance-q4-results-12345.html</link>
+      <description>RIL reported a profit growth of 12% YoY.</description>
+      <pubDate>Tue, 13 May 2026 09:30:00 +0530</pubDate>
+    </item>
+    <item>
+      <title>SEBI bars promoter of small-cap auto firm over disclosure lapses</title>
+      <link>https://www.moneycontrol.com/news/business/markets/sebi-bars-promoter-67890.html</link>
+      <description>The regulator has imposed a five-year market ban.</description>
+      <pubDate>Tue, 13 May 2026 11:15:00 +0530</pubDate>
+    </item>
+    <item>
+      <title>NTPC commissions 800 MW solar capacity at Rajasthan plant</title>
+      <link>https://www.moneycontrol.com/news/business/markets/ntpc-solar-11111.html</link>
+      <description>NTPC's renewable arm crosses key milestone.</description>
+      <pubDate>Tue, 13 May 2026 13:45:00 +0530</pubDate>
+    </item>
+  </channel>
+</rss>

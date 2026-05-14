@@ -24,7 +24,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 5 | Rule scanner (Layer A) | `[x]` |
 | 6 | Sizing + exits | `[x]` |
 | 7 | Backtest engine | `[x]` |
-| 8 | News + sentiment | `[ ]` |
+| 8 | News + sentiment | `[x]` |
 | 9 | Macro + regime | `[ ]` |
 | 10 | Portfolio analyzer | `[ ]` |
 | 11 | Paper-trade ledger | `[ ]` |
@@ -36,8 +36,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 8 — News + sentiment_
-**Next up:** _Phase 9 — Macro + regime_
+**Currently working on:** _Phase 9 — Macro + regime_
+**Next up:** _Phase 10 — Portfolio analyzer_
 
 ---
 
@@ -121,12 +121,12 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 8 — News + sentiment
 
-- [ ] 8.1 `src/trading/data/news.py`: RSS aggregator (Moneycontrol, ET, BS); NSE corp announcements scraper
-- [ ] 8.2 `src/trading/features/sentiment.py`: FinBERT loader (cached locally), `score_headline(text)` returning [-1, +1] + category
-- [ ] 8.3 Critical-event keyword classifier (SEBI/SAT/fraud/auditor/pledge) → `is_critical=True`
-- [ ] 8.4 Aggregator: per-stock 7d/30d sentiment → writes `sentiment_daily`
-- [ ] 8.5 Tests: cached HTML fixtures; FinBERT snapshot on a fixed sentence; critical-keyword tests
-- [ ] 8.6 Update PROGRESS.md → commit `feat(features): news + sentiment`
+- [x] 8.1 `src/trading/data/news.py`: RSS aggregator (Moneycontrol/ET/BS) via `feedparser` + NSE event calendar via `nsepython.nse_events`. `NewsSource` Protocol; orchestrator dedupes by URL and isolates failing sources (spec §18). Symbol attribution via whole-word case-insensitive alias map (`DEFAULT_ALIASES`, holdings + smoke universe).
+- [x] 8.2 `src/trading/features/sentiment.py`: lazy singleton FinBERT (`ProsusAI/finbert`, cached under `data/cache/models/`); `score_headline` returns `ScoreResult(score ∈ [-1,+1], category, is_critical)`. Score = `P(pos) − P(neg)`. Injectable `Scorer` callable keeps unit tests fast (stubbed) and one `@slow` test exercises the real ~440MB model.
+- [x] 8.3 `CRITICAL_PATTERNS` regex set (SEBI/SAT/fraud/auditor/pledge/qualified opinion/NCLT/ED/CBI/default/insolvency) and `CATEGORY_KEYWORDS` (results/management/regulatory/M&A/downgrade/dividend/pledge). Critical → hard veto for Layer A §4.1.
+- [x] 8.4 `aggregate_symbol(conn, sym, as_of)` + `aggregate_daily(conn, symbols, as_of)` write per-(date, symbol) rollup to `sentiment_daily`: 7d/30d mean score, news_count, negative_news_count (< -0.20), has_critical. Idempotent UPSERT; skips symbols with zero news.
+- [x] 8.5 56 new tests across `test_news.py` (14), `test_sentiment.py` (34 — incl. one `@slow` real-FinBERT directional snapshot), `test_news_store.py` (8). Cached XML fixtures under `tests/fixtures/news/`. Full suite **279 passed**, 2 deselected (1 live, 1 slow).
+- [x] 8.6 CLI `trading ingest-news [--date YYYY-MM-DD] [--skip-score] [--skip-aggregate]`. Smoke test against live RSS: 511 headlines pulled + deduped + persisted in ~5s with `--skip-score`. PROGRESS.md updated → commit `feat(features): news + sentiment (Phase 8)` and push to origin/main.
 
 ## Phase 9 — Macro + regime
 
