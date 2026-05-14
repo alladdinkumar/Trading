@@ -26,7 +26,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 7 | Backtest engine | `[x]` |
 | 8 | News + sentiment | `[x]` |
 | 9 | Macro + regime | `[x]` |
-| 10 | Portfolio analyzer | `[ ]` |
+| 10 | Portfolio analyzer | `[x]` |
 | 11 | Paper-trade ledger | `[ ]` |
 | 12 | LLM analyst | `[ ]` |
 | 13 | pre_open job (MVP ⭐) | `[ ]` |
@@ -36,8 +36,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 10 — Portfolio analyzer_
-**Next up:** _Phase 11 — Paper-trade ledger_
+**Currently working on:** _Phase 11 — Paper-trade ledger_
+**Next up:** _Phase 12 — LLM analyst_
 
 ---
 
@@ -139,12 +139,12 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 10 — Portfolio analyzer
 
-- [ ] 10.1 `src/trading/portfolio/health.py`: per-holding HOLD/TRIM/EXIT scorer using fundamentals + technicals + sentiment
-- [ ] 10.2 `src/trading/portfolio/gtt.py`: Monte Carlo viability (1,000 ATR-based paths, 60-day vol)
-- [ ] 10.3 `src/trading/portfolio/allocator.py`: ₹1L SIP splitter (topup vs new vs cash; ≤60% deployed per batch)
-- [ ] 10.4 CLI `trading portfolio`: produces markdown report
-- [ ] 10.5 Tests: synthetic Kite fixtures; allocator concurrency caps
-- [ ] 10.6 Update PROGRESS.md → commit `feat(portfolio): health + GTT + allocator`
+- [x] 10.1 `src/trading/portfolio/health.py`: vote-based HOLD/TRIM/EXIT scorer over technicals (above 200-DMA, drawdown bands, RSI bands, dist to 52w high), fundamentals (profit growth/CAGR, debt/equity, ROE, P/E percentile) and sentiment. `has_critical` triggers immediate EXIT veto. Pure function over a `HoldingContext` dataclass; all fundamentals fields Optional so missing yfinance data degrades gracefully. `technicals_from_history` adapter computes the technical slice from an enriched OHLCV frame.
+- [x] 10.2 `src/trading/portfolio/gtt.py`: `simulate_target_hit` runs n-path GBM with Itô-corrected drift (`µ − ½σ²`), direction-aware hit detection (above-start → ≥, below-start → ≤), deterministic with optional seed. `project_gtt_viability` uses 60-day realised log-return mean/std; gracefully notes when history < `vol_window + 1` bars or σ=0. `project_all_gtts` orchestrates across the holdings universe.
+- [x] 10.3 `src/trading/portfolio/allocator.py`: pure `allocate_sip` splits ₹1L across TOPUP (HOLD-rated existing only) / NEW (non-holdings) / CASH. Caps from spec §4.4 + §7.3: 50% topup, 50% new, 60% deployed total, 25% per-stock, 30% per-sector, 5 concurrent open. Greedy priority-ordered fill; rounds to whole rupees; surfaces a `skipped` list with reasons (bucket exhausted / concurrency / sector cap).
+- [x] 10.4 `trading portfolio [--horizon-days] [--n-paths] [--seed] [--report]` CLI: pulls live Kite holdings + GTTs, scores health using parquet history + `sentiment_daily`, projects GTT viability, prints Rich tables + writes markdown to `data/research/portfolio_<ts>.md`.
+- [x] 10.5 64 new tests across `test_health.py` (24 — per-axis voters, critical veto, low-evidence default, threshold constants, score formula, `technicals_from_history`), `test_gtt.py` (18 — seed determinism, directional hits, vol→prob relationship, edge cases, graceful skips, orchestrator), `test_allocator.py` (22 — bucket routing, concurrency/sector/per-stock caps, priority ordering, cash reserve, whole-share rounding, determinism). Suite **385 passed**, 2 deselected.
+- [x] 10.6 End-to-end synthetic smoke ran cleanly (RVNL HOLD 100/100, GTT P(hit)=31% in 32 expected days, SIP allocates 24.5k NEW + 75.5k CASH). PROGRESS.md updated → commit `feat(portfolio): health + GTT + allocator (Phase 10)` and pushed to origin/main.
 
 ## Phase 11 — Paper-trade ledger
 

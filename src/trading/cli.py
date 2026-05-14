@@ -31,6 +31,8 @@ from trading.config import get_paths, get_settings, update_env_var
 from trading.data.kite import (
     KiteAuthError,
     generate_session,
+    get_gtts,
+    get_holdings,
     is_authenticated,
     login_url,
     make_client,
@@ -41,10 +43,17 @@ from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
+from trading.portfolio.gtt import project_all_gtts
+from trading.portfolio.health import (
+    HoldingContext,
+    SentimentSnapshot,
+    score_holding,
+    technicals_from_history,
+)
 from trading.store.db import get_conn
 from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
-from trading.store.news_store import insert_news_items
+from trading.store.news_store import get_sentiment_daily, insert_news_items
 from trading.store.ohlcv import list_symbols, parquet_path, read_ohlcv, write_ohlcv
 from trading.strategy.rules import ScanContext, passing, scan
 
@@ -563,6 +572,191 @@ def _fmt(v: float | None) -> str:
     if v is None:
         return "-"
     return f"{v:,.2f}"
+
+
+@app.command("portfolio")
+def portfolio_cmd(
+    horizon_days: Annotated[
+        int,
+        typer.Option(help="GTT viability horizon in trading days."),
+    ] = 60,
+    n_paths: Annotated[
+        int,
+        typer.Option(help="Monte Carlo paths per GTT."),
+    ] = 1000,
+    seed: Annotated[
+        int | None,
+        typer.Option(help="Optional seed for reproducible GTT simulation."),
+    ] = None,
+    report: Annotated[
+        str | None,
+        typer.Option(help="Markdown report path (default: data/research/portfolio_<ts>.md)."),
+    ] = None,
+) -> None:
+    """Pull holdings + GTTs from Kite, score health, project GTT viability."""
+    paths = get_paths()
+    settings = get_settings()
+    if not (settings.kite_api_key and settings.kite_access_token):
+        console.print("[red]Kite credentials missing. Run `trading kite-login` first.[/red]")
+        raise typer.Exit(code=1)
+
+    client = make_client(settings.kite_api_key, settings.kite_access_token)
+    try:
+        holdings_list = get_holdings(client)
+        gtts_list = get_gtts(client)
+    except KiteAuthError as exc:
+        console.print(f"[red]Kite auth failed: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"[bold]Loaded {len(holdings_list)} holding(s), "
+        f"{len(gtts_list)} GTT(s) from Kite.[/bold]"
+    )
+
+    # Enrich each holding with parquet history + sentiment
+    enriched: dict[str, pd.DataFrame] = {}
+    health_rows = []
+    today_iso = date.today().isoformat()
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        for h in holdings_list:
+            sym = h.tradingsymbol
+            try:
+                raw = read_ohlcv(sym, paths)
+                if len(raw) >= 200:
+                    enriched[sym] = add_indicators(raw)
+            except FileNotFoundError:
+                pass
+            sent_row = get_sentiment_daily(conn, today_iso, sym)
+            sent = SentimentSnapshot(
+                score_30d=sent_row.score_30d if sent_row else None,
+                has_critical=sent_row.has_critical if sent_row else False,
+            )
+            tech = (
+                technicals_from_history(enriched[sym])
+                if sym in enriched
+                else technicals_from_history(None)  # falls through to empty
+            )
+            ctx = HoldingContext(
+                symbol=sym,
+                qty=h.quantity,
+                avg_price=h.average_price,
+                last_price=h.last_price,
+                technicals=tech,
+                sentiment=sent,
+            )
+            health_rows.append(score_holding(ctx))
+
+    _print_health_table(health_rows)
+
+    # GTT viability
+    viabilities = project_all_gtts(
+        gtts_list,
+        enriched,
+        horizon_days=horizon_days,
+        n_paths=n_paths,
+        seed=seed,
+    )
+    _print_gtt_table(viabilities)
+
+    # Markdown report
+    report_path = (
+        Path(report)
+        if report
+        else paths.research_dir / f"portfolio_{datetime.now():%Y%m%d_%H%M%S}.md"
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        _render_portfolio_report(health_rows, viabilities),
+        encoding="utf-8",
+    )
+    console.print(f"\n[green]Report written to[/green] {report_path}")
+
+
+def _print_health_table(rows: list) -> None:  # type: ignore[type-arg]
+    if not rows:
+        console.print("[yellow]No holdings to score.[/yellow]")
+        return
+    table = Table(
+        title="Holdings health (HOLD / TRIM / EXIT)",
+        show_header=True,
+        header_style="bold",
+    )
+    table.add_column("Symbol")
+    table.add_column("Verdict")
+    table.add_column("Score", justify="right")
+    table.add_column("Net votes", justify="right")
+    table.add_column("P&L %", justify="right")
+    table.add_column("Top reason")
+    color = {"HOLD": "green", "TRIM": "yellow", "EXIT": "red"}
+    for r in rows:
+        c = color[r.verdict]
+        pnl = f"{r.pnl_pct:+.1f}%" if r.pnl_pct is not None else "-"
+        table.add_row(
+            r.symbol,
+            f"[bold {c}]{r.verdict}[/bold {c}]",
+            f"{r.score}/100",
+            f"{r.net_votes:+d} of {r.votes_cast}",
+            pnl,
+            r.reasons[0] if r.reasons else "",
+        )
+    console.print(table)
+
+
+def _print_gtt_table(viabilities: list) -> None:  # type: ignore[type-arg]
+    if not viabilities:
+        console.print("[yellow]No GTTs to project.[/yellow]")
+        return
+    table = Table(
+        title="GTT viability (Monte Carlo)",
+        show_header=True,
+        header_style="bold",
+    )
+    table.add_column("Symbol")
+    table.add_column("Trigger", justify="right")
+    table.add_column("Last", justify="right")
+    table.add_column("P(hit)", justify="right")
+    table.add_column("Exp days", justify="right")
+    table.add_column("Note")
+    for v in viabilities:
+        trigger = ", ".join(f"{t:.2f}" for t in v.trigger_values)
+        prob = f"{v.probability_hit:.0%}" if v.probability_hit is not None else "-"
+        days = f"{v.expected_days_to_hit:.0f}" if v.expected_days_to_hit else "-"
+        last = f"{v.last_price:.2f}" if v.last_price is not None else "-"
+        table.add_row(v.symbol, trigger, last, prob, days, v.note or "")
+    console.print(table)
+
+
+def _render_portfolio_report(health_rows: list, viabilities: list) -> str:  # type: ignore[type-arg]
+    lines: list[str] = []
+    lines.append(f"# Portfolio analysis — {date.today().isoformat()}")
+    lines.append("")
+    lines.append("## Holdings health")
+    lines.append("")
+    lines.append("| Symbol | Verdict | Score | Net votes | P&L % | Reasons |")
+    lines.append("|---|---|---:|---:|---:|---|")
+    for r in health_rows:
+        pnl = f"{r.pnl_pct:+.1f}%" if r.pnl_pct is not None else "—"
+        reasons = "; ".join(r.reasons) if r.reasons else "—"
+        lines.append(
+            f"| {r.symbol} | **{r.verdict}** | {r.score}/100 | "
+            f"{r.net_votes:+d} of {r.votes_cast} | {pnl} | {reasons} |"
+        )
+
+    lines.append("")
+    lines.append("## GTT viability")
+    lines.append("")
+    lines.append("| Symbol | Trigger | Last | P(hit) | Expected days | Note |")
+    lines.append("|---|---:|---:|---:|---:|---|")
+    for v in viabilities:
+        trigger = ", ".join(f"₹{t:,.2f}" for t in v.trigger_values)
+        prob = f"{v.probability_hit:.1%}" if v.probability_hit is not None else "—"
+        days = f"{v.expected_days_to_hit:.1f}" if v.expected_days_to_hit else "—"
+        last = f"₹{v.last_price:,.2f}" if v.last_price is not None else "—"
+        lines.append(
+            f"| {v.symbol} | {trigger} | {last} | {prob} | {days} | {v.note or ''} |"
+        )
+    return "\n".join(lines) + "\n"
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry
