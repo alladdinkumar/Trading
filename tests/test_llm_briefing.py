@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from freezegun import freeze_time
 
 from trading.llm.briefing import (
     MissingNarrativeError,
@@ -47,9 +48,6 @@ def test_compile_brief_raises_when_parts_missing(tmp_path: Path) -> None:
     assert "macro_brief.md" in msg
     assert "sector_commentary.md" in msg
     assert "candidates/RVNL.md" in msg
-
-
-from freezegun import freeze_time
 
 
 def _write_part(date_dir: Path, rel: str, body: str) -> None:
