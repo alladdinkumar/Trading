@@ -32,6 +32,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 12.5 | Data quality cleanup | `[x]` |
 | 12.6 | Sector data | `[ ]` |
 | 13 | pre_open job (MVP ⭐) | `[x]` |
+| 13.5 | Kite MCP pivot | `[x]` |
 | 14 | mid_day + post_close jobs | `[ ]` |
 | 15 | Streamlit dashboard | `[ ]` |
 | 16 | LightGBM ranker (Layer B) | `[ ]` |
@@ -264,6 +265,44 @@ Granular task tracker for the trading system build. Update as work completes.
        Idempotency confirmed on re-run.
 - [x] 13.7 PROGRESS.md updated → commit `feat(jobs): pre_open end-to-end
        (MVP) (Phase 13)` and pushed to origin/main.
+
+## Phase 13.5 — Kite MCP pivot
+
+> Reverses Phase 13's `--skip-kite` design. Production paths read Kite data
+> from JSON files written by a `/kite-snapshot` Claude Code skill. SDK
+> wrapper at `src/trading/data/kite.py` is kept as a manual fallback,
+> wired only into `kite-emergency-*` CLI commands.
+> Spec at [`docs/superpowers/specs/2026-05-15-phase-13-5-kite-mcp-pivot-design.md`](docs/superpowers/specs/2026-05-15-phase-13-5-kite-mcp-pivot-design.md).
+> Plan at [`docs/superpowers/plans/2026-05-15-phase-13-5-kite-mcp-pivot.md`](docs/superpowers/plans/2026-05-15-phase-13-5-kite-mcp-pivot.md).
+
+- [x] 13.5.1 `src/trading/data/kite_snapshot.py`: `read_holdings/gtts/positions`
+       readers + `KiteSnapshotMissingError` / `KiteSnapshotStaleError`. Reads
+       `data/raw/<as_of>/<resource>.json` + `_meta.json` validation
+       (date-equality). 7 new tests in `test_kite_snapshot.py`.
+       `seed_kite_snapshot` helper added to `conftest.py`.
+- [x] 13.5.2 `.claude/skills/kite-snapshot/SKILL.md`: project-level skill.
+       Probes `mcp__kite__get_profile`; on 401 prompts user to run
+       `mcp__kite__login` (no partial writes). Calls `mcp__kite__get_holdings`
+       / `mcp__kite__get_gtts`; writes JSONs atomically + `_meta.json` with
+       `source: "mcp"`.
+- [x] 13.5.3 `src/trading/jobs/pre_open.py`: `_step_portfolio` reads from
+       `kite_snapshot.read_holdings`. Drops `skip_kite` arg. New
+       `PreOpenAborted` exception bubbles to CLI which exits 2 with
+       remediation message. 2 new step tests; 1 new CLI abort test.
+- [x] 13.5.4 `trading portfolio` CLI: drops SDK calls, reads from
+       `kite_snapshot`. New required `--date` option. `KiteSnapshotMissingError`
+       exits 2 with same remediation as pre-open. 2 new tests.
+- [x] 13.5.5 Renamed `kite-login` → `kite-emergency-login`. Added
+       `kite-emergency-snapshot --date` CLI: writes the same JSON contract
+       as the skill but tags `_meta.source: "sdk-fallback"`. 2 new tests.
+- [x] 13.5.6 Real-data smoke: `/kite-snapshot` invoked via MCP fetched 11
+       holdings + 10 GTTs from real Zerodha account; `trading pre-open`
+       scored all 11 holdings cleanly (`holdings_scored: 11`); `trading
+       portfolio` rendered health table + GTT viability projections
+       (COALINDIA HOLD 100/100, PFC HOLD 88/100, GTT P(hit) 88% on
+       COALINDIA, 81% on MAZDOCK). Suite **474 passed**, 1 skipped
+       (live), ruff + mypy clean. Commit `feat(data): Phase 13.5 Kite
+       MCP pivot` pushed to origin/main.
 
 ## Phase 14 — mid_day + post_close jobs
 
