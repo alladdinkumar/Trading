@@ -44,6 +44,7 @@ from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
+from trading.jobs.pre_open import run_pre_open
 from trading.llm.briefing import MissingNarrativeError, compile_brief
 from trading.llm.context import ContextInputs
 from trading.llm.context import assemble_context as _assemble_context
@@ -1043,6 +1044,42 @@ def brief_compile_cmd(
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1) from e
     console.print(f"[green]wrote[/green] {out}")
+
+
+@app.command("pre-open")
+def pre_open_cmd(
+    date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD")],
+    skip_news: Annotated[bool, typer.Option("--skip-news")] = False,
+    skip_kite: Annotated[bool, typer.Option("--skip-kite")] = False,
+    capital: Annotated[float, typer.Option(help="Capital per trade.")] = 100_000.0,
+    risk_pct: Annotated[float, typer.Option(help="Risk per trade.")] = 0.02,
+) -> None:
+    """Phase 13 MVP — orchestrate Phases 1-12 and write the analyst bundle."""
+    as_of = date.fromisoformat(date_str)
+    result = run_pre_open(
+        as_of, skip_news=skip_news, skip_kite=skip_kite,
+        capital_per_trade=capital, risk_pct=risk_pct,
+    )
+    table = Table(title=f"pre_open {as_of.isoformat()}", show_header=True)
+    table.add_column("step")
+    table.add_column("count", justify="right")
+    table.add_row("macro_written", "yes" if result.macro_written else "no")
+    table.add_row("news_inserted", str(result.news_inserted))
+    table.add_row("sentiment_rows", str(result.sentiment_rows))
+    table.add_row("candidates_total", str(result.candidates_total))
+    table.add_row("candidates_passing", str(result.candidates_passing))
+    table.add_row("paper_trades_opened", str(result.paper_trades_opened))
+    table.add_row("holdings_scored", str(result.holdings_scored))
+    console.print(table)
+    if result.warnings:
+        console.print("[yellow]Warnings:[/yellow]")
+        for w in result.warnings:
+            console.print(f"  - {w}")
+    console.print(f"[green]wrote[/green] {result.bundle_path}")
+    console.print(
+        f"[bold]Now run /analyst skill, then "
+        f"`trading brief compile --date {date_str}`[/bold]"
+    )
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry
