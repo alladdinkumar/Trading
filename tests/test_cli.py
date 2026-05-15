@@ -324,3 +324,35 @@ def test_pre_open_cli_aborts_when_kite_snapshot_missing(
     )
     assert result.exit_code == 2, result.stdout
     assert "/kite-snapshot" in result.stdout
+
+
+def test_portfolio_cli_reads_snapshot(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+    from datetime import date as _d
+
+    from tests.conftest import seed_kite_snapshot
+    from trading.config import get_paths as _gp
+    seed_kite_snapshot(
+        _gp(),
+        _d(2026, 5, 15),
+        holdings=[],
+        gtts=[],
+    )
+    result = runner.invoke(
+        app, ["portfolio", "--date", "2026-05-15"]
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "0 holding" in result.stdout or "Loaded 0" in result.stdout
+
+
+def test_portfolio_cli_aborts_when_snapshot_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+    result = runner.invoke(
+        app, ["portfolio", "--date", "2026-05-15"]
+    )
+    assert result.exit_code == 2, result.stdout
+    assert "/kite-snapshot" in result.stdout

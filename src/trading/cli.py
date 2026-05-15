@@ -44,6 +44,12 @@ from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
+from trading.data.kite_snapshot import (
+    KiteSnapshotMissingError,
+    KiteSnapshotStaleError,
+    read_gtts as _snapshot_read_gtts,
+    read_holdings as _snapshot_read_holdings,
+)
 from trading.jobs.pre_open import PreOpenAborted, run_pre_open
 from trading.llm.briefing import MissingNarrativeError, compile_brief
 from trading.llm.context import ContextInputs
@@ -585,6 +591,9 @@ def _fmt(v: float | None) -> str:
 
 @app.command("portfolio")
 def portfolio_cmd(
+    date_str: Annotated[
+        str, typer.Option("--date", help="ISO date YYYY-MM-DD for the snapshot to read.")
+    ],
     horizon_days: Annotated[
         int,
         typer.Option(help="GTT viability horizon in trading days."),
@@ -602,24 +611,19 @@ def portfolio_cmd(
         typer.Option(help="Markdown report path (default: data/research/portfolio_<ts>.md)."),
     ] = None,
 ) -> None:
-    """Pull holdings + GTTs from Kite, score health, project GTT viability."""
+    """Score portfolio health + project GTT viability from today's Kite snapshot."""
     paths = get_paths()
-    settings = get_settings()
-    if not (settings.kite_api_key and settings.kite_access_token):
-        console.print("[red]Kite credentials missing. Run `trading kite-login` first.[/red]")
-        raise typer.Exit(code=1)
-
-    client = make_client(settings.kite_api_key, settings.kite_access_token)
+    as_of = date.fromisoformat(date_str)
     try:
-        holdings_list = get_holdings(client)
-        gtts_list = get_gtts(client)
-    except KiteAuthError as exc:
-        console.print(f"[red]Kite auth failed: {exc}[/red]")
-        raise typer.Exit(code=1) from exc
+        holdings_list = _snapshot_read_holdings(paths, as_of)
+        gtts_list = _snapshot_read_gtts(paths, as_of)
+    except (KiteSnapshotMissingError, KiteSnapshotStaleError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(code=2) from exc
 
     console.print(
         f"[bold]Loaded {len(holdings_list)} holding(s), "
-        f"{len(gtts_list)} GTT(s) from Kite.[/bold]"
+        f"{len(gtts_list)} GTT(s) from snapshot.[/bold]"
     )
 
     # Enrich each holding with parquet history + sentiment
