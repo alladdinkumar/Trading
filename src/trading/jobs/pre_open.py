@@ -287,3 +287,25 @@ def _step_assemble(
         conn=conn, paths=paths, as_of=as_of, mode="pre_open",
         inputs=ContextInputs(candidates=candidates, holdings_health=holdings),
     )
+
+
+def _main(  # pragma: no cover — manual entry
+    date_str: str,
+    skip_news: bool = False,
+    skip_kite: bool = False,
+) -> None:
+    """`python -m trading.jobs.pre_open --date-str YYYY-MM-DD` entry."""
+    result = run_pre_open(
+        date.fromisoformat(date_str),
+        skip_news=skip_news, skip_kite=skip_kite,
+    )
+    print(f"wrote {result.bundle_path}")
+    if result.warnings:
+        print(f"warnings ({len(result.warnings)}):")
+        for w in result.warnings:
+            print(f"  - {w}")
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import typer
+    typer.run(_main)
