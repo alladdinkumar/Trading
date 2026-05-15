@@ -201,3 +201,72 @@ def test_assemble_context_holdings_health_no_data_when_empty(
     body = out.read_text(encoding="utf-8")
     assert "## Holdings health" in body
     assert "_(no data)_" in body
+
+
+def _seed_open_trade(conn: sqlite3.Connection) -> None:
+    cur = conn.execute(
+        "INSERT INTO signals (ts, symbol, side, entry, stop, target, "
+        "horizon_days) VALUES (?, ?, 'LONG', ?, ?, ?, 25)",
+        ("2026-05-11T15:30:00", "RVNL", 305.0, 290.0, 360.0),
+    )
+    sig_id = cur.lastrowid
+    conn.execute(
+        "INSERT INTO paper_trades (signal_id, ts_entry, entry_price, qty, "
+        "current_stop, atr_at_entry) VALUES (?, ?, ?, ?, ?, ?)",
+        (sig_id, "2026-05-12T09:15:00", 305.0, 32, 295.0, 8.4),
+    )
+    conn.commit()
+
+
+def _seed_matured_prediction(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        "INSERT INTO predictions (ts, symbol, predicted_return_pct, "
+        "predicted_horizon_days, actual_return_at_horizon, error_pct, "
+        "evaluated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("2026-04-10T15:30:00", "RVNL", 5.0, 25, 6.2, 1.2, "2026-05-15T16:00:00"),
+    )
+    conn.commit()
+
+
+def test_assemble_context_includes_open_trades(
+    conn: sqlite3.Connection, paths
+) -> None:
+    _seed_open_trade(conn)
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(candidates=[], holdings_health=[]),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "## Open paper-trades" in body
+    assert "RVNL" in body
+    assert "305.00" in body
+
+
+def test_assemble_context_pre_open_omits_matured_predictions(
+    conn: sqlite3.Connection, paths
+) -> None:
+    _seed_matured_prediction(conn)
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(candidates=[], holdings_health=[]),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "## Matured predictions" not in body
+
+
+def test_assemble_context_post_close_includes_matured_predictions(
+    conn: sqlite3.Connection, paths
+) -> None:
+    _seed_matured_prediction(conn)
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="post_close",
+        inputs=ContextInputs(candidates=[], holdings_health=[]),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "## Matured predictions" in body
+    assert "RVNL" in body
+    assert "5.00" in body
+    assert "6.20" in body

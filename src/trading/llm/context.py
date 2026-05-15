@@ -53,6 +53,9 @@ def assemble_context(
     parts.append(_render_macro(conn, as_of))
     parts.append(_render_candidates(conn, as_of, inputs.candidates))
     parts.append(_render_holdings_health(inputs.holdings_health))
+    parts.append(_render_open_trades(conn))
+    if mode == "post_close":
+        parts.append(_render_matured_predictions(conn, as_of))
 
     out_path.write_text("\n\n".join(parts) + "\n", encoding="utf-8")
     return out_path
@@ -170,3 +173,53 @@ def _render_holdings_health(rows: list[HealthScore]) -> str:
         for reason in h.reasons:
             blocks.append(f"- {reason}")
     return "\n".join(blocks)
+
+
+def _render_open_trades(conn: sqlite3.Connection) -> str:
+    rows = conn.execute(
+        "SELECT pt.id, s.symbol, pt.entry_price, pt.qty, pt.ts_entry, "
+        "pt.current_stop "
+        "FROM paper_trades pt JOIN signals s ON s.id = pt.signal_id "
+        "WHERE pt.ts_exit IS NULL ORDER BY pt.ts_entry"
+    ).fetchall()
+    if not rows:
+        return "## Open paper-trades\n\n_(no data)_"
+    out = [
+        "## Open paper-trades",
+        "",
+        "| symbol | entry | qty | entered | trailing stop |",
+        "|---|---|---|---|---|",
+    ]
+    for r in rows:
+        stop = f"{r['current_stop']:.2f}" if r["current_stop"] is not None else "—"
+        out.append(
+            f"| {r['symbol']} | {r['entry_price']:.2f} | {r['qty']} | "
+            f"{r['ts_entry'][:10]} | {stop} |"
+        )
+    return "\n".join(out)
+
+
+def _render_matured_predictions(conn: sqlite3.Connection, as_of: date) -> str:
+    rows = conn.execute(
+        "SELECT symbol, predicted_return_pct, actual_return_at_horizon, "
+        "error_pct, predicted_horizon_days "
+        "FROM predictions "
+        "WHERE evaluated_at IS NOT NULL AND substr(evaluated_at, 1, 10) = ? "
+        "ORDER BY symbol",
+        (as_of.isoformat(),),
+    ).fetchall()
+    if not rows:
+        return "## Matured predictions\n\n_(no data)_"
+    out = [
+        "## Matured predictions",
+        "",
+        "| symbol | predicted % | actual % | error % | horizon (d) |",
+        "|---|---|---|---|---|",
+    ]
+    for r in rows:
+        out.append(
+            f"| {r['symbol']} | {r['predicted_return_pct']:.2f} | "
+            f"{r['actual_return_at_horizon']:.2f} | "
+            f"{r['error_pct']:+.2f} | {r['predicted_horizon_days']} |"
+        )
+    return "\n".join(out)
