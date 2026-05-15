@@ -2,20 +2,27 @@
 
 from __future__ import annotations
 
+import json as _j
 import sqlite3
 from datetime import date
+from datetime import datetime as _dt
 from pathlib import Path
 
 import pytest
+from freezegun import freeze_time
 
 from tests.conftest import seed_kite_snapshot
 from trading.config import get_paths
+from trading.data.kite import Quote
 from trading.jobs.mid_day import (
+    MidDayAborted,
     MidDayResult,
+    _quotes_to_bars,
     gather_quote_symbols,
     run_mid_day,
 )
 from trading.store.migrations import run_migrations
+from trading.strategy.exits import Bar
 
 
 @pytest.fixture
@@ -96,3 +103,93 @@ def test_run_mid_day_prepare_writes_symbol_file(paths) -> None:
     assert body.split("\n") == ["COALINDIA", "RVNL", ""]
     assert result.update_path is None
     assert result.trades_evaluated == 0
+
+
+_QUOTE_ROW_RVNL = {
+    "instrument_token": 2445313,
+    "last_price": 280.0,           # below current_stop=295 → triggers EXIT_STOP
+    "volume": 100,
+    "open": 305.0, "high": 305.5, "low": 280.0, "close": 305.0,
+    "bid": 279.9, "ask": 280.1, "oi": None,
+    "upper_circuit_limit": None, "lower_circuit_limit": None,
+    "tradingsymbol": "RVNL",
+}
+
+
+def _write_quotes(paths, as_of, hhmm: str, rows: list) -> Path:
+    base = paths.raw_dir / as_of.isoformat()
+    base.mkdir(parents=True, exist_ok=True)
+    target = base / f"quotes_{hhmm}.json"
+    target.write_text(_j.dumps(rows), encoding="utf-8")
+    return target
+
+
+def test_quotes_to_bars_uses_last_price_as_close() -> None:
+    q = Quote(
+        instrument_token=1, last_price=395.25, volume=8123456,
+        open=396.30, high=397.10, low=393.80, close=396.30,
+        bid=395.20, ask=395.30, oi=None,
+        upper_circuit_limit=None, lower_circuit_limit=None,
+    )
+    bars = _quotes_to_bars({"NTPC": q})
+    assert bars["NTPC"] == Bar(
+        open=396.30, high=397.10, low=393.80, close=395.25,
+    )
+
+
+@freeze_time("2026-05-16T12:33:00")
+def test_run_mid_day_apply_closes_stop_hit_and_writes_markdown(paths) -> None:
+    from trading.store.db import get_conn
+    paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with get_conn(paths.db_path) as file_conn:
+        run_migrations(file_conn)
+        _seed_open_trade(file_conn, "RVNL")
+    _write_quotes(paths, date(2026, 5, 16), "1232", [_QUOTE_ROW_RVNL])
+    result = run_mid_day(date(2026, 5, 16), paths=paths, apply=True)
+    assert isinstance(result, MidDayResult)
+    assert result.quotes_capture_ts == _dt(2026, 5, 16, 12, 32)
+    assert result.bars_built == 1
+    assert result.trades_evaluated == 1
+    assert result.trades_closed == 1
+    assert result.trades_held == 0
+    # paper_trade is now closed
+    with get_conn(paths.db_path) as file_conn:
+        closed = file_conn.execute(
+            "SELECT exit_reason, exit_price FROM paper_trades WHERE ts_exit IS NOT NULL"
+        ).fetchone()
+    assert closed["exit_reason"] == "STOP"
+    assert closed["exit_price"] is not None
+    # markdown written
+    assert result.update_path is not None
+    body = result.update_path.read_text(encoding="utf-8")
+    assert "## Mid-day update" in body
+    assert "RVNL" in body
+    assert "EXIT_STOP" in body
+
+
+@freeze_time("2026-05-16T12:33:00")
+def test_run_mid_day_apply_aborts_when_quotes_missing(paths) -> None:
+    from trading.store.db import get_conn
+    paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with get_conn(paths.db_path) as file_conn:
+        run_migrations(file_conn)
+        _seed_open_trade(file_conn, "RVNL")
+    with pytest.raises(MidDayAborted) as exc:
+        run_mid_day(date(2026, 5, 16), paths=paths, apply=True)
+    assert "/kite-quotes-snapshot" in str(exc.value)
+
+
+@freeze_time("2026-05-16T12:33:00")
+def test_run_mid_day_apply_idempotent_on_rerun(paths) -> None:
+    from trading.store.db import get_conn
+    paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with get_conn(paths.db_path) as file_conn:
+        run_migrations(file_conn)
+        _seed_open_trade(file_conn, "RVNL")
+    _write_quotes(paths, date(2026, 5, 16), "1232", [_QUOTE_ROW_RVNL])
+    r1 = run_mid_day(date(2026, 5, 16), paths=paths, apply=True)
+    assert r1.trades_closed == 1
+    # Re-run: trade already closed → mtm_open_trades sees no open trades
+    r2 = run_mid_day(date(2026, 5, 16), paths=paths, apply=True)
+    assert r2.trades_evaluated == 0
+    assert r2.trades_closed == 0

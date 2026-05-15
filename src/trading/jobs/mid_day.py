@@ -14,10 +14,18 @@ from datetime import date, datetime
 from pathlib import Path
 
 from trading.config import Paths, get_paths
+from trading.data.kite import Quote
 from trading.data.kite_snapshot import KiteSnapshotMissingError, read_holdings
+from trading.data.quotes_snapshot import (
+    QuoteSnapshotMissingError,
+    QuoteSnapshotStaleError,
+    read_latest_quotes,
+)
+from trading.paper.mtm import MtmResult, mtm_open_trades
 from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
 from trading.store.repo import list_signals_by_date
+from trading.strategy.exits import Bar
 
 
 class MidDayAborted(RuntimeError):  # noqa: N818 — "Aborted" is a state
@@ -98,5 +106,104 @@ def run_mid_day(
                 warnings=warnings,
             )
 
-        # apply mode wired in Task 3
-        raise NotImplementedError("apply mode wired in Task 3")
+        # apply mode
+        try:
+            quotes, capture_ts = read_latest_quotes(p, as_of)
+        except (QuoteSnapshotMissingError, QuoteSnapshotStaleError) as e:
+            raise MidDayAborted(str(e)) from e
+
+        bars = _quotes_to_bars(quotes)
+        mtm_results = mtm_open_trades(conn, bars, as_of=capture_ts)
+
+        closed = sum(1 for r in mtm_results if r.action.startswith("EXIT_"))
+        held = sum(1 for r in mtm_results if r.action == "HOLD")
+        skipped = sum(1 for r in mtm_results if r.action == "SKIP")
+
+        update_dir = p.research_dir / as_of.isoformat()
+        update_dir.mkdir(parents=True, exist_ok=True)
+        update_path = update_dir / "mid_day_update.md"
+        update_path.write_text(
+            _render_mid_day_update(capture_ts, mtm_results),
+            encoding="utf-8",
+        )
+
+        return MidDayResult(
+            as_of=as_of,
+            quotes_capture_ts=capture_ts,
+            bars_built=len(bars),
+            trades_evaluated=len(mtm_results),
+            trades_closed=closed,
+            trades_held=held,
+            trades_skipped=skipped,
+            update_path=update_path,
+            symbols_path=None,
+            warnings=warnings,
+        )
+
+
+def _quotes_to_bars(quotes: dict[str, Quote]) -> dict[str, Bar]:
+    """Translate Quote → Bar. close = last_price (current LTP), NOT
+    quote.close (which is yesterday's close in Kite's convention).
+    """
+    return {
+        sym: Bar(
+            open=q.open, high=q.high, low=q.low, close=q.last_price,
+        )
+        for sym, q in quotes.items()
+    }
+
+
+def _render_mid_day_update(
+    capture_ts: datetime, results: list[MtmResult]
+) -> str:
+    closed = [r for r in results if r.action.startswith("EXIT_")]
+    held = [r for r in results if r.action == "HOLD"]
+    skipped = [r for r in results if r.action == "SKIP"]
+
+    lines = [
+        f"## Mid-day update — captured {capture_ts.isoformat(timespec='seconds')}",
+        "",
+        "| symbol | action | exit price | reason | new stop |",
+        "|---|---|---|---|---|",
+    ]
+    for r in results:
+        ep = f"{r.exit_price:.2f}" if r.exit_price is not None else "—"
+        ns = f"{r.new_stop:.2f}" if r.new_stop is not None else "—"
+        lines.append(
+            f"| {r.symbol} | {r.action} | {ep} | {r.reason or '—'} | {ns} |"
+        )
+    lines.append("")
+    lines.append(
+        f"{len(results)} open trades evaluated; "
+        f"{len(closed)} closed (EXIT_STOP/TARGET/TIME); "
+        f"{len(held)} held; "
+        f"{len(skipped)} skipped (no quote)."
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _main(  # pragma: no cover — manual entry
+    date_str: str,
+    apply: bool = False,
+) -> None:
+    """`python -m trading.jobs.mid_day <YYYY-MM-DD> [--apply]` entry."""
+    try:
+        result = run_mid_day(date.fromisoformat(date_str), apply=apply)
+    except MidDayAborted as e:
+        print(f"Mid-day aborted: {e}")
+        raise SystemExit(2) from e
+    if result.symbols_path:
+        print(f"wrote {result.symbols_path}")
+        print("Now run /kite-quotes-snapshot skill, then re-run with --apply")
+    if result.update_path:
+        print(f"wrote {result.update_path}")
+        print(
+            f"trades evaluated={result.trades_evaluated} "
+            f"closed={result.trades_closed} held={result.trades_held} "
+            f"skipped={result.trades_skipped}"
+        )
+
+
+if __name__ == "__main__":  # pragma: no cover
+    import typer
+    typer.run(_main)
