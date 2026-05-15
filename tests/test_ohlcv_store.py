@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pandas as pd
@@ -87,3 +88,54 @@ def test_list_symbols_returns_sorted(tmp_path: Path) -> None:
 def test_list_symbols_empty_when_dir_missing(tmp_path: Path) -> None:
     paths = get_paths(root=tmp_path)
     assert list_symbols(paths) == []
+
+
+def _df_with_trailing_nan(valid_rows: int = 3, nan_rows: int = 1) -> pd.DataFrame:
+    total = valid_rows + nan_rows
+    idx = pd.date_range("2025-01-01", periods=total, freq="B")
+    idx.name = "date"
+    closes = [100.0 + i for i in range(valid_rows)] + [float("nan")] * nan_rows
+    opens = [99.0 + i for i in range(valid_rows)] + [float("nan")] * nan_rows
+    highs = [101.0 + i for i in range(valid_rows)] + [float("nan")] * nan_rows
+    lows = [98.0 + i for i in range(valid_rows)] + [float("nan")] * nan_rows
+    vols = [1_000_000 + i for i in range(valid_rows)] + [5_000_000] * nan_rows
+    return pd.DataFrame(
+        {"open": opens, "high": highs, "low": lows, "close": closes, "volume": vols},
+        index=idx,
+    )
+
+
+def test_read_drops_trailing_nan_close_rows(tmp_path: Path) -> None:
+    paths = get_paths(root=tmp_path)
+    df = _df_with_trailing_nan(valid_rows=3, nan_rows=1)
+    write_ohlcv(df, "RECLTD", paths)
+    back = read_ohlcv("RECLTD", paths)
+    assert len(back) == 3
+    assert not math.isnan(back["close"].iloc[-1])
+
+
+def test_read_drops_multiple_trailing_nan_rows(tmp_path: Path) -> None:
+    paths = get_paths(root=tmp_path)
+    df = _df_with_trailing_nan(valid_rows=2, nan_rows=3)
+    write_ohlcv(df, "X", paths)
+    back = read_ohlcv("X", paths)
+    assert len(back) == 2
+
+
+def test_read_keeps_interior_nan_close(tmp_path: Path) -> None:
+    """Only TRAILING NaN-close rows are stripped — a NaN in the middle stays."""
+    paths = get_paths(root=tmp_path)
+    df = _df_with_trailing_nan(valid_rows=3, nan_rows=0)
+    df.iloc[1, df.columns.get_loc("close")] = float("nan")  # interior NaN
+    write_ohlcv(df, "Y", paths)
+    back = read_ohlcv("Y", paths)
+    assert len(back) == 3
+    assert math.isnan(back["close"].iloc[1])
+
+
+def test_read_all_nan_close_returns_empty(tmp_path: Path) -> None:
+    paths = get_paths(root=tmp_path)
+    df = _df_with_trailing_nan(valid_rows=0, nan_rows=3)
+    write_ohlcv(df, "Z", paths)
+    back = read_ohlcv("Z", paths)
+    assert len(back) == 0

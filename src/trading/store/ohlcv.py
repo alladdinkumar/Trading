@@ -47,16 +47,38 @@ def read_ohlcv(
     start: date | str | None = None,
     end: date | str | None = None,
 ) -> pd.DataFrame:
-    """Read a symbol's parquet, optionally filter by inclusive [start, end]."""
+    """Read a symbol's parquet, optionally filter by inclusive [start, end].
+
+    Trailing rows with NaN `close` (yfinance current-day stub) are dropped
+    before slicing.
+    """
     target = parquet_path(symbol, paths)
     if not target.is_file():
         raise FileNotFoundError(f"No parquet for {symbol} at {target}")
     df = pd.read_parquet(target)
+    df = _drop_trailing_nan_close(df)
     if start is not None:
         df = df.loc[pd.Timestamp(start) :]
     if end is not None:
         df = df.loc[: pd.Timestamp(end)]
     return df
+
+
+def _drop_trailing_nan_close(df: pd.DataFrame) -> pd.DataFrame:
+    """Strip trailing rows where `close` is NaN.
+
+    yfinance returns a row for the current trading day with NaN OHLC
+    before the day has closed. That stub row breaks downstream indicator
+    math (RSI/SMA propagate NaN), so we drop it here at the storage
+    boundary. Interior NaN rows are preserved — only trailing NaN-close
+    rows are stripped.
+    """
+    if df.empty:
+        return df
+    last_valid_idx = df["close"].last_valid_index()
+    if last_valid_idx is None:
+        return df.iloc[0:0]
+    return df.loc[:last_valid_idx]
 
 
 def list_symbols(paths: Paths) -> list[str]:
