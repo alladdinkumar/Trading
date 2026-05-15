@@ -19,7 +19,7 @@ from trading.config import Paths
 from trading.portfolio.health import HealthScore
 from trading.strategy.rules import Candidate
 
-Mode = Literal["pre_open", "post_close"]
+Mode = Literal["pre_open", "mid_day", "post_close"]
 
 
 @dataclass(frozen=True)

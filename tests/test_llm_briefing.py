@@ -147,3 +147,43 @@ def test_compile_brief_substitutes_placeholder_when_sector_missing(
     body = out.read_text(encoding="utf-8")
     assert "## Sector commentary" in body
     assert "_(sector commentary not yet wired — see Phase 12.6)_" in body
+
+
+def test_compile_brief_mid_day_appends_update_when_present(
+    tmp_path: Path,
+) -> None:
+    date_dir = tmp_path / "2026-05-16"
+    date_dir.mkdir()
+    _write_part(
+        date_dir, "_context.md",
+        "# Trading context bundle — 2026-05-16  (mode: pre_open)\n"
+        "\n## Today's candidates\n\n### RVNL — passes 9/10 rules\n",
+    )
+    _write_part(date_dir, "macro_brief.md", "Regime: NEUTRAL.\n")
+    _write_part(date_dir, "candidates/RVNL.md", "# RVNL — Conviction: HIGH\n")
+    _write_part(
+        date_dir, "mid_day_update.md",
+        "## Mid-day update — captured 2026-05-16T12:32:14\n\n"
+        "| symbol | action | ... |\n",
+    )
+    out = compile_brief(date_dir, mode="mid_day")
+    body = out.read_text(encoding="utf-8")
+    assert "## Mid-day update" in body
+    assert "12:32:14" in body
+
+
+def test_compile_brief_mid_day_skips_update_when_absent(
+    tmp_path: Path,
+) -> None:
+    date_dir = tmp_path / "2026-05-16"
+    date_dir.mkdir()
+    _write_part(
+        date_dir, "_context.md",
+        "# Trading context bundle — 2026-05-16  (mode: pre_open)\n"
+        "\n## Today's candidates\n\n### RVNL — passes 9/10 rules\n",
+    )
+    _write_part(date_dir, "macro_brief.md", "Regime: NEUTRAL.\n")
+    _write_part(date_dir, "candidates/RVNL.md", "# RVNL — Conviction: HIGH\n")
+    out = compile_brief(date_dir, mode="mid_day")
+    body = out.read_text(encoding="utf-8")
+    assert "Mid-day update" not in body

@@ -114,6 +114,13 @@ def compile_brief(date_dir: Path, *, mode: Mode | None = None) -> Path:
         body = (date_dir / "candidates" / f"{sym}.md").read_text(encoding="utf-8")
         sections.append("")
         sections.append(body.strip())
+
+    # Optional mid-day update (Phase 14.A): included when present, regardless of mode.
+    mid_day_path = date_dir / "mid_day_update.md"
+    if mid_day_path.is_file():
+        sections.append("")
+        sections.append(mid_day_path.read_text(encoding="utf-8").strip())
+
     if mode == "post_close":
         sections.append("")
         sections.append("## Post-close recap")
