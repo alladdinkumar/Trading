@@ -15,10 +15,12 @@ from datetime import date
 from pathlib import Path
 
 from trading.config import Paths, Settings, get_paths, get_settings
+from trading.data.macro import snapshot_and_classify
 from trading.features.regime import Regime
 from trading.llm.context import ContextInputs, assemble_context
 from trading.portfolio.health import HealthScore
 from trading.store.db import get_conn
+from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.strategy.rules import Candidate, passing
 
@@ -102,8 +104,14 @@ def run_pre_open(
 def _step_macro(
     conn: sqlite3.Connection, as_of: date, warnings: list[str]
 ) -> tuple[bool, Regime]:
-    """Stub — Task 2 wires snapshot_and_classify."""
-    return False, "NEUTRAL"
+    """Pull macro inputs, classify regime, upsert snapshot. Degrade on error."""
+    try:
+        snap, rr = snapshot_and_classify(as_of)
+    except Exception as e:  # pragma: no cover — defensive
+        warnings.append(f"macro snapshot failed: {e!s}")
+        return False, "NEUTRAL"
+    upsert_macro_snapshot(conn, snap)
+    return True, rr.regime
 
 
 def _step_news(

@@ -69,3 +69,58 @@ def test_run_pre_open_returns_result_with_bundle_path(
     assert result.bundle_path.is_file()
     assert result.candidates_passing == 0
     assert result.paper_trades_opened == 0
+
+
+from unittest.mock import patch
+
+from trading.data.macro import MacroSnapshot
+from trading.features.regime import RegimeResult
+from trading.jobs.pre_open import _step_macro
+
+
+def test_step_macro_writes_snapshot_and_returns_regime(
+    conn: sqlite3.Connection,
+) -> None:
+    snap = MacroSnapshot(
+        date=date(2026, 5, 15), sgx_nifty=None, dow_fut=None,
+        nasdaq_fut=None, sp500=None, usdinr=95.0, crude=None,
+        vix=18.0, us_10y=None, fii_flow_cr=200.0, dii_flow_cr=500.0,
+        regime="RISK_ON",
+    )
+    rr = RegimeResult(
+        regime="RISK_ON", composite_score=2,
+        vix_vote=1, futures_vote=0, fii_vote=1, usdinr_vote=0,
+        reasons=["VIX low", "FII positive"],
+    )
+    warnings: list[str] = []
+    with patch(
+        "trading.jobs.pre_open.snapshot_and_classify", return_value=(snap, rr)
+    ):
+        ok, regime = _step_macro(conn, date(2026, 5, 15), warnings)
+    assert ok is True
+    assert regime == "RISK_ON"
+    row = conn.execute(
+        "SELECT vix, regime FROM macro_snapshot WHERE date = ?",
+        ("2026-05-15",),
+    ).fetchone()
+    assert row is not None
+    assert row["vix"] == 18.0
+    assert row["regime"] == "RISK_ON"
+    assert warnings == []
+
+
+def test_step_macro_degrades_gracefully_on_fetch_error(
+    conn: sqlite3.Connection,
+) -> None:
+    warnings: list[str] = []
+    with patch(
+        "trading.jobs.pre_open.snapshot_and_classify",
+        side_effect=RuntimeError("yfinance down"),
+    ):
+        ok, regime = _step_macro(conn, date(2026, 5, 15), warnings)
+    assert ok is False
+    assert regime == "NEUTRAL"
+    assert any("macro" in w.lower() for w in warnings)
+    assert conn.execute(
+        "SELECT COUNT(*) FROM macro_snapshot"
+    ).fetchone()[0] == 0
