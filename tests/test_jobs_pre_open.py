@@ -186,3 +186,28 @@ def test_step_news_degrades_gracefully_on_fetch_error(
     assert inserted == 0
     assert rollups == 0
     assert any("news" in w.lower() for w in warnings)
+
+
+from trading.jobs.pre_open import _step_scan
+from trading.strategy.rules import Candidate, RuleResult
+
+
+def _candidate(symbol: str, n_passed: int) -> Candidate:
+    rules = tuple(
+        RuleResult(name=f"r{i}", passed=(i < n_passed), reason="")
+        for i in range(10)
+    )
+    return Candidate(
+        symbol=symbol, scan_date=date(2026, 5, 15),
+        close=100.0, rsi_14=40.0, sma_20=100.0, sma_50=100.0,
+        sma_200=100.0, atr_14=2.0, rules=rules,
+    )
+
+
+def test_step_scan_delegates_to_strategy(paths) -> None:
+    warnings: list[str] = []
+    fake = [_candidate("RVNL", 9), _candidate("NTPC", 7)]
+    with patch("trading.jobs.pre_open.scan", return_value=fake):
+        out = _step_scan(paths, date(2026, 5, 15), warnings)
+    assert out == fake
+    assert warnings == []

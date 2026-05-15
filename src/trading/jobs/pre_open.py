@@ -25,7 +25,7 @@ from trading.store.db import get_conn
 from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import insert_news_items
-from trading.strategy.rules import Candidate, passing
+from trading.strategy.rules import Candidate, ScanContext, passing, scan
 
 
 @dataclass(frozen=True)
@@ -142,8 +142,9 @@ def _step_news(
 def _step_scan(
     paths: Paths, as_of: date, warnings: list[str]
 ) -> list[Candidate]:
-    """Stub — Task 4 wires the scanner."""
-    return []
+    """Run Layer A scanner over the parquet universe."""
+    ctx = ScanContext(scan_date=as_of)
+    return scan(paths, as_of, ctx=ctx)
 
 
 def _step_portfolio(
