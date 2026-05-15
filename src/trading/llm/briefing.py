@@ -67,6 +67,17 @@ def compile_brief(date_dir: Path, *, mode: Mode | None = None) -> Path:
             "Missing analyst narrative files: " + ", ".join(missing)
         )
 
+    candidates_dir = date_dir / "candidates"
+    if candidates_dir.is_dir():
+        expected_syms = set(symbols)
+        for f in sorted(candidates_dir.iterdir()):
+            if f.suffix == ".md" and f.stem not in expected_syms:
+                print(
+                    f"warning: orphan candidate file {f.relative_to(date_dir)} "
+                    f"(symbol not in bundle) — skipped",
+                    file=sys.stderr,
+                )
+
     out_path = date_dir / "brief.md"
     sections: list[str] = [
         f"# Daily brief — {date_dir.name}",

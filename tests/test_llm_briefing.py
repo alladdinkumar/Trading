@@ -87,3 +87,41 @@ def test_compile_brief_pre_open_happy_path_snapshot(
     out = compile_brief(date_dir, mode="pre_open")
     assert out == date_dir / "brief.md"
     assert out.read_text(encoding="utf-8") == snapshot
+
+
+def test_compile_brief_warns_on_orphan_candidate_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    date_dir = tmp_path / "2026-05-15"
+    date_dir.mkdir()
+    _write_part(
+        date_dir, "_context.md",
+        "# Trading context bundle — 2026-05-15  (mode: pre_open)\n"
+        "\n## Today's candidates\n\n### RVNL — passes 9/10 rules\n",
+    )
+    _write_part(date_dir, "macro_brief.md", "x")
+    _write_part(date_dir, "sector_commentary.md", "x")
+    _write_part(date_dir, "candidates/RVNL.md", "# RVNL — Conviction: HIGH\n")
+    _write_part(date_dir, "candidates/IRCTC.md", "# IRCTC — Conviction: HIGH\n")
+    compile_brief(date_dir, mode="pre_open")
+    err = capsys.readouterr().err
+    assert "IRCTC.md" in err and "orphan" in err.lower()
+
+
+@freeze_time("2026-05-15T17:00:00")
+def test_compile_brief_post_close_includes_recap(
+    tmp_path: Path, snapshot
+) -> None:
+    date_dir = tmp_path / "2026-05-15"
+    date_dir.mkdir()
+    _write_part(
+        date_dir, "_context.md",
+        "# Trading context bundle — 2026-05-15  (mode: post_close)\n"
+        "\n## Today's candidates\n\n_(no data)_\n",
+    )
+    _write_part(date_dir, "macro_brief.md", "Regime closed at NEUTRAL.\n")
+    _write_part(date_dir, "sector_commentary.md", "PSU/Infra strong.\n")
+    _write_part(date_dir, "post_close_recap.md",
+        "Day's market: flat. Predictions averaged 1.2% error.\n")
+    out = compile_brief(date_dir, mode="post_close")
+    assert out.read_text(encoding="utf-8") == snapshot

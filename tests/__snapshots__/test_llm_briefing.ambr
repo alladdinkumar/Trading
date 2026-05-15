@@ -1,4 +1,22 @@
 # serializer version: 1
+# name: test_compile_brief_post_close_includes_recap
+  '''
+  # Daily brief — 2026-05-15
+  _Compiled at 2026-05-15T17:00:00 from 3 narrative parts._
+  
+  ## Macro
+  Regime closed at NEUTRAL.
+  
+  ## Sector commentary
+  PSU/Infra strong.
+  
+  ## Candidates
+  
+  ## Post-close recap
+  Day's market: flat. Predictions averaged 1.2% error.
+  
+  '''
+# ---
 # name: test_compile_brief_pre_open_happy_path_snapshot
   '''
   # Daily brief — 2026-05-15
