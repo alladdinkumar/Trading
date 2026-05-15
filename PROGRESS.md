@@ -31,14 +31,14 @@ Granular task tracker for the trading system build. Update as work completes.
 | 12 | LLM analyst | `[x]` |
 | 12.5 | Data quality cleanup | `[x]` |
 | 12.6 | Sector data | `[ ]` |
-| 13 | pre_open job (MVP ⭐) | `[ ]` |
+| 13 | pre_open job (MVP ⭐) | `[x]` |
 | 14 | mid_day + post_close jobs | `[ ]` |
 | 15 | Streamlit dashboard | `[ ]` |
 | 16 | LightGBM ranker (Layer B) | `[ ]` |
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 13 — pre_open job (MVP ⭐)_
+**Currently working on:** _Phase 14 — mid_day + post_close jobs_
 **Next up:** _Phase 12.6 — Sector data (deferred)_
 
 ---
@@ -232,13 +232,38 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 13 — pre_open job (E2E) ⭐ MVP milestone
 
-- [ ] 13.1 `src/trading/jobs/pre_open.py`: orchestrate phases 1-12 in correct dependency order
-- [ ] 13.2 Generate full daily markdown bundle in `data/research/YYYY-MM-DD/`
-- [ ] 13.3 Auto-log fired signals as paper-trades opened at next-day open price
-- [ ] 13.4 `scripts/pre_open.bat`: Windows launcher invoking `uv run python -m trading.jobs.pre_open`
-- [ ] 13.5 Integration test: full pre_open run on cached fixtures
-- [ ] 13.6 Manual smoke run on real data
-- [ ] 13.7 Update PROGRESS.md → commit `feat(jobs): pre_open end-to-end (MVP)`
+> Spec at [`docs/superpowers/specs/2026-05-15-phase-13-pre-open-design.md`](docs/superpowers/specs/2026-05-15-phase-13-pre-open-design.md).
+> Plan at [`docs/superpowers/plans/2026-05-15-phase-13-pre-open.md`](docs/superpowers/plans/2026-05-15-phase-13-pre-open.md).
+
+- [x] 13.1 `src/trading/jobs/pre_open.py`: `run_pre_open(as_of, ...)` orchestrator
+       + `PreOpenResult` dataclass + 6 private `_step_*` helpers (`_step_macro`
+       / `_step_news` / `_step_scan` / `_step_portfolio` / `_step_auto_open`
+       / `_step_assemble`). In-process invocation of every upstream phase
+       (1-12); each step degrades gracefully when its data source is
+       unavailable (yfinance down → empty macro; Kite token absent → empty
+       holdings; RSS down → no news inserted).
+- [x] 13.2 Bundle written to `data/research/YYYY-MM-DD/_context.md` via
+       Phase 12's `assemble_context`. CLI prints next-step instruction
+       (run `/analyst`, then `trading brief compile`). Re-runnable
+       safely — DB upserts + idempotent file writes.
+- [x] 13.3 Auto-log: `_step_auto_open` opens one paper-trade per all-pass
+       candidate at D-1's close (per spec §4.4 'limit order at close').
+       Position sizing per Phase 6 with regime multiplier from `_step_macro`.
+       `_already_opened_today` guard prevents duplicate paper-trades on
+       re-run for the same date.
+- [x] 13.4 `scripts/pre_open.bat` Windows launcher invoking
+       `uv run python -m trading.jobs.pre_open <date>`. Phase 17 will
+       wire this into Task Scheduler.
+- [x] 13.5 13 unit tests in `test_jobs_pre_open.py` (per-step + idempotency
+       + 1 end-to-end integration test on synthetic parquet) + 1 CLI
+       happy-path test. All offline / deterministic.
+- [x] 13.6 Manual smoke run on real data (2026-05-15): macro_written yes,
+       604 news inserted, 12 candidates evaluated, 0 passing (correction
+       day — every candidate fails uptrend), 0 paper-trades opened.
+       Bundle written cleanly with no NaN closes (Phase 12.5.1 working).
+       Idempotency confirmed on re-run.
+- [x] 13.7 PROGRESS.md updated → commit `feat(jobs): pre_open end-to-end
+       (MVP) (Phase 13)` and pushed to origin/main.
 
 ## Phase 14 — mid_day + post_close jobs
 
