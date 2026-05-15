@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from trading.llm.context import Mode
@@ -67,5 +68,28 @@ def compile_brief(date_dir: Path, *, mode: Mode | None = None) -> Path:
         )
 
     out_path = date_dir / "brief.md"
-    out_path.write_text("", encoding="utf-8")
+    sections: list[str] = [
+        f"# Daily brief — {date_dir.name}",
+        f"_Compiled at {datetime.now().isoformat(timespec='seconds')} from "
+        f"{len(expected)} narrative parts._",
+        "",
+        "## Macro",
+        (date_dir / "macro_brief.md").read_text(encoding="utf-8").strip(),
+        "",
+        "## Sector commentary",
+        (date_dir / "sector_commentary.md").read_text(encoding="utf-8").strip(),
+        "",
+        "## Candidates",
+    ]
+    for sym in symbols:
+        body = (date_dir / "candidates" / f"{sym}.md").read_text(encoding="utf-8")
+        sections.append("")
+        sections.append(body.strip())
+    if mode == "post_close":
+        sections.append("")
+        sections.append("## Post-close recap")
+        sections.append(
+            (date_dir / "post_close_recap.md").read_text(encoding="utf-8").strip()
+        )
+    out_path.write_text("\n".join(sections) + "\n", encoding="utf-8")
     return out_path

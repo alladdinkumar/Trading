@@ -1,0 +1,38 @@
+# serializer version: 1
+# name: test_compile_brief_pre_open_happy_path_snapshot
+  '''
+  # Daily brief — 2026-05-15
+  _Compiled at 2026-05-15T09:00:00 from 4 narrative parts._
+  
+  ## Macro
+  Regime is NEUTRAL. VIX 19.4.
+  
+  ## Sector commentary
+  PSU/Infra LEADING.
+  
+  ## Candidates
+  
+  # RVNL — Conviction: HIGH
+  
+  ## Bullish case
+  x
+  
+  ## Bearish case / risks
+  x
+  
+  ## Event risks in 25-day horizon
+  - 2026-05-22: results — x
+  
+  # NTPC — Conviction: MEDIUM
+  
+  ## Bullish case
+  y
+  
+  ## Bearish case / risks
+  y
+  
+  ## Event risks in 25-day horizon
+  - (none)
+  
+  '''
+# ---
