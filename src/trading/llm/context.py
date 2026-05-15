@@ -52,6 +52,7 @@ def assemble_context(
     parts.append(_render_header(as_of, mode))
     parts.append(_render_macro(conn, as_of))
     parts.append(_render_candidates(conn, as_of, inputs.candidates))
+    parts.append(_render_holdings_health(inputs.holdings_health))
 
     out_path.write_text("\n\n".join(parts) + "\n", encoding="utf-8")
     return out_path
@@ -151,3 +152,21 @@ def _render_news_for_symbol(
             cat = r["category"] or "—"
             out.append(f"  - {r['ts'][:10]} · [{cat}] {r['headline']} ({score})")
     return out
+
+
+def _render_holdings_health(rows: list[HealthScore]) -> str:
+    if not rows:
+        return "## Holdings health\n\n_(no data)_"
+    sorted_rows = sorted(rows, key=lambda h: (h.score, h.symbol))
+    blocks: list[str] = ["## Holdings health"]
+    for h in sorted_rows[:10]:
+        blocks.append("")
+        blocks.append(
+            f"### {h.symbol} — verdict {h.verdict} (score {h.score}/100, "
+            f"net votes {h.net_votes:+d}/{h.votes_cast})"
+        )
+        if h.pnl_pct is not None:
+            blocks.append(f"- unrealised P&L: {h.pnl_pct:+.2f}%")
+        for reason in h.reasons:
+            blocks.append(f"- {reason}")
+    return "\n".join(blocks)

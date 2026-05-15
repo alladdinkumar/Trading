@@ -10,6 +10,7 @@ import pytest
 
 from trading.config import get_paths
 from trading.llm.context import ContextInputs, assemble_context
+from trading.portfolio.health import HealthScore
 from trading.store.migrations import run_migrations
 from trading.strategy.rules import Candidate, RuleResult
 
@@ -162,3 +163,41 @@ def test_assemble_context_candidates_no_data_when_empty(
     body = out.read_text(encoding="utf-8")
     assert "## Today's candidates" in body
     assert body.count("_(no data)_") >= 1  # at least the candidates section
+
+
+def test_assemble_context_includes_holdings_health(
+    conn: sqlite3.Connection, paths
+) -> None:
+    health = HealthScore(
+        symbol="TATAPOWER",
+        verdict="TRIM",
+        score=22,
+        net_votes=-2,
+        votes_cast=8,
+        reasons=["below 200-DMA", "RSI 38", "dist to 52w high 28%"],
+        pnl_pct=-3.2,
+    )
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(candidates=[], holdings_health=[health]),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "## Holdings health" in body
+    assert "### TATAPOWER" in body
+    assert "TRIM" in body
+    assert "22/100" in body
+    assert "below 200-DMA" in body
+
+
+def test_assemble_context_holdings_health_no_data_when_empty(
+    conn: sqlite3.Connection, paths
+) -> None:
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(candidates=[], holdings_health=[]),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "## Holdings health" in body
+    assert "_(no data)_" in body
