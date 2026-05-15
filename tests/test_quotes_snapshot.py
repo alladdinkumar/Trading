@@ -88,3 +88,28 @@ def test_read_latest_quotes_empty_list_returns_empty_dict(paths) -> None:
     _seed_quotes(paths, date(2026, 5, 16), "1232", [])
     quotes, _ = read_latest_quotes(paths, date(2026, 5, 16))
     assert quotes == {}
+
+
+@freeze_time("2026-05-16T12:33:00")
+def test_read_latest_quotes_ignores_malformed_filenames(paths) -> None:
+    """quotes_2400.json should be ignored (invalid hour); valid one used."""
+    base = paths.raw_dir / "2026-05-16"
+    base.mkdir(parents=True, exist_ok=True)
+    # Malformed file — invalid hour. Should NOT match the tightened regex.
+    (base / "quotes_2400.json").write_text(json.dumps([_QUOTE_ROW]), encoding="utf-8")
+    # Valid file
+    (base / "quotes_1232.json").write_text(json.dumps([_QUOTE_ROW]), encoding="utf-8")
+    quotes, capture_ts = read_latest_quotes(paths, date(2026, 5, 16))
+    assert "NTPC" in quotes
+    assert capture_ts == datetime(2026, 5, 16, 12, 32)
+
+
+@freeze_time("2026-05-16T12:33:00")
+def test_read_latest_quotes_only_malformed_files_raises_missing(paths) -> None:
+    """If only malformed files exist, behave as if no snapshot file is present."""
+    base = paths.raw_dir / "2026-05-16"
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "quotes_2400.json").write_text("[]", encoding="utf-8")
+    (base / "quotes_9999.json").write_text("[]", encoding="utf-8")
+    with pytest.raises(QuoteSnapshotMissingError):
+        read_latest_quotes(paths, date(2026, 5, 16))

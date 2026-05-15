@@ -21,7 +21,7 @@ from typing import Any
 from trading.config import Paths
 from trading.data.kite import Quote
 
-_FILENAME_RE = re.compile(r"^quotes_(\d{4})\.json$")
+_FILENAME_RE = re.compile(r"^quotes_([01]\d|2[0-3])([0-5]\d)\.json$")
 
 
 class QuoteSnapshotMissingError(RuntimeError):
@@ -43,6 +43,9 @@ def read_latest_quotes(
     Returns (quotes_by_symbol, capture_ts). Raises:
       - QuoteSnapshotMissingError: no quotes_*.json present for the date
       - QuoteSnapshotStaleError: newest exists but capture > max_age_minutes ago
+
+    Note: tradingsymbol is popped from each row before splatting into Quote, so the
+    returned Quote objects use instrument_token for identity; symbol is the dict key only.
     """
     date_dir = paths.raw_dir / as_of.isoformat()
     if not date_dir.is_dir():
@@ -50,26 +53,26 @@ def read_latest_quotes(
             f"No quotes for {as_of.isoformat()} (directory absent: {date_dir}). "
             "Run /kite-quotes-snapshot skill in Claude Code first."
         )
-    candidates: list[tuple[str, Path]] = []
+    candidates: list[tuple[str, str, Path]] = []
     for f in date_dir.iterdir():
         m = _FILENAME_RE.match(f.name)
         if m:
-            candidates.append((m.group(1), f))
+            candidates.append((m.group(1), m.group(2), f))
     if not candidates:
         raise QuoteSnapshotMissingError(
             f"No quotes_HHMM.json files in {date_dir}. "
             "Run /kite-quotes-snapshot skill in Claude Code first."
         )
-    candidates.sort(key=lambda x: x[0])  # ascending HHMM
-    hhmm, target = candidates[-1]
+    candidates.sort(key=lambda x: (x[0], x[1]))  # ascending HH then MM
+    hh, mm, target = candidates[-1]
     capture_ts = datetime(
         as_of.year, as_of.month, as_of.day,
-        int(hhmm[:2]), int(hhmm[2:]),
+        int(hh), int(mm),
     )
     age = datetime.now() - capture_ts
     if age > timedelta(minutes=max_age_minutes):
         raise QuoteSnapshotStaleError(
-            f"Newest quotes snapshot is stale: captured at {hhmm[:2]}:{hhmm[2:]} "
+            f"Newest quotes snapshot is stale: captured at {hh}:{mm} "
             f"({int(age.total_seconds() // 60)} min ago, max {max_age_minutes}). "
             "Re-run /kite-quotes-snapshot skill."
         )
