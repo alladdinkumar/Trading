@@ -135,13 +135,19 @@ response shapes to the on-disk schema (§4).
 
 - `pre-open` command: drop `--skip-kite`. Wrap `run_pre_open` in a
   try/except for `PreOpenAborted` → print the message in red, exit 2.
+- `portfolio` command: drop SDK calls (`make_client`, `get_holdings`,
+  `get_gtts`). Read both via `kite_snapshot.read_holdings` and
+  `kite_snapshot.read_gtts`. On `KiteSnapshotMissingError` /
+  `KiteSnapshotStaleError` → print remediation, exit 2. The `--date`
+  option (currently absent) is added so users can re-run for a past
+  snapshot date.
 - `kite-login` command: rename to `kite-emergency-login`. Same
   behaviour. Help text starts "FALLBACK: …".
 - New `kite-emergency-snapshot --date YYYY-MM-DD` command: uses the
-  SDK wrapper to populate `data/raw/<as_of>/holdings.json` (and
-  optionally `gtts.json`) when MCP is broken. Writes the same JSON
-  shape and `_meta.json` with `source: "sdk-fallback"`. Help text
-  starts "FALLBACK: …".
+  SDK wrapper to populate `data/raw/<as_of>/holdings.json` AND
+  `gtts.json` when MCP is broken. Writes the same JSON shape and
+  `_meta.json` with `source: "sdk-fallback"`. Help text starts
+  "FALLBACK: …".
 
 ### 3.5 Unchanged
 
@@ -209,7 +215,7 @@ Single-user, local — fail loud, fix the cause.
 |------|----------|--------------|
 | `tests/test_kite_snapshot.py` (new) | `read_holdings/gtts/positions` happy path with stub JSONs in tmp_path; `KiteSnapshotMissingError` when file absent; `KiteSnapshotStaleError` when `_meta.snapshot_at` mismatches; empty-list snapshot returns `[]` cleanly; `Holding(**row)` shape preservation across the existing dataclass fields | ~8 |
 | `tests/test_jobs_pre_open.py` (modify) | Replace 3 existing `test_step_portfolio_*` tests. New: (a) reads stub holdings.json from tmp_path → returns scored Holdings; (b) raises `PreOpenAborted` when snapshot missing; (c) `run_pre_open` no longer accepts `skip_kite`. | net +1 |
-| `tests/test_cli.py` (modify) | Drop `--skip-kite` from the pre-open CLI happy-path test. Add 1 test for `kite-emergency-snapshot` (mocked SDK → JSON file written). Rename test for `kite-emergency-login`. | net +1 |
+| `tests/test_cli.py` (modify) | Drop `--skip-kite` from the pre-open CLI happy-path test. Add 1 test for `kite-emergency-snapshot` (mocked SDK → JSON file written). Rename test for `kite-emergency-login`. Update existing `portfolio` CLI test to seed stub holdings.json + gtts.json instead of mocking `make_client` / `get_holdings`. | net +1 |
 | `tests/test_kite.py` (unchanged) | Existing 15 SDK-wrapper tests stay — they cover the fallback path. | 0 change |
 | `tests/test_gtt.py` (unchanged) | Uses `GttOrder` dataclass which still lives in `data/kite.py`. | 0 change |
 
@@ -223,8 +229,9 @@ Phase 14, mirroring the layout used for Phase 12.5. Sub-tasks:
 - 13.5.1 `data/kite_snapshot.py` + reader functions + typed errors + tests
 - 13.5.2 `.claude/skills/kite-snapshot/SKILL.md` + MCP-call instructions + auth handling
 - 13.5.3 Rewrite `_step_portfolio` to use `kite_snapshot`; drop `--skip-kite`; add `PreOpenAborted` + CLI exit handling
-- 13.5.4 Rename `kite-login` → `kite-emergency-login`; add `kite-emergency-snapshot` CLI
-- 13.5.5 Real-data smoke (run /kite-snapshot, then trading pre-open) + PROGRESS.md + commit + push
+- 13.5.4 Rewire `trading portfolio` CLI to read snapshots instead of calling SDK
+- 13.5.5 Rename `kite-login` → `kite-emergency-login`; add `kite-emergency-snapshot` CLI
+- 13.5.6 Real-data smoke (run /kite-snapshot, then trading pre-open) + PROGRESS.md + commit + push
 
 Status snapshot table gets a new row: `| 13.5 | Kite MCP pivot | [x] |`.
 
