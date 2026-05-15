@@ -54,6 +54,7 @@ from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
+from trading.jobs.mid_day import MidDayAborted, run_mid_day
 from trading.jobs.pre_open import PreOpenAborted, run_pre_open
 from trading.llm.briefing import MissingNarrativeError, compile_brief
 from trading.llm.context import ContextInputs
@@ -1154,6 +1155,50 @@ def pre_open_cmd(
         f"[bold]Now run /analyst skill, then "
         f"`trading brief compile --date {date_str}`[/bold]"
     )
+
+
+@app.command("mid-day")
+def mid_day_cmd(
+    date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD")],
+    apply: Annotated[
+        bool,
+        typer.Option(
+            "--apply",
+            help="Apply mode: read quotes + run MTM. Without --apply runs prepare mode.",
+        ),
+    ] = False,
+) -> None:
+    """Phase 14.A — mid-day MTM. Two-phase: prepare → /kite-quotes-snapshot → apply."""
+    as_of = date.fromisoformat(date_str)
+    try:
+        result = run_mid_day(as_of, apply=apply)
+    except MidDayAborted as e:
+        console.print(f"[red]Mid-day aborted:[/red] {e}")
+        raise typer.Exit(code=2) from e
+
+    if result.symbols_path is not None:
+        console.print(f"[green]wrote[/green] {result.symbols_path}")
+        console.print(
+            "[bold]Now run /kite-quotes-snapshot skill in Claude Code, "
+            f"then `trading mid-day --date {date_str} --apply`[/bold]"
+        )
+        return
+
+    table = Table(title=f"mid-day {as_of.isoformat()}", show_header=True)
+    table.add_column("step")
+    table.add_column("count", justify="right")
+    table.add_row("quotes_captured_at", str(result.quotes_capture_ts))
+    table.add_row("bars_built", str(result.bars_built))
+    table.add_row("trades_evaluated", str(result.trades_evaluated))
+    table.add_row("trades_closed", str(result.trades_closed))
+    table.add_row("trades_held", str(result.trades_held))
+    table.add_row("trades_skipped", str(result.trades_skipped))
+    console.print(table)
+    if result.warnings:
+        console.print("[yellow]Warnings:[/yellow]")
+        for w in result.warnings:
+            console.print(f"  - {w}")
+    console.print(f"[green]wrote[/green] {result.update_path}")
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry
