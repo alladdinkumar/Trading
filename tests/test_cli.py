@@ -229,3 +229,53 @@ def test_scan_no_parquet_exits_1(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["scan"])
     assert result.exit_code == 1
     assert "ingest-history" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# Phase 12 — brief assemble-context / compile
+# ---------------------------------------------------------------------------
+
+
+def _init_db(tmp_path: Path) -> Path:
+    from trading.store.db import get_conn as _get_conn
+    from trading.store.migrations import run_migrations as _run_migrations
+    db_path = tmp_path / "data" / "app.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with _get_conn(db_path) as conn:
+        _run_migrations(conn)
+    return db_path
+
+
+def test_brief_assemble_context_writes_bundle(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+    result = runner.invoke(
+        app,
+        ["brief", "assemble-context", "--date", "2026-05-15", "--mode", "pre_open"],
+    )
+    assert result.exit_code == 0, result.stdout
+    out = tmp_path / "data" / "research" / "2026-05-15" / "_context.md"
+    assert out.is_file()
+    assert "now run /analyst" in result.stdout
+
+
+def test_brief_compile_assembles_brief(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+    date_dir = tmp_path / "data" / "research" / "2026-05-15"
+    date_dir.mkdir(parents=True)
+    (date_dir / "_context.md").write_text(
+        "# Trading context bundle — 2026-05-15  (mode: pre_open)\n"
+        "\n## Today's candidates\n\n_(no data)_\n",
+        encoding="utf-8",
+    )
+    (date_dir / "macro_brief.md").write_text("x\n", encoding="utf-8")
+    (date_dir / "sector_commentary.md").write_text("x\n", encoding="utf-8")
+    result = runner.invoke(
+        app, ["brief", "compile", "--date", "2026-05-15"]
+    )
+    assert result.exit_code == 0, result.stdout
+    assert (date_dir / "brief.md").is_file()
+    assert "brief.md" in result.stdout

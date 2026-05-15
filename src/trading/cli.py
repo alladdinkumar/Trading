@@ -44,6 +44,9 @@ from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
+from trading.llm.briefing import MissingNarrativeError, compile_brief
+from trading.llm.context import ContextInputs
+from trading.llm.context import assemble_context as _assemble_context
 from trading.paper.ledger import log_signal_and_open_trade, open_trades
 from trading.paper.mtm import build_bars_from_history, mtm_open_trades
 from trading.paper.reconcile import reconcile_day
@@ -995,6 +998,51 @@ def paper_reconcile_cmd(
                 f"[{c}]{u.error_pct:+.1f}[/{c}]",
             )
         console.print(pt)
+
+
+brief_app = typer.Typer(help="Daily-brief context assembly + compilation (Phase 12).")
+app.add_typer(brief_app, name="brief")
+
+
+@brief_app.command("assemble-context")
+def brief_assemble_context_cmd(
+    date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD")],
+    mode: Annotated[
+        str, typer.Option("--mode", help="pre_open or post_close")
+    ] = "pre_open",
+) -> None:
+    """Write data/research/YYYY-MM-DD/_context.md for the analyst skill."""
+    if mode not in ("pre_open", "post_close"):
+        console.print(f"[red]invalid --mode: {mode}[/red]")
+        raise typer.Exit(code=2)
+    as_of = date.fromisoformat(date_str)
+    paths = get_paths()
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        out = _assemble_context(
+            conn=conn,
+            paths=paths,
+            as_of=as_of,
+            mode=mode,  # type: ignore[arg-type]
+            inputs=ContextInputs(),
+        )
+    console.print(f"[green]wrote[/green] {out}")
+    console.print("[bold]now run /analyst skill in Claude Code[/bold]")
+
+
+@brief_app.command("compile")
+def brief_compile_cmd(
+    date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD")],
+) -> None:
+    """Concatenate analyst-produced narrative parts into brief.md."""
+    paths = get_paths()
+    date_dir = paths.research_dir / date_str
+    try:
+        out = compile_brief(date_dir)
+    except MissingNarrativeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
+    console.print(f"[green]wrote[/green] {out}")
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry
