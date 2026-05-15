@@ -78,7 +78,7 @@ def _drop_trailing_nan_close(df: pd.DataFrame) -> pd.DataFrame:
     last_valid_idx = df["close"].last_valid_index()
     if last_valid_idx is None:
         return df.iloc[0:0]
-    return df.loc[:last_valid_idx]
+    return df.loc[:last_valid_idx]  # type: ignore[misc]  # Hashable index slice
 
 
 def list_symbols(paths: Paths) -> list[str]:

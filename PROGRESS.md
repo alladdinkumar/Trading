@@ -29,6 +29,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 10 | Portfolio analyzer | `[x]` |
 | 11 | Paper-trade ledger | `[x]` |
 | 12 | LLM analyst | `[x]` |
+| 12.5 | Data quality cleanup | `[x]` |
+| 12.6 | Sector data | `[ ]` |
 | 13 | pre_open job (MVP ⭐) | `[ ]` |
 | 14 | mid_day + post_close jobs | `[ ]` |
 | 15 | Streamlit dashboard | `[ ]` |
@@ -37,7 +39,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
 **Currently working on:** _Phase 13 — pre_open job (MVP ⭐)_
-**Next up:** _Phase 14 — mid_day + post_close jobs_
+**Next up:** _Phase 12.6 — Sector data (deferred)_
 
 ---
 
@@ -185,6 +187,48 @@ Granular task tracker for the trading system build. Update as work completes.
 - [x] 12.5 N/A — cost tracking dropped (Claude Pro plan, no per-call cost).
 - [x] 12.6 PROGRESS.md updated → commit `feat(llm): analyst skill + briefing
        pipeline (Phase 12)` and pushed to origin/main.
+
+## Phase 12.5 — Data quality cleanup (pre-Phase-13 prep)
+
+> Surfaced by the Phase 12 real-data smoke (memory:
+> `project_data_quality_gaps_2026_05_15`). Spec at
+> [`docs/superpowers/specs/2026-05-15-phase-12-5-data-quality-design.md`](docs/superpowers/specs/2026-05-15-phase-12-5-data-quality-design.md).
+
+- [x] 12.5.1 `src/trading/store/ohlcv.py`: `_drop_trailing_nan_close` strips
+       yfinance's current-day NaN-OHLC stub row at the storage boundary;
+       interior NaN preserved. 4 new tests in `test_ohlcv_store.py`.
+       Smoke impact: COALINDIA jumped from 5/10-with-NaN to 8/10-clean
+       (now actually passes uptrend); RECLTD 7/10→9/10; IDFCFIRSTB and
+       MAZDOCK now appear in top 5.
+- [x] 12.5.2 `src/trading/llm/context.py`: `_render_news_for_symbol` SQL
+       caps `ts <= as_of end-of-day` so NSE event-calendar entries with
+       future event dates don't leak into "Recent headlines". 1 new test;
+       snapshots stayed valid (seeded data still in window).
+- [x] 12.5.3 Ran `trading ingest-news --date 2026-05-15` (without
+       `--skip-score`); 556 headlines scored. **Acceptance partial:**
+       only 1 sentiment_daily row written (JIOFIN), because alias-map
+       attribution covers only 6 of 1067 news_items, and event entries
+       are duplicated (ingest dedupe gap). Both flagged as Phase 13 prep
+       items (out of scope for 12.5 per spec §4).
+- [x] 12.5.4 `src/trading/llm/briefing.py`: split `expected_parts` into
+       `required_parts` + `optional_parts`; `compile_brief` substitutes
+       a hardcoded placeholder body for missing optional parts. SKILL.md
+       updated to mark sector_commentary as optional. 4 new tests +
+       1 updated; snapshots unchanged (parts_count arithmetic identical).
+- [x] 12.5.5 Real-data smoke confirms candidate section now shows real
+       closes/SMAs (no NaN), no future-dated headline leakage, and the
+       sector_commentary placeholder substitutes cleanly when absent.
+       Suite **449 passed**, 1 skipped (live), ruff + mypy clean.
+       Commit `feat(data): Phase 12.5 quality fixes` pushed to origin/main.
+
+## Phase 12.6 — Sector data (deferred)
+
+- [ ] 12.6.1 Spec the `data/sector.py` module (NSE sectoral indices via
+       nsepython/yfinance, 5d/20d/60d relative strength vs Nifty 200).
+- [ ] 12.6.2 Implement + persist into `sector_daily` table.
+- [ ] 12.6.3 Wire into `assemble_context` (replace placeholder).
+- [ ] 12.6.4 CLI: `trading sector --date YYYY-MM-DD`.
+- [ ] 12.6.5 Tests + smoke + commit.
 
 ## Phase 13 — pre_open job (E2E) ⭐ MVP milestone
 
