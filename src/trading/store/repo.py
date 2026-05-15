@@ -46,7 +46,12 @@ class Signal:
 
 @dataclass(frozen=True)
 class PaperTrade:
-    """A paper-traded position. `ts_exit` is None while the trade is open."""
+    """A paper-traded position. `ts_exit` is None while the trade is open.
+
+    `current_stop` and `atr_at_entry` (added in schema v2) carry the
+    trailing-stop state across MTM runs; `current_stop` initialises to
+    the signal's stop at trade open and ratchets up via exits.evaluate_exit.
+    """
 
     id: int | None
     signal_id: int
@@ -59,6 +64,8 @@ class PaperTrade:
     pnl: float | None = None
     pnl_pct: float | None = None
     days_held: int | None = None
+    current_stop: float | None = None
+    atr_at_entry: float | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +106,7 @@ def _row_to_signal(row: sqlite3.Row) -> Signal:
 
 
 def _row_to_paper_trade(row: sqlite3.Row) -> PaperTrade:
+    keys = row.keys()
     return PaperTrade(
         id=row["id"],
         signal_id=row["signal_id"],
@@ -111,6 +119,8 @@ def _row_to_paper_trade(row: sqlite3.Row) -> PaperTrade:
         pnl=row["pnl"],
         pnl_pct=row["pnl_pct"],
         days_held=row["days_held"],
+        current_stop=row["current_stop"] if "current_stop" in keys else None,
+        atr_at_entry=row["atr_at_entry"] if "atr_at_entry" in keys else None,
     )
 
 
@@ -184,8 +194,9 @@ def insert_paper_trade(conn: sqlite3.Connection, trade: PaperTrade) -> int:
         """
         INSERT INTO paper_trades (
           signal_id, ts_entry, entry_price, qty,
-          ts_exit, exit_price, exit_reason, pnl, pnl_pct, days_held
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ts_exit, exit_price, exit_reason, pnl, pnl_pct, days_held,
+          current_stop, atr_at_entry
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             trade.signal_id,
@@ -198,11 +209,30 @@ def insert_paper_trade(conn: sqlite3.Connection, trade: PaperTrade) -> int:
             trade.pnl,
             trade.pnl_pct,
             trade.days_held,
+            trade.current_stop,
+            trade.atr_at_entry,
         ),
     )
     rowid = cur.lastrowid
     assert rowid is not None
     return rowid
+
+
+def update_trailing_state(
+    conn: sqlite3.Connection,
+    trade_id: int,
+    *,
+    current_stop: float,
+    days_held: int,
+) -> None:
+    """Bump trailing stop + days_held without closing the trade.
+
+    Called by MTM when `evaluate_exit` returns HOLD with a ratcheted stop.
+    """
+    conn.execute(
+        "UPDATE paper_trades SET current_stop = ?, days_held = ? WHERE id = ?",
+        (current_stop, days_held, trade_id),
+    )
 
 
 def close_paper_trade(

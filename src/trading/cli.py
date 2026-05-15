@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from dataclasses import asdict
 from datetime import date, datetime
@@ -43,6 +44,9 @@ from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
+from trading.paper.ledger import log_signal_and_open_trade, open_trades
+from trading.paper.mtm import build_bars_from_history, mtm_open_trades
+from trading.paper.reconcile import reconcile_day
 from trading.portfolio.gtt import project_all_gtts
 from trading.portfolio.health import (
     HoldingContext,
@@ -55,6 +59,7 @@ from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import get_sentiment_daily, insert_news_items
 from trading.store.ohlcv import list_symbols, parquet_path, read_ohlcv, write_ohlcv
+from trading.store.repo import Signal, get_signal
 from trading.strategy.rules import ScanContext, passing, scan
 
 app = typer.Typer(help="Trading — research and paper-trading CLI.", add_completion=False)
@@ -757,6 +762,239 @@ def _render_portfolio_report(health_rows: list, viabilities: list) -> str:  # ty
             f"| {v.symbol} | {trigger} | {last} | {prob} | {days} | {v.note or ''} |"
         )
     return "\n".join(lines) + "\n"
+
+
+@app.command("paper-open")
+def paper_open_cmd(
+    symbol: Annotated[str, typer.Option("--symbol", "-s", help="NSE ticker.")],
+    entry: Annotated[float, typer.Option(help="Entry price (Rs).")],
+    stop: Annotated[float, typer.Option(help="Initial stop price (Rs).")],
+    target: Annotated[float, typer.Option(help="Target price (Rs).")],
+    qty: Annotated[int, typer.Option(help="Position quantity.")],
+    horizon: Annotated[int, typer.Option(help="Horizon in trading days.")] = 15,
+    atr: Annotated[float, typer.Option("--atr", help="ATR at entry (for trailing).")] = 0.0,
+    rationale: Annotated[str, typer.Option(help="One-line rationale.")] = "manual entry",
+) -> None:
+    """Manually log a signal and open a paper trade — ad-hoc seeding."""
+    paths = get_paths()
+    signal = Signal(
+        id=None,
+        ts=datetime.now().isoformat(),
+        symbol=symbol.upper(),
+        side="LONG",
+        entry=entry,
+        stop=stop,
+        target=target,
+        horizon_days=horizon,
+        rationale=rationale,
+        created_by="manual",
+    )
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        result = log_signal_and_open_trade(
+            conn,
+            signal=signal,
+            entry_ts=datetime.now(),
+            entry_price=entry,
+            qty=qty,
+            atr_at_entry=atr,
+        )
+    console.print(
+        f"[green]Opened paper trade[/green] id={result.paper_trade_id} "
+        f"(signal {result.signal_id}, prediction {result.prediction_id}) "
+        f"on {symbol.upper()} @ Rs {entry:,.2f}, qty {qty}, stop Rs {stop:,.2f}, target Rs {target:,.2f}"
+    )
+
+
+@app.command("paper-mtm")
+def paper_mtm_cmd(
+    as_of: Annotated[
+        str | None,
+        typer.Option("--date", help="MTM date (YYYY-MM-DD). Defaults to today."),
+    ] = None,
+) -> None:
+    """Run MTM against parquet bars for the given date."""
+    paths = get_paths()
+    target_date = date.fromisoformat(as_of) if as_of else date.today()
+    target_dt = datetime.combine(target_date, datetime.min.time().replace(hour=15, minute=30))
+
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        trades = open_trades(conn)
+        if not trades:
+            console.print("[yellow]No open paper trades.[/yellow]")
+            return
+        symbols = set()
+        for t in trades:
+            sig = get_signal(conn, t.signal_id)
+            if sig is not None:
+                symbols.add(sig.symbol)
+        histories = {}
+        for sym in symbols:
+            with contextlib.suppress(FileNotFoundError):
+                histories[sym] = read_ohlcv(sym, paths)
+        bars = build_bars_from_history(histories, target_dt)
+        results = mtm_open_trades(conn, bars, as_of=target_dt)
+
+    table = Table(title=f"MTM for {target_date}", show_header=True, header_style="bold")
+    table.add_column("Trade")
+    table.add_column("Symbol")
+    table.add_column("Action")
+    table.add_column("New stop", justify="right")
+    table.add_column("Exit price", justify="right")
+    table.add_column("Reason")
+    color = {
+        "HOLD": "green", "EXIT_TARGET": "green",
+        "EXIT_STOP": "red", "EXIT_TIME": "yellow", "SKIP": "yellow",
+    }
+    for r in results:
+        c = color.get(r.action, "white")
+        new_stop = f"{r.new_stop:.2f}" if r.new_stop is not None else "-"
+        exit_p = f"{r.exit_price:.2f}" if r.exit_price is not None else "-"
+        table.add_row(
+            str(r.paper_trade_id),
+            r.symbol,
+            f"[bold {c}]{r.action}[/bold {c}]",
+            new_stop,
+            exit_p,
+            r.reason,
+        )
+    console.print(table)
+    n_closed = sum(1 for r in results if r.action.startswith("EXIT_"))
+    n_hold = sum(1 for r in results if r.action == "HOLD")
+    n_skip = sum(1 for r in results if r.action == "SKIP")
+    console.print(
+        f"\n[bold]{n_closed} closed[/bold] · {n_hold} held · {n_skip} skipped"
+    )
+
+
+@app.command("paper-status")
+def paper_status_cmd() -> None:
+    """Show open paper trades + most-recent closes + portfolio snapshot."""
+    paths = get_paths()
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        opens = open_trades(conn)
+        closed_rows = conn.execute(
+            """SELECT pt.*, s.symbol FROM paper_trades pt
+               JOIN signals s ON s.id = pt.signal_id
+               WHERE pt.ts_exit IS NOT NULL
+               ORDER BY pt.ts_exit DESC LIMIT 10"""
+        ).fetchall()
+        snap_row = conn.execute(
+            "SELECT * FROM portfolio_snapshots ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+
+    # Open trades
+    if opens:
+        table = Table(title="Open paper trades", show_header=True, header_style="bold")
+        table.add_column("Trade")
+        table.add_column("Symbol")
+        table.add_column("Entry", justify="right")
+        table.add_column("Qty", justify="right")
+        table.add_column("Stop (curr)", justify="right")
+        table.add_column("Days", justify="right")
+        for t in opens:
+            sig = get_signal(conn, t.signal_id)
+            sym = sig.symbol if sig else "?"
+            curr_stop = t.current_stop if t.current_stop is not None else (sig.stop if sig else 0)
+            table.add_row(
+                str(t.id), sym, f"{t.entry_price:.2f}", str(t.qty),
+                f"{curr_stop:.2f}", str(t.days_held or 0),
+            )
+        console.print(table)
+    else:
+        console.print("[yellow]No open paper trades.[/yellow]")
+
+    # Recent closes
+    if closed_rows:
+        rt = Table(title="Recent closes (last 10)", show_header=True, header_style="bold")
+        rt.add_column("Symbol")
+        rt.add_column("Exit", justify="right")
+        rt.add_column("Qty", justify="right")
+        rt.add_column("Reason")
+        rt.add_column("P&L %", justify="right")
+        rt.add_column("Days", justify="right")
+        for r in closed_rows:
+            pnl_pct = r["pnl_pct"] if r["pnl_pct"] is not None else 0.0
+            c = "green" if pnl_pct >= 0 else "red"
+            rt.add_row(
+                r["symbol"],
+                f"{r['exit_price']:.2f}" if r["exit_price"] is not None else "-",
+                str(r["qty"]),
+                r["exit_reason"] or "-",
+                f"[{c}]{pnl_pct:+.1f}%[/{c}]",
+                str(r["days_held"] or 0),
+            )
+        console.print(rt)
+
+    # Snapshot
+    if snap_row:
+        console.print(
+            f"\n[bold]Latest snapshot ({snap_row['date']})[/bold]: "
+            f"cash Rs {snap_row['cash']:,.0f}, "
+            f"equity Rs {snap_row['equity']:,.0f}, "
+            f"drawdown {snap_row['drawdown_pct']:.2f}%"
+            if snap_row['drawdown_pct'] is not None
+            else f"\n[bold]Latest snapshot ({snap_row['date']})[/bold]: "
+                 f"cash Rs {snap_row['cash']:,.0f}, equity Rs {snap_row['equity']:,.0f}"
+        )
+
+
+@app.command("paper-reconcile")
+def paper_reconcile_cmd(
+    as_of: Annotated[
+        str | None,
+        typer.Option("--date", help="Reconcile date (YYYY-MM-DD). Defaults to today."),
+    ] = None,
+    cash: Annotated[
+        float,
+        typer.Option(help="Paper-cash balance to record on the snapshot."),
+    ] = 100_000.0,
+) -> None:
+    """Evaluate matured predictions + write today's portfolio_snapshots row."""
+    paths = get_paths()
+    target_date = date.fromisoformat(as_of) if as_of else date.today()
+    target_dt = datetime.combine(target_date, datetime.min.time().replace(hour=15, minute=30))
+
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        # Build bars from parquet for any open positions (used for both MTM
+        # of equity and the bar-path of matured predictions).
+        trades = open_trades(conn)
+        symbols = set()
+        for t in trades:
+            sig = get_signal(conn, t.signal_id)
+            if sig is not None:
+                symbols.add(sig.symbol)
+        histories = {}
+        for sym in symbols:
+            with contextlib.suppress(FileNotFoundError):
+                histories[sym] = read_ohlcv(sym, paths)
+        bars = build_bars_from_history(histories, target_dt)
+        result = reconcile_day(conn, as_of=target_date, cash=cash, bars=bars)
+
+    console.print(
+        f"[green]Reconciled {target_date}[/green]: "
+        f"equity Rs {result.snapshot.equity:,.0f}, "
+        f"drawdown {result.snapshot.drawdown_pct or 0:.2f}%, "
+        f"{len(result.prediction_updates)} prediction(s) matured."
+    )
+    if result.prediction_updates:
+        pt = Table(title="Matured predictions", show_header=True, header_style="bold")
+        pt.add_column("Symbol")
+        pt.add_column("Predicted %", justify="right")
+        pt.add_column("Actual %", justify="right")
+        pt.add_column("Error %", justify="right")
+        for u in result.prediction_updates:
+            c = "green" if u.error_pct >= 0 else "red"
+            pt.add_row(
+                u.symbol,
+                f"{u.predicted_return_pct:+.1f}",
+                f"{u.actual_return_pct:+.1f}",
+                f"[{c}]{u.error_pct:+.1f}[/{c}]",
+            )
+        console.print(pt)
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry

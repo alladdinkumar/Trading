@@ -52,9 +52,9 @@ def test_schema_version_row_recorded(tmp_path: Path) -> None:
         rows = conn.execute(
             "SELECT version, applied_at FROM schema_version ORDER BY version"
         ).fetchall()
-    assert len(rows) == 1
-    assert rows[0]["version"] == 1
-    assert rows[0]["applied_at"]  # truthy ISO string
+    assert len(rows) == CURRENT_VERSION
+    assert [r["version"] for r in rows] == list(range(1, CURRENT_VERSION + 1))
+    assert all(r["applied_at"] for r in rows)
 
 
 def test_run_migrations_is_idempotent(tmp_path: Path) -> None:
@@ -64,7 +64,8 @@ def test_run_migrations_is_idempotent(tmp_path: Path) -> None:
         run_migrations(conn)
         run_migrations(conn)
         rows = conn.execute("SELECT COUNT(*) AS n FROM schema_version").fetchone()
-    assert rows["n"] == 1
+    # Each version applies exactly once across re-runs.
+    assert rows["n"] == CURRENT_VERSION
 
 
 def test_signals_side_check_constraint(tmp_path: Path) -> None:

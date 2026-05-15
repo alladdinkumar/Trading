@@ -330,7 +330,7 @@ def test_technicals_from_history_skips_trailing_nan_close() -> None:
     df = _history(n=300)
     # Add an empty bar at the end (close=NaN), as if today's bar isn't done
     next_day = df.index[-1] + pd.Timedelta(days=1)
-    df.loc[next_day] = {col: np.nan for col in df.columns}
+    df.loc[next_day] = dict.fromkeys(df.columns, np.nan)
     snap = technicals_from_history(df)
     assert snap.above_200dma is not None  # not skipped
     assert snap.dist_to_52w_high_pct is not None

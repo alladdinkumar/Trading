@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-CURRENT_VERSION = 1
+CURRENT_VERSION = 2
 
 
 SCHEMA_V1 = """
@@ -210,6 +210,17 @@ CREATE INDEX IF NOT EXISTS idx_event_calendar_date ON event_calendar(event_date)
 """
 
 
+# v2: persist trailing-stop state on paper_trades so MTM can ratchet
+# across daily runs without re-deriving from history. `current_stop`
+# initialises from signals.stop at trade open; `atr_at_entry` is fixed
+# (used by strategy.exits._trail_new_stop's ATR-based trail). Both
+# nullable so legacy rows can be skipped (or migrated) gracefully.
+SCHEMA_V2 = """
+ALTER TABLE paper_trades ADD COLUMN current_stop  REAL;
+ALTER TABLE paper_trades ADD COLUMN atr_at_entry  REAL;
+"""
+
+
 def _current_db_version(conn: sqlite3.Connection) -> int:
     """Return the highest applied version, or 0 if schema_version doesn't exist yet."""
     row = conn.execute(
@@ -234,5 +245,11 @@ def run_migrations(conn: sqlite3.Connection) -> int:
         conn.execute(
             "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
             (1, datetime.now(UTC).isoformat()),
+        )
+    if current < 2:
+        conn.executescript(SCHEMA_V2)
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (2, datetime.now(UTC).isoformat()),
         )
     return CURRENT_VERSION
