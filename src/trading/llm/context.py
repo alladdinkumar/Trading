@@ -123,11 +123,15 @@ def _render_news_for_symbol(
 ) -> list[str]:
     """Last 7 days of headlines + sentiment_daily summary + critical flag."""
     cutoff = (as_of - timedelta(days=7)).isoformat()
+    # Cap upper bound at as_of end-of-day. NSE event-calendar entries arrive
+    # in news_items with their *future* event date as ts; long-term home is
+    # the event_calendar table (Phase 13 prep).
+    upper = as_of.isoformat() + "T23:59:59"
     rows = conn.execute(
         "SELECT ts, headline, sentiment, category, is_critical "
-        "FROM news_items WHERE symbol = ? AND ts >= ? "
+        "FROM news_items WHERE symbol = ? AND ts >= ? AND ts <= ? "
         "ORDER BY ts DESC LIMIT 5",
-        (symbol, cutoff),
+        (symbol, cutoff, upper),
     ).fetchall()
     sd = conn.execute(
         "SELECT score_7d, news_count, negative_news_count, has_critical "

@@ -308,3 +308,33 @@ def test_full_post_close_bundle_snapshot(
         inputs=ContextInputs(candidates=[], holdings_health=[]),
     )
     assert out.read_text(encoding="utf-8") == snapshot
+
+
+def test_assemble_context_excludes_future_dated_news(
+    conn: sqlite3.Connection, paths
+) -> None:
+    """NSE event-calendar entries arrive with future ts and must not leak."""
+    # Past headline (within 7d window)
+    conn.execute(
+        "INSERT INTO news_items (ts, symbol, source, headline, url, "
+        "sentiment, category, is_critical) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("2026-05-13T10:00:00", "RVNL", "moneycontrol",
+         "Past RVNL story", "https://example.com/p", 0.3, "results", 0),
+    )
+    # Future headline (NSE event scheduled for next week)
+    conn.execute(
+        "INSERT INTO news_items (ts, symbol, source, headline, url, "
+        "sentiment, category, is_critical) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("2026-05-21T15:00:00", "RVNL", "nse_events",
+         "RVNL: Financial Results on 21-May-2026", "https://nse.example", None, None, 0),
+    )
+    conn.commit()
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(candidates=[_candidate("RVNL", n_passed=9)],
+                             holdings_health=[]),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "Past RVNL story" in body
+    assert "Financial Results on 21-May-2026" not in body
