@@ -27,8 +27,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 8 | News + sentiment | `[x]` |
 | 9 | Macro + regime | `[x]` |
 | 10 | Portfolio analyzer | `[x]` |
-| 11 | Paper-trade ledger | `[ ]` |
-| 12 | LLM analyst | `[ ]` |
+| 11 | Paper-trade ledger | `[x]` |
+| 12 | LLM analyst | `[x]` |
 | 13 | pre_open job (MVP ⭐) | `[ ]` |
 | 14 | mid_day + post_close jobs | `[ ]` |
 | 15 | Streamlit dashboard | `[ ]` |
@@ -36,8 +36,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 11 — Paper-trade ledger_
-**Next up:** _Phase 12 — LLM analyst_
+**Currently working on:** _Phase 13 — pre_open job (MVP ⭐)_
+**Next up:** _Phase 14 — mid_day + post_close jobs_
 
 ---
 
@@ -148,20 +148,43 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 11 — Paper-trade ledger
 
-- [ ] 11.1 `src/trading/paper/ledger.py`: `log_signal`, `open_trade`, `close_trade`, `list_open`, `mark_to_market`
-- [ ] 11.2 `src/trading/paper/mtm.py`: pulls live LTP via Kite, applies exit logic, writes closes
-- [ ] 11.3 `src/trading/paper/reconcile.py`: daily P&L; predicted vs actual accuracy
-- [ ] 11.4 Tests: full lifecycle in-memory SQLite
-- [ ] 11.5 Update PROGRESS.md → commit `feat(paper): ledger + MTM`
+- [x] 11.1 `src/trading/paper/ledger.py`: `log_signal`, `open_trade`, `close_trade`, `list_open`, `mark_to_market`
+- [x] 11.2 `src/trading/paper/mtm.py`: pulls live LTP via Kite, applies exit logic, writes closes
+- [x] 11.3 `src/trading/paper/reconcile.py`: daily P&L; predicted vs actual accuracy
+- [x] 11.4 Tests: full lifecycle in-memory SQLite
+- [x] 11.5 Update PROGRESS.md → commit `feat(paper): ledger + MTM + reconcile — Phase 11`
 
-## Phase 12 — LLM analyst
+## Phase 12 — LLM analyst (Claude Code skill version)
 
-- [ ] 12.1 `src/trading/llm/client.py`: anthropic SDK wrapper with retry, prompt caching, model selection (Haiku 4.5 / Sonnet 4.6)
-- [ ] 12.2 `src/trading/llm/prompts.py`: prompt builders for macro brief, per-stock narrative, post-close recap, sector commentary
-- [ ] 12.3 `src/trading/llm/briefing.py`: assembles full daily markdown brief from prompts + outputs
-- [ ] 12.4 Tests: mocked anthropic client; prompt-template snapshot tests (syrupy)
-- [ ] 12.5 Cost tracking: log token usage per session for budget visibility
-- [ ] 12.6 Update PROGRESS.md → commit `feat(llm): analyst pipeline`
+> **Spec deviation:** the original Anthropic-SDK plan was replaced by a
+> project-level Claude Code skill (`/analyst`). User has Claude Pro plan
+> but no API credits — paying twice for the same model wasn't worth it.
+> Full rationale and design in
+> [`docs/superpowers/specs/2026-05-15-phase-12-llm-skill-design.md`](docs/superpowers/specs/2026-05-15-phase-12-llm-skill-design.md).
+
+- [x] 12.1 `src/trading/llm/context.py`: `ContextInputs` dataclass +
+       `assemble_context(conn, paths, as_of, mode, inputs)` writes
+       `_context.md` from DB (`macro_snapshot` / `sentiment_daily` /
+       `news_items` / `paper_trades` / `predictions`) + ephemeral inputs
+       (`candidates` from scanner, `holdings_health` from portfolio analyzer).
+       Pure renderer; mode-conditional matured-predictions section. Empty
+       sources render as `_(no data)_` so the skill flags gaps explicitly.
+- [x] 12.2 `.claude/skills/analyst/SKILL.md` + `references/output-templates.md`:
+       project-level skill that reads `_context.md`, refuses if stale > 12 h,
+       writes `macro_brief.md`, `sector_commentary.md`,
+       `candidates/{SYMBOL}.md`, and (post_close) `post_close_recap.md`.
+- [x] 12.3 `src/trading/llm/briefing.py`: `compile_brief(date_dir, mode)` +
+       `expected_parts(mode, candidate_symbols)` + `MissingNarrativeError`.
+       Concatenates parts into `brief.md` in fixed order; orphan candidate
+       files printed to stderr as warnings.
+- [x] 12.4 21 new tests across `test_llm_context.py` (12 — per-section
+       populated/empty + 2 syrupy bundle snapshots), `test_llm_briefing.py`
+       (6 — `expected_parts` for both modes, missing-parts raise, orphan
+       warning, 2 syrupy compile snapshots), `test_cli.py` (2 happy-path).
+       Suite **442 passed**, 1 skipped, 1 warning.
+- [x] 12.5 N/A — cost tracking dropped (Claude Pro plan, no per-call cost).
+- [x] 12.6 PROGRESS.md updated → commit `feat(llm): analyst skill + briefing
+       pipeline (Phase 12)` and pushed to origin/main.
 
 ## Phase 13 — pre_open job (E2E) ⭐ MVP milestone
 
