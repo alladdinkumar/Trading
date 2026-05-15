@@ -211,3 +211,40 @@ def test_step_scan_delegates_to_strategy(paths) -> None:
         out = _step_scan(paths, date(2026, 5, 15), warnings)
     assert out == fake
     assert warnings == []
+
+
+from trading.config import Settings
+from trading.data.kite import KiteAuthError
+from trading.jobs.pre_open import _step_portfolio
+
+
+def _settings(token: str | None = None) -> Settings:
+    return Settings(
+        anthropic_api_key=None, kite_api_key="k",
+        kite_api_secret="s", kite_access_token=token,
+        log_level="INFO", news_user_agent="test",
+    )
+
+
+def test_step_portfolio_returns_empty_when_skip_kite(paths) -> None:
+    warnings: list[str] = []
+    out = _step_portfolio(paths, _settings(token="x"), warnings, skip_kite=True)
+    assert out == []
+    assert any("kite" in w.lower() for w in warnings)
+
+
+def test_step_portfolio_returns_empty_when_no_token(paths) -> None:
+    warnings: list[str] = []
+    out = _step_portfolio(paths, _settings(token=None), warnings, skip_kite=False)
+    assert out == []
+    assert any("kite token" in w.lower() for w in warnings)
+
+
+def test_step_portfolio_degrades_on_kite_auth_error(paths) -> None:
+    warnings: list[str] = []
+    with patch(
+        "trading.jobs.pre_open.make_client", side_effect=KiteAuthError("expired")
+    ):
+        out = _step_portfolio(paths, _settings(token="x"), warnings, skip_kite=False)
+    assert out == []
+    assert any("kite auth" in w.lower() for w in warnings)

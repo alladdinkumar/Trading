@@ -15,16 +15,25 @@ from datetime import date
 from pathlib import Path
 
 from trading.config import Paths, Settings, get_paths, get_settings
+from trading.data.kite import KiteAuthError, get_holdings, make_client
 from trading.data.macro import snapshot_and_classify
 from trading.data.news import DEFAULT_ALIASES, fetch_all_news
 from trading.features.regime import Regime
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.llm.context import ContextInputs, assemble_context
-from trading.portfolio.health import HealthScore
+from trading.portfolio.health import (
+    FundamentalsSnapshot,
+    HealthScore,
+    HoldingContext,
+    SentimentSnapshot,
+    score_holding,
+    technicals_from_history,
+)
 from trading.store.db import get_conn
 from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import insert_news_items
+from trading.store.ohlcv import read_ohlcv
 from trading.strategy.rules import Candidate, ScanContext, passing, scan
 
 
@@ -154,8 +163,37 @@ def _step_portfolio(
     *,
     skip_kite: bool,
 ) -> list[HealthScore]:
-    """Stub — Task 5 wires Kite holdings + score_holding."""
-    return []
+    """Pull live Kite holdings, score each. Empty if Kite token absent."""
+    if skip_kite:
+        warnings.append("skip_kite=True — portfolio health skipped")
+        return []
+    if not settings.kite_access_token or not settings.kite_api_key:
+        warnings.append("kite token absent — portfolio health skipped")
+        return []
+    try:
+        client = make_client(
+            settings.kite_api_key, access_token=settings.kite_access_token
+        )
+        holdings = get_holdings(client)
+    except KiteAuthError as e:
+        warnings.append(f"kite auth failed: {e!s} — portfolio health skipped")
+        return []
+
+    results: list[HealthScore] = []
+    for h in holdings:
+        try:
+            history = read_ohlcv(h.tradingsymbol, paths)
+        except FileNotFoundError:
+            warnings.append(f"no parquet for holding {h.tradingsymbol} — skipped")
+            continue
+        ctx = HoldingContext(
+            symbol=h.tradingsymbol,
+            technicals=technicals_from_history(history),
+            fundamentals=FundamentalsSnapshot(),
+            sentiment=SentimentSnapshot(),
+        )
+        results.append(score_holding(ctx))
+    return results
 
 
 def _step_auto_open(
