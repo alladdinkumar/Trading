@@ -248,3 +248,63 @@ def test_step_portfolio_degrades_on_kite_auth_error(paths) -> None:
         out = _step_portfolio(paths, _settings(token="x"), warnings, skip_kite=False)
     assert out == []
     assert any("kite auth" in w.lower() for w in warnings)
+
+
+from trading.jobs.pre_open import _already_opened_today, _step_auto_open
+
+
+def test_step_auto_open_creates_signal_and_paper_trade(
+    conn: sqlite3.Connection,
+) -> None:
+    warnings: list[str] = []
+    cand = _candidate("RVNL", 10)
+    opened = _step_auto_open(
+        conn, date(2026, 5, 15), [cand], "NEUTRAL",
+        capital=100_000.0, risk_pct=0.02, warnings=warnings,
+    )
+    assert opened == 1
+    sig_count = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+    pt_count = conn.execute(
+        "SELECT COUNT(*) FROM paper_trades WHERE ts_exit IS NULL"
+    ).fetchone()[0]
+    assert sig_count == 1
+    assert pt_count == 1
+
+
+def test_step_auto_open_idempotent_on_rerun(
+    conn: sqlite3.Connection,
+) -> None:
+    warnings: list[str] = []
+    cand = _candidate("RVNL", 10)
+    _step_auto_open(
+        conn, date(2026, 5, 15), [cand], "NEUTRAL",
+        capital=100_000.0, risk_pct=0.02, warnings=warnings,
+    )
+    opened2 = _step_auto_open(
+        conn, date(2026, 5, 15), [cand], "NEUTRAL",
+        capital=100_000.0, risk_pct=0.02, warnings=warnings,
+    )
+    assert opened2 == 0
+    pt_count = conn.execute(
+        "SELECT COUNT(*) FROM paper_trades"
+    ).fetchone()[0]
+    assert pt_count == 1
+
+
+def test_already_opened_today_detects_open_trade(
+    conn: sqlite3.Connection,
+) -> None:
+    cur = conn.execute(
+        "INSERT INTO signals (ts, symbol, side, entry, stop, target, "
+        "horizon_days) VALUES (?, ?, 'LONG', ?, ?, ?, 25)",
+        ("2026-05-15T08:30:00", "RVNL", 100.0, 95.0, 120.0),
+    )
+    sig_id = cur.lastrowid
+    conn.execute(
+        "INSERT INTO paper_trades (signal_id, ts_entry, entry_price, qty) "
+        "VALUES (?, ?, ?, ?)",
+        (sig_id, "2026-05-15T08:30:00", 100.0, 10),
+    )
+    conn.commit()
+    assert _already_opened_today(conn, "RVNL", date(2026, 5, 15)) is True
+    assert _already_opened_today(conn, "NTPC", date(2026, 5, 15)) is False

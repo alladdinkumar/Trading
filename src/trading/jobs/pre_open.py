@@ -9,6 +9,7 @@ narrative. Each `_step_*` either returns a typed result or appends to
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date
@@ -33,8 +34,11 @@ from trading.store.db import get_conn
 from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import insert_news_items
+from trading.paper.ledger import log_signal_and_open_trade
 from trading.store.ohlcv import read_ohlcv
+from trading.store.repo import Signal
 from trading.strategy.rules import Candidate, ScanContext, passing, scan
+from trading.strategy.sizing import SizingInput, position_size
 
 
 @dataclass(frozen=True)
@@ -205,8 +209,70 @@ def _step_auto_open(
     risk_pct: float,
     warnings: list[str],
 ) -> int:
-    """Stub — Task 6 wires sizing + log_signal_and_open_trade."""
-    return 0
+    """For each all-pass candidate: size + open paper-trade.
+
+    Entry price = `cand.close` (D-1's close — the most recent bar in the
+    parquet at pre_open time, per spec §4.4 'limit order at close').
+    Skips if (a) idempotency guard finds an open trade for symbol+date,
+    or (b) sizing returns qty=0 (caps bound to zero).
+    """
+    opened = 0
+    for cand in passing:
+        if _already_opened_today(conn, cand.symbol, as_of):
+            continue
+        stop_price = cand.close - 1.5 * cand.atr_14
+        target_price = cand.close * 1.20
+        if cand.close <= stop_price:
+            warnings.append(
+                f"{cand.symbol}: ATR={cand.atr_14:.2f} ≥ close — skip"
+            )
+            continue
+        sizing = position_size(SizingInput(
+            capital=capital, risk_pct=risk_pct,
+            entry=cand.close, stop=stop_price, regime=regime,
+        ))
+        if sizing.qty == 0:
+            warnings.append(
+                f"{cand.symbol}: sizing bound to zero "
+                f"({', '.join(sizing.reasons)})"
+            )
+            continue
+        signal = Signal(
+            id=None,
+            ts=f"{as_of.isoformat()}T08:30:00",
+            symbol=cand.symbol,
+            side="LONG",
+            entry=cand.close,
+            stop=stop_price,
+            target=target_price,
+            horizon_days=25,
+            rules_passed_json=json.dumps(
+                [r.name for r in cand.rules if r.passed]
+            ),
+            created_by="pre_open",
+        )
+        log_signal_and_open_trade(
+            conn, signal=signal,
+            entry_ts=signal.ts, entry_price=cand.close, qty=sizing.qty,
+            atr_at_entry=cand.atr_14, predicted_return_pct=20.0,
+        )
+        opened += 1
+    return opened
+
+
+def _already_opened_today(
+    conn: sqlite3.Connection, symbol: str, as_of: date
+) -> bool:
+    """True if `symbol` has an OPEN paper-trade entered on `as_of`."""
+    row = conn.execute(
+        "SELECT 1 FROM paper_trades pt "
+        "JOIN signals s ON s.id = pt.signal_id "
+        "WHERE s.symbol = ? AND substr(pt.ts_entry, 1, 10) = ? "
+        "  AND pt.ts_exit IS NULL "
+        "LIMIT 1",
+        (symbol, as_of.isoformat()),
+    ).fetchone()
+    return row is not None
 
 
 def _step_assemble(
