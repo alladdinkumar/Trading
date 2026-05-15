@@ -44,7 +44,7 @@ from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
-from trading.jobs.pre_open import run_pre_open
+from trading.jobs.pre_open import PreOpenAborted, run_pre_open
 from trading.llm.briefing import MissingNarrativeError, compile_brief
 from trading.llm.context import ContextInputs
 from trading.llm.context import assemble_context as _assemble_context
@@ -1050,16 +1050,19 @@ def brief_compile_cmd(
 def pre_open_cmd(
     date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD")],
     skip_news: Annotated[bool, typer.Option("--skip-news")] = False,
-    skip_kite: Annotated[bool, typer.Option("--skip-kite")] = False,
     capital: Annotated[float, typer.Option(help="Capital per trade.")] = 100_000.0,
     risk_pct: Annotated[float, typer.Option(help="Risk per trade.")] = 0.02,
 ) -> None:
     """Phase 13 MVP — orchestrate Phases 1-12 and write the analyst bundle."""
     as_of = date.fromisoformat(date_str)
-    result = run_pre_open(
-        as_of, skip_news=skip_news, skip_kite=skip_kite,
-        capital_per_trade=capital, risk_pct=risk_pct,
-    )
+    try:
+        result = run_pre_open(
+            as_of, skip_news=skip_news,
+            capital_per_trade=capital, risk_pct=risk_pct,
+        )
+    except PreOpenAborted as e:
+        console.print(f"[red]Pre-open aborted:[/red] {e}")
+        raise typer.Exit(code=2) from e
     table = Table(title=f"pre_open {as_of.isoformat()}", show_header=True)
     table.add_column("step")
     table.add_column("count", justify="right")

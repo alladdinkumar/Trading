@@ -68,7 +68,7 @@ def test_run_pre_open_returns_result_with_bundle_path(
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_portfolio",
-        lambda paths, settings, warnings, skip_kite: [],
+        lambda paths, settings, warnings, *, as_of: [],
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_auto_open",
@@ -79,7 +79,6 @@ def test_run_pre_open_returns_result_with_bundle_path(
         date(2026, 5, 15),
         paths=paths,
         skip_news=True,
-        skip_kite=True,
     )
     assert isinstance(result, PreOpenResult)
     assert result.as_of == date(2026, 5, 15)
@@ -222,28 +221,33 @@ def _settings(token: str | None = None) -> Settings:
     )
 
 
-def test_step_portfolio_returns_empty_when_skip_kite(paths) -> None:
+_PRE_OPEN_HOLDING = {
+    "tradingsymbol": "RVNL", "exchange": "NSE", "isin": "INE415G01027",
+    "quantity": 32, "average_price": 305.0, "last_price": 329.6,
+    "close_price": 327.1, "pnl": 787.2, "day_change": 2.5,
+    "day_change_percentage": 0.76,
+}
+
+
+def test_step_portfolio_reads_snapshot_and_scores(paths) -> None:
+    from tests.conftest import seed_kite_snapshot
+    seed_kite_snapshot(paths, date(2026, 5, 15), holdings=[_PRE_OPEN_HOLDING])
     warnings: list[str] = []
-    out = _step_portfolio(paths, _settings(token="x"), warnings, skip_kite=True)
+    out = _step_portfolio(paths, _settings(), warnings, as_of=date(2026, 5, 15))
+    # No parquet for RVNL in this fixture so the warning notes the skip;
+    # but the snapshot read succeeded. Empty result is expected here.
     assert out == []
-    assert any("kite" in w.lower() for w in warnings)
+    assert any("no parquet" in w.lower() for w in warnings)
 
 
-def test_step_portfolio_returns_empty_when_no_token(paths) -> None:
+def test_step_portfolio_raises_pre_open_aborted_when_snapshot_missing(
+    paths,
+) -> None:
+    from trading.jobs.pre_open import PreOpenAborted
     warnings: list[str] = []
-    out = _step_portfolio(paths, _settings(token=None), warnings, skip_kite=False)
-    assert out == []
-    assert any("kite token" in w.lower() for w in warnings)
-
-
-def test_step_portfolio_degrades_on_kite_auth_error(paths) -> None:
-    warnings: list[str] = []
-    with patch(
-        "trading.jobs.pre_open.make_client", side_effect=KiteAuthError("expired")
-    ):
-        out = _step_portfolio(paths, _settings(token="x"), warnings, skip_kite=False)
-    assert out == []
-    assert any("kite auth" in w.lower() for w in warnings)
+    with pytest.raises(PreOpenAborted) as exc:
+        _step_portfolio(paths, _settings(), warnings, as_of=date(2026, 5, 15))
+    assert "/kite-snapshot" in str(exc.value)
 
 
 def test_step_auto_open_creates_signal_and_paper_trade(
@@ -343,12 +347,11 @@ def test_run_pre_open_full_happy_path_integration(
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_portfolio",
-        lambda p, s, w, *, skip_kite: [],
+        lambda p, s, w, *, as_of: [],
     )
 
     result = run_pre_open(
-        date(2026, 5, 15), paths=paths,
-        skip_news=False, skip_kite=True,
+        date(2026, 5, 15), paths=paths, skip_news=False,
     )
     assert result.bundle_path.is_file()
     body = result.bundle_path.read_text(encoding="utf-8")
@@ -358,7 +361,6 @@ def test_run_pre_open_full_happy_path_integration(
     assert result.paper_trades_opened == result.candidates_passing
 
     result2 = run_pre_open(
-        date(2026, 5, 15), paths=paths,
-        skip_news=False, skip_kite=True,
+        date(2026, 5, 15), paths=paths, skip_news=False,
     )
     assert result2.paper_trades_opened == 0

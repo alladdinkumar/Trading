@@ -292,15 +292,35 @@ def test_pre_open_cli_writes_bundle_and_prints_next_step(
     monkeypatch.setattr(po, "_step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr(po, "_step_scan", lambda p, d, w: [])
     monkeypatch.setattr(po, "_step_portfolio",
-                        lambda p, s, w, *, skip_kite: [])
+                        lambda p, s, w, *, as_of: [])
     monkeypatch.setattr(po, "_step_auto_open",
                         lambda *a, **kw: 0)
     result = runner.invoke(
         app,
-        ["pre-open", "--date", "2026-05-15", "--skip-news", "--skip-kite"],
+        ["pre-open", "--date", "2026-05-15", "--skip-news"],
     )
     assert result.exit_code == 0, result.stdout
     out_path = tmp_path / "data" / "research" / "2026-05-15" / "_context.md"
     assert out_path.is_file()
     assert "/analyst" in result.stdout
     assert "trading brief compile" in result.stdout
+
+
+def test_pre_open_cli_aborts_when_kite_snapshot_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+    from trading.jobs import pre_open as po
+    monkeypatch.setattr(po, "_step_macro",
+                        lambda c, d, w: (False, "NEUTRAL"))
+    monkeypatch.setattr(po, "_step_news", lambda c, d, w: (0, 0))
+    monkeypatch.setattr(po, "_step_scan", lambda p, d, w: [])
+    monkeypatch.setattr(po, "_step_auto_open", lambda *a, **kw: 0)
+    # NO seed_kite_snapshot — _step_portfolio will raise PreOpenAborted
+    result = runner.invoke(
+        app,
+        ["pre-open", "--date", "2026-05-15", "--skip-news"],
+    )
+    assert result.exit_code == 2, result.stdout
+    assert "/kite-snapshot" in result.stdout

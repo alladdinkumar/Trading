@@ -16,7 +16,11 @@ from datetime import date
 from pathlib import Path
 
 from trading.config import Paths, Settings, get_paths, get_settings
-from trading.data.kite import KiteAuthError, get_holdings, make_client
+from trading.data.kite_snapshot import (
+    KiteSnapshotMissingError,
+    KiteSnapshotStaleError,
+    read_holdings,
+)
 from trading.data.macro import snapshot_and_classify
 from trading.data.news import DEFAULT_ALIASES, fetch_all_news
 from trading.features.regime import Regime
@@ -41,6 +45,15 @@ from trading.strategy.rules import Candidate, ScanContext, passing, scan
 from trading.strategy.sizing import SizingInput, position_size
 
 
+class PreOpenAborted(RuntimeError):
+    """Raised when run_pre_open cannot proceed because a prerequisite is missing.
+
+    Currently raised when the Kite snapshot for `as_of` is missing or stale —
+    `/kite-snapshot` skill must run first. CLI catches this and exits 2 with
+    the remediation message.
+    """
+
+
 @dataclass(frozen=True)
 class PreOpenResult:
     """What pre_open produced. Returned by `run_pre_open` for tests + CLI."""
@@ -63,7 +76,6 @@ def run_pre_open(
     paths: Paths | None = None,
     settings: Settings | None = None,
     skip_news: bool = False,
-    skip_kite: bool = False,
     capital_per_trade: float = 100_000.0,
     risk_pct: float = 0.02,
 ) -> PreOpenResult:
@@ -92,7 +104,7 @@ def run_pre_open(
         candidates = _step_scan(p, as_of, warnings)
         passing_candidates = passing(candidates)
 
-        holdings = _step_portfolio(p, s, warnings, skip_kite=skip_kite)
+        holdings = _step_portfolio(p, s, warnings, as_of=as_of)
 
         opened = _step_auto_open(
             conn, as_of, passing_candidates, regime,
@@ -165,23 +177,19 @@ def _step_portfolio(
     settings: Settings,
     warnings: list[str],
     *,
-    skip_kite: bool,
+    as_of: date,
 ) -> list[HealthScore]:
-    """Pull live Kite holdings, score each. Empty if Kite token absent."""
-    if skip_kite:
-        warnings.append("skip_kite=True — portfolio health skipped")
-        return []
-    if not settings.kite_access_token or not settings.kite_api_key:
-        warnings.append("kite token absent — portfolio health skipped")
-        return []
+    """Score each holding from today's Kite snapshot.
+
+    Reads `data/raw/<as_of>/holdings.json` (written by the /kite-snapshot
+    skill). Missing or stale snapshot raises `PreOpenAborted`. `settings`
+    is unused today; kept on the signature for symmetry with other steps
+    and forward-compat with future per-account config.
+    """
     try:
-        client = make_client(
-            settings.kite_api_key, access_token=settings.kite_access_token
-        )
-        holdings = get_holdings(client)
-    except KiteAuthError as e:
-        warnings.append(f"kite auth failed: {e!s} — portfolio health skipped")
-        return []
+        holdings = read_holdings(paths, as_of)
+    except (KiteSnapshotMissingError, KiteSnapshotStaleError) as e:
+        raise PreOpenAborted(str(e)) from e
 
     results: list[HealthScore] = []
     for h in holdings:
