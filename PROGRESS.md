@@ -33,7 +33,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 12.6 | Sector data | `[ ]` |
 | 13 | pre_open job (MVP ⭐) | `[x]` |
 | 13.5 | Kite MCP pivot | `[x]` |
-| 14 | mid_day + post_close jobs | `[ ]` |
+| 14 | mid_day + post_close jobs | `[~]` |
+| 14.A | mid_day MVP | `[x]` |
 | 15 | Streamlit dashboard | `[ ]` |
 | 16 | LightGBM ranker (Layer B) | `[ ]` |
 | 17 | Task Scheduler + logging | `[ ]` |
@@ -303,6 +304,46 @@ Granular task tracker for the trading system build. Update as work completes.
        COALINDIA, 81% on MAZDOCK). Suite **474 passed**, 1 skipped
        (live), ruff + mypy clean. Commit `feat(data): Phase 13.5 Kite
        MCP pivot` pushed to origin/main.
+
+## Phase 14.A — mid_day MVP
+
+> Spec at [`docs/superpowers/specs/2026-05-16-phase-14-a-mid-day-design.md`](docs/superpowers/specs/2026-05-16-phase-14-a-mid-day-design.md).
+> Plan at [`docs/superpowers/plans/2026-05-16-phase-14-a-mid-day.md`](docs/superpowers/plans/2026-05-16-phase-14-a-mid-day.md).
+> Phase 14 split into 14.A (mid_day), 14.B (post_close), 14.C (pre_open_iep).
+> 14.B and 14.C will get their own brainstorm → spec → plan cycles.
+
+- [x] 14.A.1 `src/trading/data/quotes_snapshot.py`: `read_latest_quotes` +
+       `QuoteSnapshotMissingError` / `StaleError`. Reads newest
+       `quotes_HHMM.json` from `data/raw/<as_of>/`. Filename HHMM is
+       single source of truth for capture time; staleness checked
+       against wall-clock `datetime.now()`. Tightened regex rejects
+       invalid hours/minutes (code-review fix). 7 new tests.
+- [x] 14.A.2 `.claude/skills/kite-quotes-snapshot/SKILL.md`: reads
+       `_quote_symbols.txt`, calls `mcp__kite__get_quotes`, writes
+       `quotes_HHMM.json` atomically, updates `_meta.quotes_at`.
+- [x] 14.A.3 `src/trading/jobs/mid_day.py`: `gather_quote_symbols`
+       (paper-trades ∪ signals ∪ holdings); `_quotes_to_bars`
+       (close=last_price, NOT yesterday's close); `run_mid_day` two-mode
+       orchestrator; `_render_mid_day_update` markdown builder;
+       `MidDayAborted` + `MidDayResult`. 7 new tests including
+       end-to-end EXIT_STOP closure + idempotency.
+- [x] 14.A.4 `src/trading/cli.py`: `trading mid-day --date YYYY-MM-DD
+       [--apply]` subcommand with Rich summary table + remediation on
+       abort. 3 new tests.
+- [x] 14.A.5 `src/trading/llm/briefing.py` + `context.py`: `Mode`
+       extended to include `"mid_day"`; `compile_brief` includes
+       `mid_day_update.md` after candidates section when present
+       (additive across all modes). 2 new tests.
+- [x] 14.A.6 `scripts/mid_day.bat`: two-step Windows launcher
+       (prepare/apply).
+- [x] 14.A.7 Real-data smoke: `trading mid-day` prepare → MCP
+       `get_quotes` for 11 holdings → `trading mid-day --apply`
+       built 11 bars (real intraday OHLC), 0 paper-trades to
+       evaluate today (correction days haven't opened any).
+       Markdown table rendered cleanly with summary line.
+       Suite **493 passed**, 1 skipped (live), ruff + mypy clean.
+       Commit `feat(jobs): mid_day MVP (Phase 14.A)` pushed to
+       origin/main.
 
 ## Phase 14 — mid_day + post_close jobs
 
