@@ -11,6 +11,7 @@ import pytest
 from trading.config import get_paths
 from trading.llm.context import ContextInputs, assemble_context
 from trading.store.migrations import run_migrations
+from trading.strategy.rules import Candidate, RuleResult
 
 
 @pytest.fixture
@@ -86,3 +87,78 @@ def test_assemble_context_macro_no_data_when_missing(
     body = out.read_text(encoding="utf-8")
     assert "## Macro snapshot" in body
     assert "_(no data)_" in body
+
+
+def _candidate(symbol: str = "RVNL", n_passed: int = 9) -> Candidate:
+    rules = tuple(
+        RuleResult(name=f"r{i}", passed=(i < n_passed), reason="")
+        for i in range(10)
+    )
+    return Candidate(
+        symbol=symbol,
+        scan_date=date(2026, 5, 15),
+        close=312.5,
+        rsi_14=58.0,
+        sma_20=305.0,
+        sma_50=300.0,
+        sma_200=275.0,
+        atr_14=8.4,
+        rules=rules,
+    )
+
+
+def _seed_news(conn: sqlite3.Connection, symbol: str) -> None:
+    conn.execute(
+        "INSERT INTO news_items (ts, symbol, source, headline, url, "
+        "sentiment, category, is_critical) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "2026-05-13T10:00:00",
+            symbol,
+            "moneycontrol",
+            "RVNL bags rs 500cr order from Indian Railways",
+            "https://example.com/rvnl",
+            0.55,
+            "results",
+            0,
+        ),
+    )
+    conn.execute(
+        "INSERT INTO sentiment_daily (date, symbol, score_7d, score_30d, "
+        "news_count, negative_news_count, has_critical) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("2026-05-15", symbol, 0.32, 0.18, 4, 0, 0),
+    )
+    conn.commit()
+
+
+def test_assemble_context_includes_candidates_section(
+    conn: sqlite3.Connection, paths
+) -> None:
+    _seed_news(conn, "RVNL")
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(candidates=[_candidate("RVNL", n_passed=9)],
+                             holdings_health=[]),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "## Today's candidates" in body
+    assert "### RVNL" in body
+    assert "9/10" in body
+    assert "RSI" in body and "58" in body
+    assert "ATR" in body and "8.4" in body
+    assert "RVNL bags" in body
+    assert "Critical news flag: NO" in body
+
+
+def test_assemble_context_candidates_no_data_when_empty(
+    conn: sqlite3.Connection, paths
+) -> None:
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(candidates=[], holdings_health=[]),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "## Today's candidates" in body
+    assert body.count("_(no data)_") >= 1  # at least the candidates section

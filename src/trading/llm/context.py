@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -51,6 +51,7 @@ def assemble_context(
     parts: list[str] = []
     parts.append(_render_header(as_of, mode))
     parts.append(_render_macro(conn, as_of))
+    parts.append(_render_candidates(conn, as_of, inputs.candidates))
 
     out_path.write_text("\n\n".join(parts) + "\n", encoding="utf-8")
     return out_path
@@ -85,3 +86,68 @@ def _render_macro(conn: sqlite3.Connection, as_of: date) -> str:
     if row["regime"] is not None:
         lines.append(f"| Regime | {row['regime']} |")
     return "\n".join(lines)
+
+
+def _render_candidates(
+    conn: sqlite3.Connection, as_of: date, candidates: list[Candidate]
+) -> str:
+    if not candidates:
+        return "## Today's candidates\n\n_(no data)_"
+
+    sorted_cands = sorted(
+        candidates,
+        key=lambda c: (-sum(1 for r in c.rules if r.passed), c.symbol),
+    )
+    blocks: list[str] = ["## Today's candidates"]
+    for c in sorted_cands[:5]:
+        n_passed = sum(1 for r in c.rules if r.passed)
+        n_total = len(c.rules)
+        blocks.append("")
+        blocks.append(f"### {c.symbol} — passes {n_passed}/{n_total} rules")
+        blocks.append(
+            f"- close {c.close:.2f}, RSI {c.rsi_14:.1f}, ATR(14) {c.atr_14:.2f}"
+        )
+        blocks.append(
+            f"- SMA20 {c.sma_20:.2f} · SMA50 {c.sma_50:.2f} · SMA200 {c.sma_200:.2f}"
+        )
+        blocks.extend(_render_news_for_symbol(conn, c.symbol, as_of))
+    return "\n".join(blocks)
+
+
+def _render_news_for_symbol(
+    conn: sqlite3.Connection, symbol: str, as_of: date
+) -> list[str]:
+    """Last 7 days of headlines + sentiment_daily summary + critical flag."""
+    cutoff = (as_of - timedelta(days=7)).isoformat()
+    rows = conn.execute(
+        "SELECT ts, headline, sentiment, category, is_critical "
+        "FROM news_items WHERE symbol = ? AND ts >= ? "
+        "ORDER BY ts DESC LIMIT 5",
+        (symbol, cutoff),
+    ).fetchall()
+    sd = conn.execute(
+        "SELECT score_7d, news_count, negative_news_count, has_critical "
+        "FROM sentiment_daily WHERE date = ? AND symbol = ?",
+        (as_of.isoformat(), symbol),
+    ).fetchone()
+    out: list[str] = []
+    if sd is not None:
+        score_7d = sd["score_7d"]
+        score_str = f"{score_7d:+.2f}" if score_7d is not None else "—"
+        out.append(
+            f"- sentiment 7d {score_str} · "
+            f"{sd['news_count']} headlines ({sd['negative_news_count']} negative)"
+        )
+        out.append(
+            f"- Critical news flag: {'YES' if sd['has_critical'] else 'NO'}"
+        )
+    else:
+        out.append("- sentiment: _(no daily aggregate)_")
+        out.append("- Critical news flag: NO")
+    if rows:
+        out.append("- Recent headlines:")
+        for r in rows:
+            score = f"{r['sentiment']:+.2f}" if r["sentiment"] is not None else "—"
+            cat = r["category"] or "—"
+            out.append(f"  - {r['ts'][:10]} · [{cat}] {r['headline']} ({score})")
+    return out
