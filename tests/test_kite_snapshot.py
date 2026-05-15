@@ -9,11 +9,13 @@ import pytest
 
 from tests.conftest import seed_kite_snapshot
 from trading.config import get_paths
-from trading.data.kite import Holding
+from trading.data.kite import GttOrder, Holding, Position
 from trading.data.kite_snapshot import (
     KiteSnapshotMissingError,
     KiteSnapshotStaleError,
+    read_gtts,
     read_holdings,
+    read_positions,
 )
 
 
@@ -70,3 +72,41 @@ def test_read_holdings_stale_raises(paths) -> None:
     with pytest.raises(KiteSnapshotStaleError) as exc:
         read_holdings(paths, date(2026, 5, 15))
     assert "2026-05-14" in str(exc.value)
+
+
+_GTT_ROW = {
+    "id": 12345, "type": "single", "status": "active",
+    "tradingsymbol": "RVNL", "exchange": "NSE",
+    "trigger_values": [350.0], "last_price": 329.6,
+    "created_at": "2026-05-10T10:00:00",
+    "orders": [{"transaction_type": "SELL", "quantity": 32, "price": 350.0}],
+}
+
+_POSITION_ROW = {
+    "tradingsymbol": "NTPC", "exchange": "NSE", "product": "CNC",
+    "quantity": 10, "average_price": 303.0, "last_price": 305.5, "pnl": 25.0,
+}
+
+
+def test_read_gtts_happy_path(paths) -> None:
+    seed_kite_snapshot(paths, date(2026, 5, 15), gtts=[_GTT_ROW])
+    out = read_gtts(paths, date(2026, 5, 15))
+    assert len(out) == 1
+    assert isinstance(out[0], GttOrder)
+    assert out[0].id == 12345
+    assert out[0].trigger_values == [350.0]
+    assert out[0].orders[0]["transaction_type"] == "SELL"
+
+
+def test_read_gtts_missing_raises(paths) -> None:
+    with pytest.raises(KiteSnapshotMissingError):
+        read_gtts(paths, date(2026, 5, 15))
+
+
+def test_read_positions_happy_path(paths) -> None:
+    seed_kite_snapshot(paths, date(2026, 5, 15), positions=[_POSITION_ROW])
+    out = read_positions(paths, date(2026, 5, 15))
+    assert len(out) == 1
+    assert isinstance(out[0], Position)
+    assert out[0].tradingsymbol == "NTPC"
+    assert out[0].pnl == 25.0
