@@ -12,7 +12,6 @@ import pandas as pd
 import pytest
 
 from trading.config import Settings, get_paths
-from trading.data.kite import KiteAuthError
 from trading.data.macro import MacroSnapshot
 from trading.data.news import RawHeadline
 from trading.features.regime import RegimeResult

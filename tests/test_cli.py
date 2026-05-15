@@ -33,7 +33,7 @@ def test_app_help_runs() -> None:
     assert result.exit_code == 0
     flat = result.stdout.replace("\n", " ")
     assert "ingest-history" in flat
-    assert "kite-login" in flat
+    assert "kite-emergency-login" in flat
     assert "scan" in flat
 
 
@@ -140,7 +140,7 @@ def test_kite_login_missing_creds_exits_1(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     bad_settings = _settings_with_kite_creds(kite_api_key=None, kite_api_secret=None)
     with patch("trading.cli.get_settings", return_value=bad_settings):
-        result = runner.invoke(app, ["kite-login", "--request-token", "rt"])
+        result = runner.invoke(app, ["kite-emergency-login", "--request-token", "rt"])
     assert result.exit_code == 1
     assert "KITE_API_KEY" in result.stdout
 
@@ -155,7 +155,7 @@ def test_kite_login_writes_token_to_env(tmp_path: Path, monkeypatch) -> None:
         patch("trading.cli.login_url", return_value="https://kite/login?x=1"),
         patch("trading.cli.generate_session", return_value="fresh-token-123"),
     ):
-        result = runner.invoke(app, ["kite-login", "--request-token", "rt-456"])
+        result = runner.invoke(app, ["kite-emergency-login", "--request-token", "rt-456"])
     assert result.exit_code == 0, result.stdout
     env_path = tmp_path / ".env"
     assert env_path.is_file()
@@ -173,7 +173,7 @@ def test_kite_login_auth_error_exits_1(tmp_path: Path, monkeypatch) -> None:
         patch("trading.cli.login_url", return_value="https://kite/login?x=1"),
         patch("trading.cli.generate_session", side_effect=KiteAuthError("bad request_token")),
     ):
-        result = runner.invoke(app, ["kite-login", "--request-token", "bogus"])
+        result = runner.invoke(app, ["kite-emergency-login", "--request-token", "bogus"])
     assert result.exit_code == 1
     assert "bad request_token" in result.stdout
 
@@ -356,3 +356,46 @@ def test_portfolio_cli_aborts_when_snapshot_missing(
     )
     assert result.exit_code == 2, result.stdout
     assert "/kite-snapshot" in result.stdout
+
+
+def test_kite_emergency_login_present_in_help() -> None:
+    result = runner.invoke(app, ["--help"])
+    flat = result.stdout.replace("\n", " ")
+    assert "kite-emergency-login" in flat
+    assert "kite-login " not in flat  # bare name renamed away
+
+
+def test_kite_emergency_snapshot_writes_files(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("KITE_API_KEY", "fake")
+    monkeypatch.setenv("KITE_ACCESS_TOKEN", "fake")
+
+    from trading.data.kite import GttOrder, Holding
+    fake_holding = Holding(
+        tradingsymbol="RVNL", exchange="NSE", isin="INE415G01027",
+        quantity=32, average_price=305.0, last_price=329.6,
+        close_price=327.1, pnl=787.2, day_change=2.5,
+        day_change_percentage=0.76,
+    )
+    fake_gtt = GttOrder(
+        id=1, type="single", status="active", tradingsymbol="RVNL",
+        exchange="NSE", trigger_values=[350.0], last_price=329.6,
+        created_at="2026-05-10T10:00:00",
+        orders=[{"transaction_type": "SELL", "quantity": 32, "price": 350.0}],
+    )
+    with patch("trading.cli.make_client", return_value=MagicMock()), \
+         patch("trading.cli.get_holdings", return_value=[fake_holding]), \
+         patch("trading.cli.get_gtts", return_value=[fake_gtt]):
+        result = runner.invoke(
+            app, ["kite-emergency-snapshot", "--date", "2026-05-15"]
+        )
+    assert result.exit_code == 0, result.stdout
+    base = tmp_path / "data" / "raw" / "2026-05-15"
+    assert (base / "holdings.json").is_file()
+    assert (base / "gtts.json").is_file()
+    assert (base / "_meta.json").is_file()
+    import json as _j
+    meta = _j.loads((base / "_meta.json").read_text(encoding="utf-8"))
+    assert meta["source"] == "sdk-fallback"

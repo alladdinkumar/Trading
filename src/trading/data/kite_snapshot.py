@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from trading.config import Paths
 from trading.data.kite import GttOrder, Holding, Position
@@ -48,7 +49,7 @@ def _read_resource(
     paths: Paths,
     as_of: date,
     filename: str,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     date_dir = paths.raw_dir / as_of.isoformat()
     target = date_dir / filename
     if not target.is_file():
@@ -57,7 +58,8 @@ def _read_resource(
             "Run /kite-snapshot skill in Claude Code first."
         )
     _validate_meta(date_dir, as_of)
-    return json.loads(target.read_text(encoding="utf-8"))
+    rows: list[dict[str, Any]] = json.loads(target.read_text(encoding="utf-8"))
+    return rows
 
 
 def read_holdings(paths: Paths, as_of: date) -> list[Holding]:

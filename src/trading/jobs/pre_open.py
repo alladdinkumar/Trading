@@ -45,7 +45,7 @@ from trading.strategy.rules import Candidate, ScanContext, passing, scan
 from trading.strategy.sizing import SizingInput, position_size
 
 
-class PreOpenAborted(RuntimeError):
+class PreOpenAborted(RuntimeError):  # noqa: N818 — "Aborted" is a state, not an error suffix
     """Raised when run_pre_open cannot proceed because a prerequisite is missing.
 
     Currently raised when the Kite snapshot for `as_of` is missing or stale —
@@ -303,13 +303,16 @@ def _step_assemble(
 def _main(  # pragma: no cover — manual entry
     date_str: str,
     skip_news: bool = False,
-    skip_kite: bool = False,
 ) -> None:
-    """`python -m trading.jobs.pre_open --date-str YYYY-MM-DD` entry."""
-    result = run_pre_open(
-        date.fromisoformat(date_str),
-        skip_news=skip_news, skip_kite=skip_kite,
-    )
+    """`python -m trading.jobs.pre_open <YYYY-MM-DD>` entry."""
+    try:
+        result = run_pre_open(
+            date.fromisoformat(date_str),
+            skip_news=skip_news,
+        )
+    except PreOpenAborted as e:
+        print(f"Pre-open aborted: {e}")
+        raise SystemExit(2) from e
     print(f"wrote {result.bundle_path}")
     if result.warnings:
         print(f"warnings ({len(result.warnings)}):")

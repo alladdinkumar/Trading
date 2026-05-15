@@ -38,18 +38,22 @@ from trading.data.kite import (
     login_url,
     make_client,
 )
+from trading.data.kite_snapshot import (
+    KiteSnapshotMissingError,
+    KiteSnapshotStaleError,
+)
+from trading.data.kite_snapshot import (
+    read_gtts as _snapshot_read_gtts,
+)
+from trading.data.kite_snapshot import (
+    read_holdings as _snapshot_read_holdings,
+)
 from trading.data.macro import snapshot_and_classify
 from trading.data.news import DEFAULT_ALIASES, fetch_all_news
 from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
-from trading.data.kite_snapshot import (
-    KiteSnapshotMissingError,
-    KiteSnapshotStaleError,
-    read_gtts as _snapshot_read_gtts,
-    read_holdings as _snapshot_read_holdings,
-)
 from trading.jobs.pre_open import PreOpenAborted, run_pre_open
 from trading.llm.briefing import MissingNarrativeError, compile_brief
 from trading.llm.context import ContextInputs
@@ -163,8 +167,8 @@ def ingest_history(
             console.print(f"  [red]{sym}[/red]: {reason}")
 
 
-@app.command("kite-login")
-def kite_login(
+@app.command("kite-emergency-login")
+def kite_emergency_login(
     request_token: Annotated[
         str | None,
         typer.Option(
@@ -174,8 +178,12 @@ def kite_login(
         ),
     ] = None,
 ) -> None:
-    """Interactive Kite Connect login. Prints the URL, accepts the request_token,
-    fetches a fresh access token, and writes it to `.env`."""
+    """FALLBACK: interactive Kite Connect SDK login.
+
+    Production paths use the /kite-snapshot skill (MCP). Use this command
+    only when MCP is broken and you need to populate KITE_ACCESS_TOKEN
+    in .env so `kite-emergency-snapshot` can run.
+    """
     settings = get_settings()
     if not settings.kite_api_key or not settings.kite_api_secret:
         console.print("[red]KITE_API_KEY and KITE_API_SECRET must be set in .env first.[/red]")
@@ -208,6 +216,65 @@ def kite_login(
             console.print(f"Logged in as: [bold]{profile.get('user_name', '?')}[/bold]")
         except Exception:  # profile is just informational
             pass
+
+
+@app.command("kite-emergency-snapshot")
+def kite_emergency_snapshot(
+    date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD.")],
+) -> None:
+    """FALLBACK: write data/raw/<date>/{holdings,gtts}.json via SDK when MCP is broken.
+
+    Same on-disk contract as the /kite-snapshot skill, but uses
+    src/trading/data/kite.py + KITE_ACCESS_TOKEN from .env. Tags
+    _meta.source as "sdk-fallback" so audits can see which path produced
+    the file.
+    """
+    from dataclasses import asdict as _dc_asdict
+
+    settings = get_settings()
+    if not (settings.kite_api_key and settings.kite_access_token):
+        console.print(
+            "[red]Kite credentials missing. Run `trading kite-emergency-login` first.[/red]"
+        )
+        raise typer.Exit(code=1)
+
+    paths = get_paths()
+    as_of = date.fromisoformat(date_str)
+    base = paths.raw_dir / as_of.isoformat()
+    base.mkdir(parents=True, exist_ok=True)
+
+    client = make_client(settings.kite_api_key, settings.kite_access_token)
+    try:
+        holdings_list = get_holdings(client)
+        gtts_list = get_gtts(client)
+    except KiteAuthError as exc:
+        console.print(f"[red]Kite auth failed: {exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    def _atomic_dump(rows: list[Any], filename: str) -> None:
+        tmp = base / (filename + ".tmp")
+        final = base / filename
+        tmp.write_text(
+            json.dumps([_dc_asdict(r) for r in rows]), encoding="utf-8"
+        )
+        tmp.replace(final)
+
+    _atomic_dump(holdings_list, "holdings.json")
+    _atomic_dump(gtts_list, "gtts.json")
+
+    meta = {
+        "snapshot_at": datetime.now().isoformat(),
+        "source": "sdk-fallback",
+        "skill_version": "1",
+    }
+    meta_tmp = base / "_meta.tmp"
+    meta_tmp.write_text(json.dumps(meta), encoding="utf-8")
+    meta_tmp.replace(base / "_meta.json")
+
+    console.print(
+        f"[green]Wrote {len(holdings_list)} holdings + {len(gtts_list)} GTTs "
+        f"to {base} (sdk-fallback).[/green]"
+    )
 
 
 @app.command("scan")
