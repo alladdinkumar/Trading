@@ -3,7 +3,8 @@
 from trading.llm.briefing import (
     MissingNarrativeError,
     compile_brief,
-    expected_parts,
+    optional_parts,
+    required_parts,
 )
 from trading.llm.context import ContextInputs, Mode, assemble_context
 
@@ -13,5 +14,6 @@ __all__ = [
     "Mode",
     "assemble_context",
     "compile_brief",
-    "expected_parts",
+    "optional_parts",
+    "required_parts",
 ]

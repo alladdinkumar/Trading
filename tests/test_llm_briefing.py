@@ -10,28 +10,32 @@ from freezegun import freeze_time
 from trading.llm.briefing import (
     MissingNarrativeError,
     compile_brief,
-    expected_parts,
+    optional_parts,
+    required_parts,
 )
 
 
-def test_expected_parts_pre_open() -> None:
-    parts = expected_parts("pre_open", candidate_symbols=["RVNL", "NTPC"])
+def test_required_parts_pre_open() -> None:
+    parts = required_parts("pre_open", candidate_symbols=["RVNL", "NTPC"])
     assert parts == [
         "macro_brief.md",
-        "sector_commentary.md",
         "candidates/RVNL.md",
         "candidates/NTPC.md",
     ]
 
 
-def test_expected_parts_post_close() -> None:
-    parts = expected_parts("post_close", candidate_symbols=["RVNL"])
+def test_required_parts_post_close() -> None:
+    parts = required_parts("post_close", candidate_symbols=["RVNL"])
     assert parts == [
         "macro_brief.md",
-        "sector_commentary.md",
         "candidates/RVNL.md",
         "post_close_recap.md",
     ]
+
+
+def test_optional_parts_returns_sector_commentary() -> None:
+    assert optional_parts("pre_open") == ["sector_commentary.md"]
+    assert optional_parts("post_close") == ["sector_commentary.md"]
 
 
 def test_compile_brief_raises_when_parts_missing(tmp_path: Path) -> None:
@@ -46,8 +50,9 @@ def test_compile_brief_raises_when_parts_missing(tmp_path: Path) -> None:
         compile_brief(date_dir, mode="pre_open")
     msg = str(exc_info.value)
     assert "macro_brief.md" in msg
-    assert "sector_commentary.md" in msg
     assert "candidates/RVNL.md" in msg
+    # sector_commentary.md is OPTIONAL since 12.5.4 — must NOT be in error
+    assert "sector_commentary.md" not in msg
 
 
 def _write_part(date_dir: Path, rel: str, body: str) -> None:
@@ -123,3 +128,22 @@ def test_compile_brief_post_close_includes_recap(
         "Day's market: flat. Predictions averaged 1.2% error.\n")
     out = compile_brief(date_dir, mode="post_close")
     assert out.read_text(encoding="utf-8") == snapshot
+
+
+def test_compile_brief_substitutes_placeholder_when_sector_missing(
+    tmp_path: Path,
+) -> None:
+    date_dir = tmp_path / "2026-05-15"
+    date_dir.mkdir()
+    _write_part(
+        date_dir, "_context.md",
+        "# Trading context bundle — 2026-05-15  (mode: pre_open)\n"
+        "\n## Today's candidates\n\n### RVNL — passes 9/10 rules\n",
+    )
+    _write_part(date_dir, "macro_brief.md", "Regime: NEUTRAL.\n")
+    # NO sector_commentary.md written
+    _write_part(date_dir, "candidates/RVNL.md", "# RVNL — Conviction: HIGH\n")
+    out = compile_brief(date_dir, mode="pre_open")
+    body = out.read_text(encoding="utf-8")
+    assert "## Sector commentary" in body
+    assert "_(sector commentary not yet wired — see Phase 12.6)_" in body

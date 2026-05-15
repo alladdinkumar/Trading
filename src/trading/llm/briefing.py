@@ -17,16 +17,24 @@ from trading.llm.context import Mode
 
 
 class MissingNarrativeError(RuntimeError):
-    """Raised by `compile_brief` when one or more expected parts are absent."""
+    """Raised by `compile_brief` when one or more required parts are absent."""
 
 
-def expected_parts(mode: Mode, candidate_symbols: list[str]) -> list[str]:
-    """Return the relative paths the analyst is expected to have written."""
-    parts = ["macro_brief.md", "sector_commentary.md"]
+SECTOR_COMMENTARY_PLACEHOLDER = "_(sector commentary not yet wired — see Phase 12.6)_"
+
+
+def required_parts(mode: Mode, candidate_symbols: list[str]) -> list[str]:
+    """Parts that MUST exist or `compile_brief` raises `MissingNarrativeError`."""
+    parts = ["macro_brief.md"]
     parts.extend(f"candidates/{sym}.md" for sym in candidate_symbols)
     if mode == "post_close":
         parts.append("post_close_recap.md")
     return parts
+
+
+def optional_parts(mode: Mode) -> list[str]:
+    """Parts `compile_brief` tolerates being absent (substitutes a placeholder)."""
+    return ["sector_commentary.md"]
 
 
 _CANDIDATE_HEADING = re.compile(r"^### ([A-Z0-9_]+) — passes \d+/\d+ rules", re.MULTILINE)
@@ -45,10 +53,12 @@ def _infer_mode(context_md: str) -> Mode:
 def compile_brief(date_dir: Path, *, mode: Mode | None = None) -> Path:
     """Read narrative parts in `date_dir`, write `brief.md`, return its path.
 
-    Raises `MissingNarrativeError` listing any expected parts that are
-    absent. Orphan candidate files (symbols not in the bundle) are skipped
-    with a stderr warning. If `mode` is None, it is inferred from the
-    bundle header.
+    Raises `MissingNarrativeError` listing any required parts that are
+    absent. Optional parts (`sector_commentary.md`) get a hardcoded
+    placeholder body when missing — the section header stays. Orphan
+    candidate files (symbols not in the bundle) are skipped with a
+    stderr warning. If `mode` is None, it is inferred from the bundle
+    header.
     """
     context_path = date_dir / "_context.md"
     if not context_path.is_file():
@@ -60,8 +70,8 @@ def compile_brief(date_dir: Path, *, mode: Mode | None = None) -> Path:
     if mode is None:
         mode = _infer_mode(context_md)
     symbols = _parse_candidate_symbols(context_md)
-    expected = expected_parts(mode, symbols)
-    missing = [p for p in expected if not (date_dir / p).is_file()]
+    required = required_parts(mode, symbols)
+    missing = [p for p in required if not (date_dir / p).is_file()]
     if missing:
         raise MissingNarrativeError(
             "Missing analyst narrative files: " + ", ".join(missing)
@@ -78,17 +88,25 @@ def compile_brief(date_dir: Path, *, mode: Mode | None = None) -> Path:
                     file=sys.stderr,
                 )
 
+    sector_path = date_dir / "sector_commentary.md"
+    sector_body = (
+        sector_path.read_text(encoding="utf-8").strip()
+        if sector_path.is_file()
+        else SECTOR_COMMENTARY_PLACEHOLDER
+    )
+
     out_path = date_dir / "brief.md"
+    parts_count = len(required) + (1 if sector_path.is_file() else 0)
     sections: list[str] = [
         f"# Daily brief — {date_dir.name}",
         f"_Compiled at {datetime.now().isoformat(timespec='seconds')} from "
-        f"{len(expected)} narrative parts._",
+        f"{parts_count} narrative parts._",
         "",
         "## Macro",
         (date_dir / "macro_brief.md").read_text(encoding="utf-8").strip(),
         "",
         "## Sector commentary",
-        (date_dir / "sector_commentary.md").read_text(encoding="utf-8").strip(),
+        sector_body,
         "",
         "## Candidates",
     ]
