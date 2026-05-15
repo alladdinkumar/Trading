@@ -22,6 +22,7 @@ from trading.data.news import DEFAULT_ALIASES, fetch_all_news
 from trading.features.regime import Regime
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.llm.context import ContextInputs, assemble_context
+from trading.paper.ledger import log_signal_and_open_trade
 from trading.portfolio.health import (
     FundamentalsSnapshot,
     HealthScore,
@@ -34,7 +35,6 @@ from trading.store.db import get_conn
 from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import insert_news_items
-from trading.paper.ledger import log_signal_and_open_trade
 from trading.store.ohlcv import read_ohlcv
 from trading.store.repo import Signal
 from trading.strategy.rules import Candidate, ScanContext, passing, scan
@@ -192,6 +192,9 @@ def _step_portfolio(
             continue
         ctx = HoldingContext(
             symbol=h.tradingsymbol,
+            qty=h.quantity,
+            avg_price=h.average_price,
+            last_price=h.last_price,
             technicals=technicals_from_history(history),
             fundamentals=FundamentalsSnapshot(),
             sentiment=SentimentSnapshot(),

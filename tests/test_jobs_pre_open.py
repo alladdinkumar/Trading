@@ -3,14 +3,32 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date
+from datetime import UTC, date
+from datetime import datetime as _dt
 from pathlib import Path
+from unittest.mock import patch
 
+import pandas as pd
 import pytest
 
-from trading.config import get_paths
-from trading.jobs.pre_open import PreOpenResult, run_pre_open
+from trading.config import Settings, get_paths
+from trading.data.kite import KiteAuthError
+from trading.data.macro import MacroSnapshot
+from trading.data.news import RawHeadline
+from trading.features.regime import RegimeResult
+from trading.jobs.pre_open import (
+    PreOpenResult,
+    _already_opened_today,
+    _step_auto_open,
+    _step_macro,
+    _step_news,
+    _step_portfolio,
+    _step_scan,
+    run_pre_open,
+)
 from trading.store.migrations import run_migrations
+from trading.store.ohlcv import write_ohlcv
+from trading.strategy.rules import Candidate, RuleResult
 
 
 @pytest.fixture
@@ -71,13 +89,6 @@ def test_run_pre_open_returns_result_with_bundle_path(
     assert result.paper_trades_opened == 0
 
 
-from unittest.mock import patch
-
-from trading.data.macro import MacroSnapshot
-from trading.features.regime import RegimeResult
-from trading.jobs.pre_open import _step_macro
-
-
 def test_step_macro_writes_snapshot_and_returns_regime(
     conn: sqlite3.Connection,
 ) -> None:
@@ -124,12 +135,6 @@ def test_step_macro_degrades_gracefully_on_fetch_error(
     assert conn.execute(
         "SELECT COUNT(*) FROM macro_snapshot"
     ).fetchone()[0] == 0
-
-
-from datetime import UTC, datetime as _dt
-
-from trading.data.news import RawHeadline
-from trading.jobs.pre_open import _step_news
 
 
 def _raw_headline(symbol: str = "RVNL") -> RawHeadline:
@@ -188,10 +193,6 @@ def test_step_news_degrades_gracefully_on_fetch_error(
     assert any("news" in w.lower() for w in warnings)
 
 
-from trading.jobs.pre_open import _step_scan
-from trading.strategy.rules import Candidate, RuleResult
-
-
 def _candidate(symbol: str, n_passed: int) -> Candidate:
     rules = tuple(
         RuleResult(name=f"r{i}", passed=(i < n_passed), reason="")
@@ -211,11 +212,6 @@ def test_step_scan_delegates_to_strategy(paths) -> None:
         out = _step_scan(paths, date(2026, 5, 15), warnings)
     assert out == fake
     assert warnings == []
-
-
-from trading.config import Settings
-from trading.data.kite import KiteAuthError
-from trading.jobs.pre_open import _step_portfolio
 
 
 def _settings(token: str | None = None) -> Settings:
@@ -248,9 +244,6 @@ def test_step_portfolio_degrades_on_kite_auth_error(paths) -> None:
         out = _step_portfolio(paths, _settings(token="x"), warnings, skip_kite=False)
     assert out == []
     assert any("kite auth" in w.lower() for w in warnings)
-
-
-from trading.jobs.pre_open import _already_opened_today, _step_auto_open
 
 
 def test_step_auto_open_creates_signal_and_paper_trade(
@@ -308,3 +301,64 @@ def test_already_opened_today_detects_open_trade(
     conn.commit()
     assert _already_opened_today(conn, "RVNL", date(2026, 5, 15)) is True
     assert _already_opened_today(conn, "NTPC", date(2026, 5, 15)) is False
+
+
+def _all_pass_frame() -> pd.DataFrame:
+    """Construct an OHLCV frame engineered for pipeline-shape testing.
+
+    Long flat history at 100 then a recent rally. Whether all 10 rules
+    pass is sensitive to threshold tuning; the test asserts structural
+    invariants (bundle written, counts consistent), not a specific
+    passing count.
+    """
+    n = 360
+    idx = pd.date_range("2025-01-01", periods=n, freq="B")
+    idx.name = "date"
+    closes = [100.0] * (n - 30) + list(range(101, 116)) + [110.0] * 15
+    df = pd.DataFrame(
+        {
+            "open":  [c - 0.5 for c in closes],
+            "high":  [c + 1.0 for c in closes],
+            "low":   [c - 1.0 for c in closes],
+            "close": closes,
+            "volume": [2_000_000] * n,
+        },
+        index=idx,
+    )
+    return df
+
+
+def test_run_pre_open_full_happy_path_integration(
+    paths, monkeypatch
+) -> None:
+    write_ohlcv(_all_pass_frame(), "TESTSYM", paths)
+
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_macro",
+        lambda c, d, w: (True, "RISK_ON"),
+    )
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_news",
+        lambda c, d, w: (0, 0),
+    )
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_portfolio",
+        lambda p, s, w, *, skip_kite: [],
+    )
+
+    result = run_pre_open(
+        date(2026, 5, 15), paths=paths,
+        skip_news=False, skip_kite=True,
+    )
+    assert result.bundle_path.is_file()
+    body = result.bundle_path.read_text(encoding="utf-8")
+    assert "## Macro snapshot" in body
+    assert "## Today's candidates" in body
+    assert result.candidates_total == 1
+    assert result.paper_trades_opened == result.candidates_passing
+
+    result2 = run_pre_open(
+        date(2026, 5, 15), paths=paths,
+        skip_news=False, skip_kite=True,
+    )
+    assert result2.paper_trades_opened == 0
