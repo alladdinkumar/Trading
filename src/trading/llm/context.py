@@ -50,6 +50,7 @@ def assemble_context(
 
     parts: list[str] = []
     parts.append(_render_header(as_of, mode))
+    parts.append(_render_macro(conn, as_of))
 
     out_path.write_text("\n\n".join(parts) + "\n", encoding="utf-8")
     return out_path
@@ -62,3 +63,25 @@ def _render_header(as_of: date, mode: Mode) -> str:
         f"\n"
         f"_Assembled at {ts}._"
     )
+
+
+def _render_macro(conn: sqlite3.Connection, as_of: date) -> str:
+    row = conn.execute(
+        "SELECT vix, usdinr, fii_flow_cr, dii_flow_cr, regime "
+        "FROM macro_snapshot WHERE date = ?",
+        (as_of.isoformat(),),
+    ).fetchone()
+    if row is None:
+        return "## Macro snapshot\n\n_(no data)_"
+    lines = ["## Macro snapshot", "", "| field | value |", "|---|---|"]
+    if row["vix"] is not None:
+        lines.append(f"| VIX | {row['vix']:.2f} |")
+    if row["usdinr"] is not None:
+        lines.append(f"| USDINR | {row['usdinr']:.2f} |")
+    if row["fii_flow_cr"] is not None:
+        lines.append(f"| FII flow (₹ cr) | {row['fii_flow_cr']:+.0f} |")
+    if row["dii_flow_cr"] is not None:
+        lines.append(f"| DII flow (₹ cr) | {row['dii_flow_cr']:+.0f} |")
+    if row["regime"] is not None:
+        lines.append(f"| Regime | {row['regime']} |")
+    return "\n".join(lines)
