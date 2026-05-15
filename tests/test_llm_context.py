@@ -7,6 +7,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from freezegun import freeze_time
 
 from trading.config import get_paths
 from trading.llm.context import ContextInputs, assemble_context
@@ -270,3 +271,40 @@ def test_assemble_context_post_close_includes_matured_predictions(
     assert "RVNL" in body
     assert "5.00" in body
     assert "6.20" in body
+
+
+@freeze_time("2026-05-15T08:30:00")
+def test_full_pre_open_bundle_snapshot(
+    conn: sqlite3.Connection, paths, snapshot
+) -> None:
+    _seed_macro(conn)
+    _seed_news(conn, "RVNL")
+    _seed_open_trade(conn)
+    health = HealthScore(
+        symbol="TATAPOWER", verdict="TRIM", score=22, net_votes=-2,
+        votes_cast=8, reasons=["below 200-DMA", "RSI 38"], pnl_pct=-3.2,
+    )
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(
+            candidates=[_candidate("RVNL", n_passed=9)],
+            holdings_health=[health],
+        ),
+    )
+    assert out.read_text(encoding="utf-8") == snapshot
+
+
+@freeze_time("2026-05-15T16:30:00")
+def test_full_post_close_bundle_snapshot(
+    conn: sqlite3.Connection, paths, snapshot
+) -> None:
+    _seed_macro(conn)
+    _seed_open_trade(conn)
+    _seed_matured_prediction(conn)
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="post_close",
+        inputs=ContextInputs(candidates=[], holdings_health=[]),
+    )
+    assert out.read_text(encoding="utf-8") == snapshot

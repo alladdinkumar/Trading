@@ -1,0 +1,78 @@
+# serializer version: 1
+# name: test_full_post_close_bundle_snapshot
+  '''
+  # Trading context bundle — 2026-05-15  (mode: post_close)
+  
+  _Assembled at 2026-05-15T16:30:00._
+  
+  ## Macro snapshot
+  
+  | field | value |
+  |---|---|
+  | VIX | 19.40 |
+  | USDINR | 95.76 |
+  | FII flow (₹ cr) | +187 |
+  | Regime | NEUTRAL |
+  
+  ## Today's candidates
+  
+  _(no data)_
+  
+  ## Holdings health
+  
+  _(no data)_
+  
+  ## Open paper-trades
+  
+  | symbol | entry | qty | entered | trailing stop |
+  |---|---|---|---|---|
+  | RVNL | 305.00 | 32 | 2026-05-12 | 295.00 |
+  
+  ## Matured predictions
+  
+  | symbol | predicted % | actual % | error % | horizon (d) |
+  |---|---|---|---|---|
+  | RVNL | 5.00 | 6.20 | +1.20 | 25 |
+  
+  '''
+# ---
+# name: test_full_pre_open_bundle_snapshot
+  '''
+  # Trading context bundle — 2026-05-15  (mode: pre_open)
+  
+  _Assembled at 2026-05-15T08:30:00._
+  
+  ## Macro snapshot
+  
+  | field | value |
+  |---|---|
+  | VIX | 19.40 |
+  | USDINR | 95.76 |
+  | FII flow (₹ cr) | +187 |
+  | Regime | NEUTRAL |
+  
+  ## Today's candidates
+  
+  ### RVNL — passes 9/10 rules
+  - close 312.50, RSI 58.0, ATR(14) 8.40
+  - SMA20 305.00 · SMA50 300.00 · SMA200 275.00
+  - sentiment 7d +0.32 · 4 headlines (0 negative)
+  - Critical news flag: NO
+  - Recent headlines:
+    - 2026-05-13 · [results] RVNL bags rs 500cr order from Indian Railways (+0.55)
+  
+  ## Holdings health
+  
+  ### TATAPOWER — verdict TRIM (score 22/100, net votes -2/8)
+  - unrealised P&L: -3.20%
+  - below 200-DMA
+  - RSI 38
+  
+  ## Open paper-trades
+  
+  | symbol | entry | qty | entered | trailing stop |
+  |---|---|---|---|---|
+  | RVNL | 305.00 | 32 | 2026-05-12 | 295.00 |
+  
+  '''
+# ---
