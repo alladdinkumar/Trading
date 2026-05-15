@@ -16,12 +16,15 @@ from pathlib import Path
 
 from trading.config import Paths, Settings, get_paths, get_settings
 from trading.data.macro import snapshot_and_classify
+from trading.data.news import DEFAULT_ALIASES, fetch_all_news
 from trading.features.regime import Regime
+from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.llm.context import ContextInputs, assemble_context
 from trading.portfolio.health import HealthScore
 from trading.store.db import get_conn
 from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
+from trading.store.news_store import insert_news_items
 from trading.strategy.rules import Candidate, passing
 
 
@@ -117,8 +120,23 @@ def _step_macro(
 def _step_news(
     conn: sqlite3.Connection, as_of: date, warnings: list[str]
 ) -> tuple[int, int]:
-    """Stub — Task 3 wires fetch_all_news + score + aggregate."""
-    return 0, 0
+    """Fetch RSS + NSE events, score with FinBERT, insert + aggregate.
+
+    Returns (news_inserted, sentiment_rollups). Degrades gracefully:
+    a top-level failure (e.g. all RSS sources down) returns (0, 0)
+    with a warning. Per-source failures are isolated by Phase 8 already.
+    """
+    try:
+        items = fetch_all_news()
+        scored = score_news_items(items)
+    except Exception as e:  # pragma: no cover — defensive
+        warnings.append(f"news fetch/score failed: {e!s}")
+        return 0, 0
+
+    inserted = insert_news_items(conn, scored)
+    watched = sorted(DEFAULT_ALIASES.keys())
+    rollups = aggregate_daily(conn, watched, as_of)
+    return inserted, len(rollups)
 
 
 def _step_scan(

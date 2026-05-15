@@ -124,3 +124,65 @@ def test_step_macro_degrades_gracefully_on_fetch_error(
     assert conn.execute(
         "SELECT COUNT(*) FROM macro_snapshot"
     ).fetchone()[0] == 0
+
+
+from datetime import UTC, datetime as _dt
+
+from trading.data.news import RawHeadline
+from trading.jobs.pre_open import _step_news
+
+
+def _raw_headline(symbol: str = "RVNL") -> RawHeadline:
+    return RawHeadline(
+        ts=_dt(2026, 5, 14, 10, 0, tzinfo=UTC),
+        source="moneycontrol",
+        headline=f"{symbol} test headline",
+        url=f"https://example.com/{symbol.lower()}",
+    )
+
+
+def test_step_news_inserts_headlines_and_aggregates(
+    conn: sqlite3.Connection,
+) -> None:
+    warnings: list[str] = []
+    with patch(
+        "trading.jobs.pre_open.fetch_all_news",
+        return_value=[_raw_headline("RVNL")],
+    ), patch(
+        "trading.jobs.pre_open.score_news_items",
+        side_effect=lambda items: [
+            __import__("trading.data.news", fromlist=["NewsItem"]).NewsItem(
+                ts=i.ts.isoformat(),
+                symbol="RVNL",
+                source=i.source,
+                headline=i.headline,
+                url=i.url,
+                sentiment=0.5,
+                category="results",
+                is_critical=False,
+            )
+            for i in items
+        ],
+    ):
+        inserted, rollups = _step_news(
+            conn, date(2026, 5, 15), warnings
+        )
+    assert inserted == 1
+    assert rollups == 1
+    assert warnings == []
+
+
+def test_step_news_degrades_gracefully_on_fetch_error(
+    conn: sqlite3.Connection,
+) -> None:
+    warnings: list[str] = []
+    with patch(
+        "trading.jobs.pre_open.fetch_all_news",
+        side_effect=RuntimeError("RSS down"),
+    ):
+        inserted, rollups = _step_news(
+            conn, date(2026, 5, 15), warnings
+        )
+    assert inserted == 0
+    assert rollups == 0
+    assert any("news" in w.lower() for w in warnings)
