@@ -121,6 +121,14 @@ def compile_brief(date_dir: Path, *, mode: Mode | None = None) -> Path:
         sections.append("")
         sections.append(mid_day_path.read_text(encoding="utf-8").strip())
 
+    # Optional post-close summary (Phase 14.B): same pattern, regardless of mode.
+    post_close_summary_path = date_dir / "post_close_summary.md"
+    if post_close_summary_path.is_file():
+        sections.append("")
+        sections.append(
+            post_close_summary_path.read_text(encoding="utf-8").strip()
+        )
+
     if mode == "post_close":
         sections.append("")
         sections.append("## Post-close recap")

@@ -187,3 +187,33 @@ def test_compile_brief_mid_day_skips_update_when_absent(
     out = compile_brief(date_dir, mode="mid_day")
     body = out.read_text(encoding="utf-8")
     assert "Mid-day update" not in body
+
+
+def test_compile_brief_includes_post_close_summary_after_mid_day(
+    tmp_path: Path,
+) -> None:
+    """Both mid_day_update.md and post_close_summary.md are opportunistically
+    included; ordering must be mid_day FIRST, post_close SECOND."""
+    date_dir = tmp_path / "2026-05-16"
+    date_dir.mkdir()
+    _write_part(
+        date_dir, "_context.md",
+        "# Trading context bundle — 2026-05-16  (mode: pre_open)\n"
+        "\n## Today's candidates\n\n### RVNL — passes 9/10 rules\n",
+    )
+    _write_part(date_dir, "macro_brief.md", "Regime: NEUTRAL.\n")
+    _write_part(date_dir, "candidates/RVNL.md", "# RVNL — Conviction: HIGH\n")
+    _write_part(
+        date_dir, "mid_day_update.md",
+        "## Mid-day update — captured 2026-05-16T12:32:14\n\nMID-DAY-CONTENT\n",
+    )
+    _write_part(
+        date_dir, "post_close_summary.md",
+        "## Post-close summary — captured 2026-05-16T16:01:23\n\nPOST-CLOSE-CONTENT\n",
+    )
+    out = compile_brief(date_dir, mode="pre_open")
+    body = out.read_text(encoding="utf-8")
+    assert "MID-DAY-CONTENT" in body
+    assert "POST-CLOSE-CONTENT" in body
+    # Order: mid-day comes BEFORE post-close
+    assert body.index("MID-DAY-CONTENT") < body.index("POST-CLOSE-CONTENT")
