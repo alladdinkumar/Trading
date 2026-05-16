@@ -35,6 +35,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 13.5 | Kite MCP pivot | `[x]` |
 | 14 | mid_day + post_close jobs | `[~]` |
 | 14.A | mid_day MVP | `[x]` |
+| 14.B | post_close MVP | `[x]` |
 | 15 | Streamlit dashboard | `[ ]` |
 | 16 | LightGBM ranker (Layer B) | `[ ]` |
 | 17 | Task Scheduler + logging | `[ ]` |
@@ -343,6 +344,41 @@ Granular task tracker for the trading system build. Update as work completes.
        Markdown table rendered cleanly with summary line.
        Suite **493 passed**, 1 skipped (live), ruff + mypy clean.
        Commit `feat(jobs): mid_day MVP (Phase 14.A)` pushed to
+       origin/main.
+
+## Phase 14.B — post_close MVP
+
+> Spec at [`docs/superpowers/specs/2026-05-16-phase-14-b-post-close-design.md`](docs/superpowers/specs/2026-05-16-phase-14-b-post-close-design.md).
+> Plan at [`docs/superpowers/plans/2026-05-16-phase-14-b-post-close.md`](docs/superpowers/plans/2026-05-16-phase-14-b-post-close.md).
+> Reuses 14.A `/kite-quotes-snapshot` skill, `paper.mtm.mtm_open_trades`,
+> and `paper.reconcile.reconcile_day` unchanged.
+
+- [x] 14.B.1 `src/trading/jobs/post_close.py`: `PostCloseAborted` +
+       `PostCloseResult` + `run_post_close(prepare/apply)` orchestrator;
+       `_render_post_close_summary` markdown builder; reuses
+       `gather_quote_symbols` + `_quotes_to_bars` from `mid_day`. Calls
+       `paper.mtm.mtm_open_trades` for final MTM and
+       `paper.reconcile.reconcile_day` for matured predictions +
+       portfolio snapshot. 5 new tests including TIME-stop closure +
+       idempotent re-run + quiet-day case.
+- [x] 14.B.2 `src/trading/cli.py`: `trading post-close --date YYYY-MM-DD
+       [--apply] [--cash N]` subcommand with Rich summary table +
+       remediation on abort. 3 new tests.
+- [x] 14.B.3 `src/trading/llm/briefing.py`: opportunistic include for
+       `post_close_summary.md` after `mid_day_update.md` (additive
+       across modes). 1 new test verifying ordering.
+- [x] 14.B.4 `scripts/post_close.bat`: two-step Windows launcher
+       (prepare/apply).
+- [x] 14.B.5 Real-data smoke: `trading post-close` prepare wrote
+       `_quote_symbols.txt` (11 symbols). Kite MCP session was invalid
+       in this session so the smoke reused today's existing
+       `quotes_0056.json` (real Kite closes) renamed to a fresh HHMM
+       to clear the 30-min staleness gate. `--apply` built 11 bars,
+       evaluated 0 open trades (quiet day), wrote
+       `portfolio_snapshots[2026-05-16]` (equity ₹100,000, drawdown
+       null), rendered `post_close_summary.md` end-to-end. Suite
+       **502 passed**, 1 skipped (live), ruff + mypy clean.
+       Commit `feat(jobs): post_close MVP (Phase 14.B)` pushed to
        origin/main.
 
 ## Phase 14 — mid_day + post_close jobs
