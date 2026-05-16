@@ -457,3 +457,62 @@ def test_mid_day_cli_apply_happy_path(
     assert result.exit_code == 0, result.stdout
     assert "evaluated" in result.stdout
     assert "mid_day_update.md" in result.stdout
+
+
+def test_post_close_cli_prepare_writes_symbol_file(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+    result = runner.invoke(
+        app, ["post-close", "--date", "2026-05-16"]
+    )
+    assert result.exit_code == 0, result.stdout
+    out_path = tmp_path / "data" / "raw" / "2026-05-16" / "_quote_symbols.txt"
+    assert out_path.is_file()
+    assert "/kite-quotes-snapshot" in result.stdout
+
+
+def test_post_close_cli_apply_aborts_when_quotes_missing(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+    result = runner.invoke(
+        app, ["post-close", "--date", "2026-05-16", "--apply"]
+    )
+    assert result.exit_code == 2, result.stdout
+    assert "/kite-quotes-snapshot" in result.stdout
+
+
+def test_post_close_cli_apply_happy_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Stub run_post_close to verify exit-code + summary-line."""
+    from datetime import date as _d
+    from datetime import datetime as _dt
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+
+    fake_summary = tmp_path / "data" / "research" / "2026-05-16" / "post_close_summary.md"
+    fake_summary.parent.mkdir(parents=True, exist_ok=True)
+    fake_summary.write_text("stub", encoding="utf-8")
+
+    from trading.jobs import post_close as pc_mod
+    fake_result = pc_mod.PostCloseResult(
+        as_of=_d(2026, 5, 16),
+        quotes_capture_ts=_dt(2026, 5, 16, 16, 1),
+        bars_built=11, trades_evaluated=2, trades_closed=1,
+        trades_held=1, trades_skipped=0, predictions_matured=2,
+        equity=527341.0, drawdown_pct=-1.2,
+        summary_path=fake_summary, symbols_path=None, warnings=[],
+    )
+    monkeypatch.setattr(
+        "trading.cli.run_post_close", lambda *a, **kw: fake_result
+    )
+    result = runner.invoke(
+        app, ["post-close", "--date", "2026-05-16", "--apply"]
+    )
+    assert result.exit_code == 0, result.stdout
+    assert "evaluated" in result.stdout or "trades_evaluated" in result.stdout
+    assert "post_close_summary.md" in result.stdout

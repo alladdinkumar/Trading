@@ -55,6 +55,7 @@ from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
 from trading.jobs.mid_day import MidDayAborted, run_mid_day
+from trading.jobs.post_close import PostCloseAborted, run_post_close
 from trading.jobs.pre_open import PreOpenAborted, run_pre_open
 from trading.llm.briefing import MissingNarrativeError, compile_brief
 from trading.llm.context import ContextInputs
@@ -1199,6 +1200,63 @@ def mid_day_cmd(
         for w in result.warnings:
             console.print(f"  - {w}")
     console.print(f"[green]wrote[/green] {result.update_path}")
+
+
+@app.command("post-close")
+def post_close_cmd(
+    date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD")],
+    apply: Annotated[
+        bool,
+        typer.Option(
+            "--apply",
+            help="Apply mode: read quotes + run MTM + reconcile. Without --apply runs prepare mode.",
+        ),
+    ] = False,
+    cash: Annotated[
+        float,
+        typer.Option(help="Paper-cash balance for portfolio snapshot."),
+    ] = 100_000.0,
+) -> None:
+    """Phase 14.B — end-of-day MTM + reconcile + summary."""
+    as_of = date.fromisoformat(date_str)
+    try:
+        result = run_post_close(as_of, apply=apply, cash=cash)
+    except PostCloseAborted as e:
+        console.print(f"[red]Post-close aborted:[/red] {e}")
+        raise typer.Exit(code=2) from e
+
+    if result.symbols_path is not None:
+        console.print(f"[green]wrote[/green] {result.symbols_path}")
+        console.print(
+            "[bold]Now run /kite-quotes-snapshot skill in Claude Code, "
+            f"then `trading post-close --date {date_str} --apply`[/bold]"
+        )
+        return
+
+    table = Table(title=f"post-close {as_of.isoformat()}", show_header=True)
+    table.add_column("step")
+    table.add_column("count", justify="right")
+    table.add_row("quotes_captured_at", str(result.quotes_capture_ts))
+    table.add_row("bars_built", str(result.bars_built))
+    table.add_row("trades_evaluated", str(result.trades_evaluated))
+    table.add_row("trades_closed", str(result.trades_closed))
+    table.add_row("trades_held", str(result.trades_held))
+    table.add_row("trades_skipped", str(result.trades_skipped))
+    table.add_row("predictions_matured", str(result.predictions_matured))
+    table.add_row(
+        "equity",
+        f"Rs {result.equity:,.0f}" if result.equity is not None else "—",
+    )
+    table.add_row(
+        "drawdown_pct",
+        f"{result.drawdown_pct:+.2f}%" if result.drawdown_pct is not None else "—",
+    )
+    console.print(table)
+    if result.warnings:
+        console.print("[yellow]Warnings:[/yellow]")
+        for w in result.warnings:
+            console.print(f"  - {w}")
+    console.print(f"[green]wrote[/green] {result.summary_path}")
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry
