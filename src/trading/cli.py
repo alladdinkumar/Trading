@@ -57,6 +57,7 @@ from trading.features.technicals import add_indicators
 from trading.jobs.mid_day import MidDayAborted, run_mid_day
 from trading.jobs.post_close import PostCloseAborted, run_post_close
 from trading.jobs.pre_open import PreOpenAborted, run_pre_open
+from trading.jobs.pre_open_iep import PreOpenIepAborted, run_pre_open_iep
 from trading.llm.briefing import MissingNarrativeError, compile_brief
 from trading.llm.context import ContextInputs
 from trading.llm.context import assemble_context as _assemble_context
@@ -1257,6 +1258,38 @@ def post_close_cmd(
         for w in result.warnings:
             console.print(f"  - {w}")
     console.print(f"[green]wrote[/green] {result.summary_path}")
+
+
+@app.command("pre-open-iep")
+def pre_open_iep_cmd(
+    date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD")],
+) -> None:
+    """Phase 14.C — pre-open gap filter + rerank of pre_open candidates (08:55)."""
+    as_of = date.fromisoformat(date_str)
+    try:
+        result = run_pre_open_iep(as_of)
+    except PreOpenIepAborted as e:
+        console.print(f"[red]Pre-open IEP aborted:[/red] {e}")
+        raise typer.Exit(code=2) from e
+
+    table = Table(title=f"pre-open-iep {as_of.isoformat()}", show_header=True)
+    table.add_column("step")
+    table.add_column("count", justify="right")
+    table.add_row("regime", result.regime)
+    table.add_row("candidates_input", str(result.candidates_input))
+    table.add_row("candidates_filtered", str(result.candidates_filtered))
+    table.add_row("candidates_removed", str(result.candidates_removed))
+    table.add_row("rerank_applied", "yes" if result.rerank_applied else "no")
+    console.print(table)
+    if result.removed_symbols:
+        console.print(f"[yellow]Removed:[/yellow] {', '.join(result.removed_symbols)}")
+    if result.warnings:
+        console.print("[yellow]Warnings:[/yellow]")
+        for w in result.warnings:
+            console.print(f"  - {w}")
+    if result.context_path is not None:
+        console.print(f"[green]updated[/green] {result.context_path}")
+        console.print("[bold]Ready for /analyst skill[/bold]")
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry

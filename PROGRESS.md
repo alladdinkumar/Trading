@@ -41,7 +41,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 14 — mid_day + post_close jobs_
+**Currently working on:** _Phase 14.C — pre-open IEP (real-data smoke pending)_
 **Next up:** _Phase 12.6 — Sector data (deferred)_
 
 ---
@@ -380,6 +380,31 @@ Granular task tracker for the trading system build. Update as work completes.
        **502 passed**, 1 skipped (live), ruff + mypy clean.
        Commit `feat(jobs): post_close MVP (Phase 14.B)` pushed to
        origin/main.
+
+## Phase 14.C — pre-open IEP gap filter
+
+> Spec at [`docs/superpowers/specs/2026-05-16-phase-14-c-pre-open-iep-design.md`](docs/superpowers/specs/2026-05-16-phase-14-c-pre-open-iep-design.md).
+> Plan at [`docs/superpowers/plans/2026-05-16-phase-14-c-pre-open-iep.md`](docs/superpowers/plans/2026-05-16-phase-14-c-pre-open-iep.md).
+> Runs at 08:55 (5 min before market open) to filter + reorder
+> pre_open's candidates by overnight gap and sector momentum
+> alignment with today's regime; updates `_context.md` in place.
+
+- [x] 14.C.1 `src/trading/jobs/pre_open_iep.py`: `PreOpenIepAborted` +
+       `PreOpenIepResult` + `run_pre_open_iep` orchestrator. Reads
+       `_context.md` + Kite quotes + parquet D-1 closes + macro_snapshot
+       regime; computes gaps; applies regime + (optional) sector filter;
+       reranks survivors by composite score `(gap_norm × 0.6) +
+       (sector_pct × 0.4)`; writes updated `_context.md` in place. 19
+       unit tests covering gap math, regime / sector filters, percentile
+       ranking, rerank ordering, and context parse/rewrite; 4
+       integration tests covering missing-context abort, no-candidates
+       early return, end-to-end RISK_ON filter+reorder, and graceful
+       degradation to NEUTRAL when regime + quotes both missing.
+- [x] 14.C.2 `src/trading/cli.py`: `trading pre-open-iep --date
+       YYYY-MM-DD` subcommand with Rich summary table; exports added
+       to `src/trading/jobs/__init__.py`.
+- [x] 14.C.3 `scripts/pre_open_iep.bat`: Windows one-step launcher.
+- [ ] 14.C.4 Real-data smoke: pre-market run on next trading day.
 
 ## Phase 14 — mid_day + post_close jobs
 
