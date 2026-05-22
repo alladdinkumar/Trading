@@ -41,8 +41,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 14.C — pre-open IEP (real-data smoke pending)_
-**Next up:** _Phase 12.6 — Sector data (deferred)_
+**Currently working on:** _Phase 14 complete (mid-session smoke 2026-05-22 ✓)_
+**Next up:** _Phase 12.6 — Sector data (deferred) or Phase 15 — Streamlit_
 
 ---
 
@@ -404,7 +404,16 @@ Granular task tracker for the trading system build. Update as work completes.
        YYYY-MM-DD` subcommand with Rich summary table; exports added
        to `src/trading/jobs/__init__.py`.
 - [x] 14.C.3 `scripts/pre_open_iep.bat`: Windows one-step launcher.
-- [ ] 14.C.4 Real-data smoke: pre-market run on next trading day.
+- [x] 14.C.4 Real-data smoke (2026-05-22, mid-session 14:25 IST): MCP
+       snapshot wrote 11 holdings + 10 GTTs; `trading pre-open` ran clean
+       (12 candidates evaluated, 0 passing, holdings_scored 11); MCP
+       quotes for 11 symbols at 14:24 fed `trading pre-open-iep` which
+       reordered the 5 rules-passing candidates (NEUTRAL regime → kept
+       all; gap rerank applied: JIOFIN, IDFCFIRSTB, COALINDIA, MAZDOCK,
+       RECLTD). `mid-day --apply` built 11 live bars and `post-close
+       --apply` recorded portfolio_snapshots[2026-05-22] (equity ₹100k,
+       0 open trades). Full pipeline 13 → 13.5 → 14.A → 14.B → 14.C
+       exercised end-to-end against live data.
 
 ## Phase 14 — mid_day + post_close jobs
 
