@@ -38,3 +38,58 @@ def test_reminder_slot_is_frozen():
     slot = ReminderSlot(when="08:30", title="t", body="b")
     with pytest.raises(Exception):
         slot.when = "09:00"  # type: ignore[misc]
+
+
+def test_fire_reminder_holiday_short_circuits(monkeypatch):
+    from trading.ops import runner
+
+    calls = []
+    monkeypatch.setattr(runner, "is_trading_day", lambda d: False)
+    monkeypatch.setattr(
+        runner, "notify",
+        lambda level, title, body="": calls.append((level, title, body)),
+    )
+
+    runner.fire_reminder("pre_open_kite", today=date(2026, 1, 26))
+    assert calls == []
+
+
+def test_fire_reminder_substitutes_date(monkeypatch):
+    from trading.ops import runner
+
+    calls = []
+    monkeypatch.setattr(runner, "is_trading_day", lambda d: True)
+    monkeypatch.setattr(
+        runner, "notify",
+        lambda level, title, body="": calls.append((level, title, body)),
+    )
+
+    runner.fire_reminder("pre_open_scan", today=date(2026, 5, 25))
+    assert len(calls) == 1
+    _, _, body = calls[0]
+    assert "2026-05-25" in body
+    assert "<date>" not in body
+
+
+def test_fire_reminder_unknown_slot_raises(monkeypatch):
+    from trading.ops import runner
+
+    monkeypatch.setattr(runner, "is_trading_day", lambda d: True)
+    monkeypatch.setattr(runner, "notify", lambda *a, **kw: None)
+    with pytest.raises(KeyError):
+        runner.fire_reminder("does_not_exist", today=date(2026, 5, 25))
+
+
+def test_fire_reminder_uses_today_when_no_arg(monkeypatch):
+    from trading.ops import runner
+
+    monkeypatch.setattr(runner, "_today_ist", lambda: date(2026, 5, 25))
+    monkeypatch.setattr(runner, "is_trading_day", lambda d: True)
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        runner, "notify",
+        lambda level, title, body="": captured.update(body=body),
+    )
+
+    runner.fire_reminder("pre_open_scan")
+    assert "2026-05-25" in captured["body"]
