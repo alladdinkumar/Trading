@@ -33,16 +33,17 @@ Granular task tracker for the trading system build. Update as work completes.
 | 12.6 | Sector data | `[ ]` |
 | 13 | pre_open job (MVP ⭐) | `[x]` |
 | 13.5 | Kite MCP pivot | `[x]` |
-| 14 | mid_day + post_close jobs | `[~]` |
+| 14 | mid_day + post_close jobs | `[x]` |
 | 14.A | mid_day MVP | `[x]` |
 | 14.B | post_close MVP | `[x]` |
-| 15 | Streamlit dashboard | `[ ]` |
+| 14.C | pre-open IEP gap filter | `[x]` |
+| 15 | Streamlit dashboard | `[~]` |
 | 16 | LightGBM ranker (Layer B) | `[ ]` |
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 14 complete (mid-session smoke 2026-05-22 ✓)_
-**Next up:** _Phase 12.6 — Sector data (deferred) or Phase 15 — Streamlit_
+**Currently working on:** _Phase 15 — Streamlit dashboard_
+**Next up:** _Phase 17 — Task Scheduler + logging (unblocks Phase 18 live paper-trading)_
 
 ---
 
@@ -415,14 +416,17 @@ Granular task tracker for the trading system build. Update as work completes.
        0 open trades). Full pipeline 13 → 13.5 → 14.A → 14.B → 14.C
        exercised end-to-end against live data.
 
-## Phase 14 — mid_day + post_close jobs
+## Phase 14 — mid_day + post_close jobs (rollup)
 
-- [ ] 14.1 `src/trading/jobs/mid_day.py`: live quotes, MTM, kill-switch checks, intraday update
-- [ ] 14.2 `src/trading/jobs/post_close.py`: final MTM, prediction eval, reconciliation, post-close brief
-- [ ] 14.3 `src/trading/jobs/pre_open_iep.py`: 08:55 pre-open IEP gap filter sub-job
-- [ ] 14.4 `scripts/{mid_day,post_close,pre_open_iep}.bat`
-- [ ] 14.5 Integration tests for each job with cached fixtures
-- [ ] 14.6 Update PROGRESS.md → commit `feat(jobs): mid_day + post_close + IEP`
+> Superseded by sub-phases 14.A / 14.B / 14.C above — the original
+> single-phase plan was split during execution. Items kept for traceability.
+
+- [x] 14.1 `src/trading/jobs/mid_day.py`: live quotes, MTM, kill-switch checks, intraday update — done in 14.A
+- [x] 14.2 `src/trading/jobs/post_close.py`: final MTM, prediction eval, reconciliation, post-close brief — done in 14.B
+- [x] 14.3 `src/trading/jobs/pre_open_iep.py`: 08:55 pre-open IEP gap filter sub-job — done in 14.C
+- [x] 14.4 `scripts/{mid_day,post_close,pre_open_iep}.bat` — done across 14.A/B/C
+- [x] 14.5 Integration tests for each job with cached fixtures — covered in 14.A/B/C test suites
+- [x] 14.6 PROGRESS.md updates + commits — pushed `feat(jobs): mid_day MVP` (14.A), `feat(jobs): post_close MVP` (14.B), `feat(jobs): pre-open IEP gap filter MVP` (14.C)
 
 ## Phase 15 — Streamlit dashboard
 
