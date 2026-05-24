@@ -516,3 +516,64 @@ def test_post_close_cli_apply_happy_path(
     assert result.exit_code == 0, result.stdout
     assert "evaluated" in result.stdout or "trades_evaluated" in result.stdout
     assert "post_close_summary.md" in result.stdout
+
+
+def test_cli_remind_happy_path(monkeypatch):
+    from trading.ops import runner as runner_mod
+
+    calls = []
+    monkeypatch.setattr(runner_mod, "is_trading_day", lambda d: True)
+    monkeypatch.setattr(
+        runner_mod, "notify",
+        lambda level, title, body="": calls.append((title, body)),
+    )
+
+    result = runner.invoke(app, ["remind", "--slot", "pre_open_scan"])
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    assert "Pre-open step 2/4" in calls[0][0]
+
+
+def test_cli_remind_unknown_slot_exits_2(monkeypatch):
+    from trading.ops import runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "is_trading_day", lambda d: True)
+    monkeypatch.setattr(runner_mod, "notify", lambda *a, **kw: None)
+
+    result = runner.invoke(app, ["remind", "--slot", "nope"])
+    assert result.exit_code == 2
+
+
+def test_cli_remind_holiday_silent(monkeypatch):
+    from trading.ops import runner as runner_mod
+
+    calls = []
+    monkeypatch.setattr(runner_mod, "is_trading_day", lambda d: False)
+    monkeypatch.setattr(
+        runner_mod, "notify",
+        lambda level, title, body="": calls.append(title),
+    )
+
+    result = runner.invoke(app, ["remind", "--slot", "pre_open_scan"])
+    assert result.exit_code == 0
+    assert calls == []
+
+
+def test_cli_notify_test_dispatches(monkeypatch):
+    from trading.ops import notify as notify_mod
+
+    calls = []
+    monkeypatch.setattr(
+        notify_mod, "notify",
+        lambda level, title, body="": calls.append((level, title, body)),
+    )
+    # cli imports the function as _notify, so patch the cli binding too
+    import trading.cli as cli_mod
+    monkeypatch.setattr(cli_mod, "_notify", notify_mod.notify)
+
+    result = runner.invoke(app, ["notify-test"])
+    assert result.exit_code == 0
+    assert len(calls) == 1
+    level, title, _ = calls[0]
+    assert level == "info"
+    assert "notify-test" in title or "Test" in title

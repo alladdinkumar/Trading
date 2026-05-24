@@ -61,6 +61,8 @@ from trading.jobs.pre_open_iep import PreOpenIepAborted, run_pre_open_iep
 from trading.llm.briefing import MissingNarrativeError, compile_brief
 from trading.llm.context import ContextInputs
 from trading.llm.context import assemble_context as _assemble_context
+from trading.ops.notify import notify as _notify
+from trading.ops.runner import SCHEDULE, fire_reminder
 from trading.paper.ledger import log_signal_and_open_trade, open_trades
 from trading.paper.mtm import build_bars_from_history, mtm_open_trades
 from trading.paper.reconcile import reconcile_day
@@ -1290,6 +1292,33 @@ def pre_open_iep_cmd(
     if result.context_path is not None:
         console.print(f"[green]updated[/green] {result.context_path}")
         console.print("[bold]Ready for /analyst skill[/bold]")
+
+
+@app.command("remind")
+def remind_cmd(
+    slot: Annotated[str, typer.Option(help="Slot name from ops.runner.SCHEDULE")],
+) -> None:
+    """Fire a single reminder. Invoked by Windows Task Scheduler entries."""
+    if slot not in SCHEDULE:
+        console.print(f"[red]unknown slot:[/red] {slot}")
+        console.print(f"valid slots: {', '.join(sorted(SCHEDULE.keys()))}")
+        raise typer.Exit(code=2)
+    fire_reminder(slot)
+
+
+@app.command("notify-test")
+def notify_test_cmd() -> None:
+    """Fire a sanity-check notification on both Slack and Windows toast.
+
+    Useful after first-time setup to verify SLACK_WEBHOOK_URL and plyer
+    are wired correctly.
+    """
+    _notify(
+        "info",
+        "Trading notify-test",
+        "If you see this in Slack AND as a Windows toast, you're wired up correctly.",
+    )
+    console.print("[green]ok[/green] — check Slack + Windows notification area")
 
 
 if __name__ == "__main__":  # pragma: no cover — manual entry
