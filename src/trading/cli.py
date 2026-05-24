@@ -91,7 +91,11 @@ def _main() -> None:
 
     Empty callback so Typer treats `trading` as a multi-command app (otherwise
     a single-command app flattens and rejects the subcommand name).
+    Calling `get_settings()` here also loads `.env` once per CLI invocation
+    so subcommands that read env vars directly (e.g. `notify-test` reading
+    `SLACK_WEBHOOK_URL` inside `post_slack`) see the configured values.
     """
+    get_settings()
 
 
 @app.command("ingest-history")
