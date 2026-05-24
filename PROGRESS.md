@@ -37,12 +37,12 @@ Granular task tracker for the trading system build. Update as work completes.
 | 14.A | mid_day MVP | `[x]` |
 | 14.B | post_close MVP | `[x]` |
 | 14.C | pre-open IEP gap filter | `[x]` |
-| 15 | Streamlit dashboard | `[~]` |
+| 15 | Streamlit dashboard | `[x]` |
 | 16 | LightGBM ranker (Layer B) | `[ ]` |
 | 17 | Task Scheduler + logging | `[ ]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 15 — Streamlit dashboard_
+**Currently working on:** _Phase 15 complete (real-data smoke 2026-05-24 ✓)_
 **Next up:** _Phase 17 — Task Scheduler + logging (unblocks Phase 18 live paper-trading)_
 
 ---
@@ -430,13 +430,24 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 15 — Streamlit dashboard
 
-- [ ] 15.1 `src/trading/ui/app.py`: multipage entry, sidebar nav
-- [ ] 15.2 `ui/pages/1_Portfolio.py`: current holdings, health scores, GTT viability
-- [ ] 15.3 `ui/pages/2_Today_Signals.py`: top candidates with rationale, paper-trade status
-- [ ] 15.4 `ui/pages/3_Backtest.py`: backtest report viewer, equity curve, metrics table
-- [ ] 15.5 `ui/pages/4_Paper_Journal.py`: paper-trade history, P&L curve, prediction accuracy
-- [ ] 15.6 Smoke tests via `streamlit.testing.v1`
-- [ ] 15.7 Update PROGRESS.md → commit `feat(ui): streamlit dashboard`
+> Spec at [`docs/superpowers/specs/2026-05-24-phase-15-streamlit-design.md`](docs/superpowers/specs/2026-05-24-phase-15-streamlit-design.md).
+> User-authorized autonomous build on 2026-05-24: "use playwright mcp …
+> make recommended choices yourself … do it on your own and test and improve".
+> Backtest page deferred to a future follow-up (closed paper-trades currently
+> zero — would render an empty page).
+
+- [x] 15.1 `src/trading/ui/data.py`: cached SQLite/parquet/markdown/kite-snapshot readers behind `@st.cache_data(ttl=60)`. Every reader degrades gracefully on missing data (returns `None` / `[]` / empty DataFrame) so pages branch on truthiness instead of catching exceptions.
+- [x] 15.2 `src/trading/ui/charts.py`: pure Plotly builders — `equity_curve`, `drawdown_curve`, `candlestick`, `sector_pie`, `pnl_distribution`, `win_loss_donut`, `prediction_calibration`, `regime_history`. Shared dark theme via `_apply_theme`; empty-state figures with grey annotation when input is empty.
+- [x] 15.3 `src/trading/ui/components.py`: Streamlit-aware widgets — `regime_badge` (colored chip), `kpi_tile` (st.metric wrapper), `health_chip`, `rule_chip_grid` (10 Layer-A rule pass/fail icons), `empty_state`, `stale_quote_tag`, `sidebar_date_picker`, `section_header`, currency/pct formatters. Plus shared palette re-exports.
+- [x] 15.4 `src/trading/ui/Home.py` + 3 sub-pages:
+    - Home (Overview) — date picker, regime badge, 4 KPI tiles (Equity / Today / Drawdown / Open trades), equity curve (90 snapshots), macro snapshot table, regime-history step plot, today's brief preview.
+    - `pages/1_Portfolio.py` — KPI tiles, holdings table (qty/avg/LTP/P&L/Day%/Weight%), sector pie + top-3 concentration, GTT viability table (Monte-Carlo P(hit) + expected days via `portfolio.gtt.project_all_gtts`), per-symbol candlestick drill-down.
+    - `pages/2_Today_Signals.py` — funnel (candidates / signals / opened), regime banner, signals table with R:R, per-signal rule chip grid, per-candidate detail (chart + brief excerpt).
+    - `pages/3_Paper_Journal.py` — 5 metric tiles (closed trades / hit rate / profit factor / Sharpe / expectancy), equity curve, open + closed trades tables, win-loss donut + P&L histogram, prediction-calibration scatter.
+- [x] 15.5 `.streamlit/config.toml` — dark theme, headless server, runOnSave, gatherUsageStats off. Plus per-file ruff ignore for N999 (Streamlit's filename-based sidebar labels need capitalised + numbered names).
+- [x] 15.6 64 new tests: `test_ui_charts.py` (20 unit tests on synthetic data — empty + populated paths for every builder), `test_ui_data.py` (15 tests on data layer with in-memory SQLite + `seed_kite_snapshot` helper, autouse cache-clear fixture), `test_ui_pages.py` (8 `streamlit.testing.v1.AppTest` smoke tests — render-without-exception on empty + seeded DB per page). Suite **566 passed**, 1 skipped (live), ruff + mypy clean.
+- [x] 15.7 Real-data visual verification via Playwright MCP: started `streamlit run src/trading/ui/Home.py` on port 8501, navigated to all 4 pages against live data (2026-05-22 snapshot, 11 holdings, 10 GTTs, 2 portfolio snapshots, 2 macro snapshots). Iterated on cosmetic issues (sidebar label, drawdown sign, loss-color delta); all 4 pages render cleanly, holdings/GTT/candlestick all show real Kite data.
+- [x] 15.8 PROGRESS.md updated → commit `feat(ui): Streamlit dashboard (Phase 15)` and pushed to origin/main.
 
 ## Phase 16 — LightGBM ranker (Layer B)
 

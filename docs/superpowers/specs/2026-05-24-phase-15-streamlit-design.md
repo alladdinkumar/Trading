@@ -30,7 +30,7 @@ trades.
 
 ```
 src/trading/ui/
-├── app.py             # Entry — "Overview" page (Home)
+├── Home.py             # Entry — "Overview" page (Home)
 ├── data.py            # @st.cache_data wrappers around repo / parquet / markdown / kite_snapshot
 ├── charts.py          # Pure Plotly figure builders
 ├── components.py      # Shared widgets: regime_badge, kpi_tile, rule_chip_grid, empty_state
@@ -40,10 +40,10 @@ src/trading/ui/
     └── 3_Paper_Journal.py
 ```
 
-**Entry:** `uv run streamlit run src/trading/ui/app.py`
+**Entry:** `uv run streamlit run src/trading/ui/Home.py`
 
 Streamlit auto-discovers files in `pages/` and renders them in the
-sidebar in numeric order. `app.py` is always the home page.
+sidebar in numeric order. `Home.py` is always the home page.
 
 ### Data layer (`ui/data.py`)
 
@@ -107,7 +107,7 @@ Small Streamlit-aware widgets (these *do* import `streamlit`):
 Each page follows the same scaffold: sidebar date picker → header with
 regime badge → content blocks → empty-state guards.
 
-### 4.1 Overview (`app.py`)
+### 4.1 Overview (`Home.py`)
 
 The "did anything change today / is anything broken" page.
 
@@ -223,7 +223,7 @@ target ~520 passed.
 
 ## 9. Acceptance
 
-1. `uv run streamlit run src/trading/ui/app.py` opens a 4-page dashboard with no console errors against the current DB state (paper_trades empty, 2 portfolio_snapshots, 2 macro_snapshots, 11 holdings via Kite snapshot for 2026-05-22).
+1. `uv run streamlit run src/trading/ui/Home.py` opens a 4-page dashboard with no console errors against the current DB state (paper_trades empty, 2 portfolio_snapshots, 2 macro_snapshots, 11 holdings via Kite snapshot for 2026-05-22).
 2. Playwright MCP screenshots saved for each page; layout passes a "could I quickly tell if anything's broken / how the portfolio looks?" eyeball test.
 3. `pytest -q` green; `ruff check .` clean; `mypy src/` clean.
 4. PROGRESS.md Phase 15 sub-items marked `[x]`; commit `feat(ui): streamlit dashboard (Phase 15)` pushed to origin/main.
