@@ -43,6 +43,7 @@ class Settings:
     kite_api_key: str | None
     kite_api_secret: str | None
     kite_access_token: str | None
+    slack_webhook_url: str | None
     log_level: str
     news_user_agent: str
 
@@ -98,6 +99,7 @@ def get_settings(*, load_dotenv: bool = True) -> Settings:
         kite_api_key=os.environ.get("KITE_API_KEY") or None,
         kite_api_secret=os.environ.get("KITE_API_SECRET") or None,
         kite_access_token=os.environ.get("KITE_ACCESS_TOKEN") or None,
+        slack_webhook_url=os.environ.get("SLACK_WEBHOOK_URL") or None,
         log_level=os.environ.get("LOG_LEVEL") or DEFAULT_LOG_LEVEL,
         news_user_agent=os.environ.get("NEWS_USER_AGENT") or DEFAULT_NEWS_USER_AGENT,
     )

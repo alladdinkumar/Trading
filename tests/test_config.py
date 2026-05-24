@@ -95,6 +95,7 @@ def test_settings_is_frozen() -> None:
         kite_api_key=None,
         kite_api_secret=None,
         kite_access_token=None,
+        slack_webhook_url=None,
         log_level="INFO",
         news_user_agent="x/1",
     )
@@ -116,3 +117,15 @@ def test_paths_construct_directly(tmp_path: Path) -> None:
         db_path=tmp_path / "data" / "app.db",
     )
     assert p.project_root == tmp_path
+
+
+def test_settings_reads_slack_webhook_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T/B/X")
+    s = get_settings(load_dotenv=False)
+    assert s.slack_webhook_url == "https://hooks.slack.com/services/T/B/X"
+
+
+def test_settings_slack_webhook_url_missing_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
+    s = get_settings(load_dotenv=False)
+    assert s.slack_webhook_url is None
