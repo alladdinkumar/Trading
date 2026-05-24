@@ -496,3 +496,28 @@ def test_run_pre_open_iep_neutral_when_regime_missing(paths) -> None:
     assert any("quotes" in w.lower() for w in result.warnings)
 
 
+
+
+def test_pre_open_iep_main_logging_and_failure(monkeypatch, tmp_path):
+    import pytest as _pytest
+    from trading.jobs import pre_open_iep as job
+    from trading.ops import logging_setup
+
+    logger_calls: list[str] = []
+    monkeypatch.setattr(logging_setup, "_configured", set())
+
+    def fake_configure(job_name, slack_on_error=True):
+        logger_calls.append(job_name)
+        return tmp_path / f"{job_name}.log"
+
+    monkeypatch.setattr(job, "configure_logging", fake_configure)
+
+    def fake_run(*a, **kw):
+        raise RuntimeError("simulated")
+
+    monkeypatch.setattr(job, "run_pre_open_iep", fake_run)
+
+    with _pytest.raises(RuntimeError, match="simulated"):
+        job._main("2026-05-25")
+
+    assert logger_calls == ["pre_open_iep"]

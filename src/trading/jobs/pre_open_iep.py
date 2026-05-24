@@ -15,6 +15,7 @@ from pathlib import Path
 
 from trading.config import Paths, get_paths
 from trading.data.kite import Quote
+from trading.ops.logging_setup import configure_logging
 from trading.data.quotes_snapshot import (
     QuoteSnapshotMissingError,
     QuoteSnapshotStaleError,
@@ -171,16 +172,22 @@ def _load_yesterday_closes(
     return closes
 
 
-def _main(  # pragma: no cover
+def _main(
     date_str: str,
     dry_run: bool = False,
 ) -> None:
     """`python -m trading.jobs.pre_open_iep <YYYY-MM-DD> [--dry-run]` entry."""
+    configure_logging("pre_open_iep")
+    from loguru import logger
+
     try:
         result = run_pre_open_iep(date.fromisoformat(date_str))
     except PreOpenIepAborted as e:
         print(f"Pre-open IEP aborted: {e}")
         raise SystemExit(2) from e
+    except Exception:
+        logger.exception("pre_open_iep failed")
+        raise
     print(f"Regime: {result.regime}")
     print(f"Candidates input: {result.candidates_input}")
     print(f"Candidates filtered: {result.candidates_filtered}")
