@@ -193,3 +193,28 @@ def test_run_mid_day_apply_idempotent_on_rerun(paths) -> None:
     r2 = run_mid_day(date(2026, 5, 16), paths=paths, apply=True)
     assert r2.trades_evaluated == 0
     assert r2.trades_closed == 0
+
+
+def test_mid_day_main_logging_and_failure(monkeypatch, tmp_path):
+    import pytest as _pytest
+    from trading.jobs import mid_day as job
+    from trading.ops import logging_setup
+
+    logger_calls: list[str] = []
+    monkeypatch.setattr(logging_setup, "_configured", set())
+
+    def fake_configure(job_name, slack_on_error=True):
+        logger_calls.append(job_name)
+        return tmp_path / f"{job_name}.log"
+
+    monkeypatch.setattr(job, "configure_logging", fake_configure)
+
+    def fake_run(*a, **kw):
+        raise RuntimeError("simulated")
+
+    monkeypatch.setattr(job, "run_mid_day", fake_run)
+
+    with _pytest.raises(RuntimeError, match="simulated"):
+        job._main("2026-05-25", apply=False)
+
+    assert logger_calls == ["mid_day"]

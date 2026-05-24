@@ -16,6 +16,7 @@ from pathlib import Path
 from trading.config import Paths, get_paths
 from trading.data.kite import Quote
 from trading.data.kite_snapshot import KiteSnapshotMissingError, read_holdings
+from trading.ops.logging_setup import configure_logging
 from trading.data.quotes_snapshot import (
     QuoteSnapshotMissingError,
     QuoteSnapshotStaleError,
@@ -182,16 +183,22 @@ def _render_mid_day_update(
     return "\n".join(lines) + "\n"
 
 
-def _main(  # pragma: no cover — manual entry
+def _main(
     date_str: str,
     apply: bool = False,
 ) -> None:
     """`python -m trading.jobs.mid_day <YYYY-MM-DD> [--apply]` entry."""
+    configure_logging("mid_day")
+    from loguru import logger
+
     try:
         result = run_mid_day(date.fromisoformat(date_str), apply=apply)
     except MidDayAborted as e:
         print(f"Mid-day aborted: {e}")
         raise SystemExit(2) from e
+    except Exception:
+        logger.exception("mid_day failed")
+        raise
     if result.symbols_path:
         print(f"wrote {result.symbols_path}")
         print("Now run /kite-quotes-snapshot skill, then re-run with --apply")
