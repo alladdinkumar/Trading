@@ -1,0 +1,21 @@
+{
+  "year": 2026,
+  "source": "best-effort seed; refresh annually from nsepython.holiday_master() when convenient",
+  "holidays": [
+    {"date": "2026-01-26", "name": "Republic Day"},
+    {"date": "2026-02-19", "name": "Mahashivratri"},
+    {"date": "2026-03-04", "name": "Holi"},
+    {"date": "2026-03-31", "name": "Id-Ul-Fitr (Ramzan Id)"},
+    {"date": "2026-04-03", "name": "Good Friday"},
+    {"date": "2026-04-14", "name": "Dr. Baba Saheb Ambedkar Jayanti"},
+    {"date": "2026-05-01", "name": "Maharashtra Day"},
+    {"date": "2026-05-27", "name": "Bakri Id"},
+    {"date": "2026-08-15", "name": "Independence Day"},
+    {"date": "2026-08-27", "name": "Ganesh Chaturthi"},
+    {"date": "2026-10-02", "name": "Mahatma Gandhi Jayanti"},
+    {"date": "2026-10-21", "name": "Dussehra"},
+    {"date": "2026-11-09", "name": "Diwali Laxmi Pujan"},
+    {"date": "2026-11-25", "name": "Guru Nanak Jayanti"},
+    {"date": "2026-12-25", "name": "Christmas"}
+  ]
+}
