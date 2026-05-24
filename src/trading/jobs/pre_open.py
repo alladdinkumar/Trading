@@ -26,6 +26,7 @@ from trading.data.news import DEFAULT_ALIASES, fetch_all_news
 from trading.features.regime import Regime
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.llm.context import ContextInputs, assemble_context
+from trading.ops.logging_setup import configure_logging
 from trading.paper.ledger import log_signal_and_open_trade
 from trading.portfolio.health import (
     FundamentalsSnapshot,
@@ -300,11 +301,14 @@ def _step_assemble(
     )
 
 
-def _main(  # pragma: no cover — manual entry
+def _main(
     date_str: str,
     skip_news: bool = False,
 ) -> None:
     """`python -m trading.jobs.pre_open <YYYY-MM-DD>` entry."""
+    configure_logging("pre_open")
+    from loguru import logger
+
     try:
         result = run_pre_open(
             date.fromisoformat(date_str),
@@ -313,6 +317,9 @@ def _main(  # pragma: no cover — manual entry
     except PreOpenAborted as e:
         print(f"Pre-open aborted: {e}")
         raise SystemExit(2) from e
+    except Exception:
+        logger.exception("pre_open failed")
+        raise
     print(f"wrote {result.bundle_path}")
     if result.warnings:
         print(f"warnings ({len(result.warnings)}):")

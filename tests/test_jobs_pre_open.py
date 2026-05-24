@@ -216,6 +216,7 @@ def _settings(token: str | None = None) -> Settings:
     return Settings(
         anthropic_api_key=None, kite_api_key="k",
         kite_api_secret="s", kite_access_token=token,
+        slack_webhook_url=None,
         log_level="INFO", news_user_agent="test",
     )
 
@@ -363,3 +364,30 @@ def test_run_pre_open_full_happy_path_integration(
         date(2026, 5, 15), paths=paths, skip_news=False,
     )
     assert result2.paper_trades_opened == 0
+
+
+def test_pre_open_main_configures_logging_and_propagates_failure(monkeypatch, tmp_path):
+    """When run_pre_open raises, _main configures logging, lets the Slack
+    sink fire via logger.exception, and re-raises so exit code propagates."""
+    import pytest as _pytest
+    from trading.jobs import pre_open as job
+    from trading.ops import logging_setup
+
+    logger_calls: list[str] = []
+    monkeypatch.setattr(logging_setup, "_configured", set())
+
+    def fake_configure(job_name, slack_on_error=True):
+        logger_calls.append(job_name)
+        return tmp_path / f"{job_name}.log"
+
+    monkeypatch.setattr(job, "configure_logging", fake_configure)
+
+    def fake_run_pre_open(*a, **kw):
+        raise RuntimeError("simulated")
+
+    monkeypatch.setattr(job, "run_pre_open", fake_run_pre_open)
+
+    with _pytest.raises(RuntimeError, match="simulated"):
+        job._main("2026-05-25")
+
+    assert logger_calls == ["pre_open"]
