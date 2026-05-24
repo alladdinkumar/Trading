@@ -81,4 +81,43 @@ def _current_log_path(job: str) -> Path:
 
 
 def _install_slack_sink(job: str, log_path: Path) -> None:
-    """Stub — implemented in Task 10."""
+    """Add a loguru sink that posts ERROR+ records to Slack + toast.
+
+    Body = formatted exception (if present) + tail of log file. Sink
+    itself never raises — failures in the notify layer must not crash
+    the job.
+    """
+    from trading.ops import notify as notify_mod
+
+    def _sink(message: object) -> None:
+        record = message.record  # type: ignore[attr-defined]
+        body_parts: list[str] = []
+        exc = record.get("exception")
+        if exc is not None:
+            import traceback
+
+            body_parts.append(
+                "".join(traceback.format_exception(exc.type, exc.value, exc.traceback))
+            )
+        body_parts.append(f"Message: {record['message']}")
+        tail = _tail_log_file(log_path, lines=20)
+        if tail:
+            body_parts.append("Recent log:\n" + tail)
+        body = "\n\n".join(body_parts)
+        try:
+            notify_mod.notify("error", f"{job} FAILED", body)
+        except Exception:
+            pass  # never crash from the logging layer
+
+    logger.add(_sink, level="ERROR", enqueue=False)
+
+
+def _tail_log_file(path: Path, *, lines: int = 20) -> str:
+    """Return the last `lines` lines of `path`, or empty string if unreadable."""
+    if not path.exists():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return "\n".join(text.splitlines()[-lines:])
