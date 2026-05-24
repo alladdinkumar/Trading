@@ -47,6 +47,7 @@ dependencies = [
     "typer>=0.12",
     "rich>=13.7",
     "loguru>=0.7",
+    "plyer>=2.1",                # cross-platform notifications (Windows toast)
     "pydantic>=2.7",
 ]
 
