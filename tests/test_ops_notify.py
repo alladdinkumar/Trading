@@ -94,3 +94,65 @@ def test_post_toast_truncates_long_message(monkeypatch):
     monkeypatch.setattr(notify_mod, "_plyer_notification", Fake())
     notify_mod.post_toast("t", "x" * 500)
     assert len(captured["message"]) == 200
+
+
+def test_notify_info_dispatches_to_both_channels(monkeypatch):
+    from trading.ops import notify as notify_mod
+
+    slack_calls: list[str] = []
+    toast_calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(notify_mod, "post_slack", lambda text: slack_calls.append(text) or True)
+    monkeypatch.setattr(
+        notify_mod, "post_toast", lambda t, m: toast_calls.append((t, m)) or True
+    )
+
+    notify_mod.notify("info", "Reminder", "Run /kite-snapshot")
+
+    assert len(slack_calls) == 1
+    assert "\U0001f514" in slack_calls[0]  # bell emoji
+    assert "*Reminder*" in slack_calls[0]
+    assert "Run /kite-snapshot" in slack_calls[0]
+    assert toast_calls == [("Reminder", "Run /kite-snapshot")]
+
+
+def test_notify_error_emoji(monkeypatch):
+    from trading.ops import notify as notify_mod
+
+    slack_calls: list[str] = []
+    monkeypatch.setattr(notify_mod, "post_slack", lambda t: slack_calls.append(t) or True)
+    monkeypatch.setattr(notify_mod, "post_toast", lambda t, m: True)
+
+    notify_mod.notify("error", "pre_open FAILED", "Traceback ...")
+    assert "❌" in slack_calls[0]  # cross mark
+
+
+def test_notify_warn_emoji(monkeypatch):
+    from trading.ops import notify as notify_mod
+
+    slack_calls: list[str] = []
+    monkeypatch.setattr(notify_mod, "post_slack", lambda t: slack_calls.append(t) or True)
+    monkeypatch.setattr(notify_mod, "post_toast", lambda t, m: True)
+
+    notify_mod.notify("warn", "Stale snapshot", "")
+    assert "⚠" in slack_calls[0]  # warning sign
+
+
+def test_notify_multiline_body_uses_code_block(monkeypatch):
+    from trading.ops import notify as notify_mod
+
+    slack_calls: list[str] = []
+    monkeypatch.setattr(notify_mod, "post_slack", lambda t: slack_calls.append(t) or True)
+    monkeypatch.setattr(notify_mod, "post_toast", lambda t, m: True)
+
+    notify_mod.notify("info", "Title", "line1\nline2\nline3")
+    assert "```" in slack_calls[0]
+
+
+def test_notify_does_not_raise_when_both_channels_fail(monkeypatch):
+    from trading.ops import notify as notify_mod
+
+    monkeypatch.setattr(notify_mod, "post_slack", lambda t: False)
+    monkeypatch.setattr(notify_mod, "post_toast", lambda t, m: False)
+
+    notify_mod.notify("error", "boom", "details")

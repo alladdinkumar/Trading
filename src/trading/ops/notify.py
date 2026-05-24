@@ -8,6 +8,7 @@ source of truth, and notification is informational only.
 from __future__ import annotations
 
 import os
+from typing import Literal
 
 import requests
 from loguru import logger
@@ -67,3 +68,40 @@ def post_toast(title: str, message: str) -> bool:
         logger.warning(f"Toast notification failed: {e}")
         return False
     return True
+
+
+_EMOJI: dict[str, str] = {
+    "info": "\U0001f514",   # 🔔
+    "warn": "⚠️",  # ⚠️
+    "error": "❌",      # ❌
+}
+
+
+def notify(
+    level: Literal["info", "warn", "error"],
+    title: str,
+    body: str = "",
+) -> None:
+    """Dispatch a notification to Slack + Windows toast.
+
+    Best-effort: both channels are attempted, failures are logged at
+    WARN. Never raises. Multi-line bodies are wrapped in a fenced code
+    block for Slack readability; toast gets the raw (truncated) text.
+    """
+    emoji = _EMOJI.get(level, _EMOJI["info"])
+    slack_lines = [f"{emoji} *{title}*"]
+    if body:
+        if "\n" in body or level == "error":
+            slack_lines.append(f"```\n{body}\n```")
+        else:
+            slack_lines.append(body)
+    slack_text = "\n".join(slack_lines)
+
+    try:
+        post_slack(slack_text)
+    except Exception as e:  # pragma: no cover — post_slack already swallows
+        logger.warning(f"notify: post_slack raised: {e}")
+    try:
+        post_toast(title, body or title)
+    except Exception as e:  # pragma: no cover
+        logger.warning(f"notify: post_toast raised: {e}")
