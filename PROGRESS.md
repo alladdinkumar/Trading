@@ -39,11 +39,11 @@ Granular task tracker for the trading system build. Update as work completes.
 | 14.C | pre-open IEP gap filter | `[x]` |
 | 15 | Streamlit dashboard | `[x]` |
 | 16 | LightGBM ranker (Layer B) | `[ ]` |
-| 17 | Task Scheduler + logging | `[ ]` |
+| 17 | Task Scheduler + logging | `[x]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 15 complete (real-data smoke 2026-05-24 ✓)_
-**Next up:** _Phase 17 — Task Scheduler + logging (unblocks Phase 18 live paper-trading)_
+**Currently working on:** _Phase 17 complete (manual smoke 2026-05-24 ✓)_
+**Next up:** _Phase 18 — Live paper-trading (3-6 month run)_
 
 ---
 
@@ -461,12 +461,16 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 17 — Task Scheduler + logging
 
-- [ ] 17.1 `loguru` configuration: rotating logs to `data/logs/{job}_YYYY-MM-DD.log`
-- [ ] 17.2 Windows Task Scheduler entries for pre_open, pre_open_iep, mid_day, post_close, weekly_train, monthly_sip
-- [ ] 17.3 Error notification: Windows toast (winrt) or simple SMTP on job failure
-- [ ] 17.4 Manual verification: leave laptop on overnight, verify jobs fire
-- [ ] 17.5 Document scheduler setup in `docs/operations.md`
-- [ ] 17.6 Update PROGRESS.md → commit `feat(ops): scheduling + logging`
+> Spec at [`docs/superpowers/specs/2026-05-24-phase-17-scheduler-logging-design.md`](docs/superpowers/specs/2026-05-24-phase-17-scheduler-logging-design.md).
+> Plan at [`docs/superpowers/plans/2026-05-24-phase-17-scheduler-logging.md`](docs/superpowers/plans/2026-05-24-phase-17-scheduler-logging.md).
+> Reminder-driven: Task Scheduler fires Slack + toast pings; user runs commands manually. weekly_train + monthly_sip deferred.
+
+- [x] 17.1 `loguru` configuration: `src/trading/ops/logging_setup.py` adds rotating file sink (`data/logs/{job}_YYYY-MM-DD.log`, daily rotation, 60-day retention, gzip), stderr sink, and an ERROR+ Slack sink. Idempotent per job. Wrapped into all 4 job entrypoints (`pre_open`, `pre_open_iep`, `mid_day`, `post_close`).
+- [x] 17.2 12 Windows Task Scheduler XML entries under `docs/scheduler/`, one per reminder slot (pre_open ×4, iep ×2, mid_day ×3, post_close ×3). Each runs `uv run trading remind --slot <name>` Mon-Fri at the slot's IST time. weekly_train and monthly_sip deferred (return with Phase 16 / future mini-phase).
+- [x] 17.3 Error notification: `src/trading/ops/notify.py` posts to Slack incoming webhook (`SLACK_WEBHOOK_URL`) + Windows toast via `plyer`. Best-effort — never crashes the job. Loguru ERROR sink auto-formats traceback + last 20 log lines into the Slack post.
+- [x] 17.4 Manual verification: `trading notify-test` and `trading remind --slot pre_open_scan` both run cleanly. Holiday gate correctly silent-skips on Sunday 2026-05-24; forced Monday dispatch attempted Slack (warns gracefully when webhook unset) + toast. Full automated smoke pending live Slack webhook setup per `docs/operations.md`.
+- [x] 17.5 `docs/operations.md` documents Slack setup, Task Scheduler import (bulk-import PowerShell snippet), holiday-list refresh, log inspection paths, and a 5-row troubleshooting matrix.
+- [x] 17.6 PROGRESS.md updated → commit `feat(ops): scheduling + logging (Phase 17)` and pushed to origin/main.
 
 ## Phase 18 — Live paper-trading + iteration (ongoing)
 
