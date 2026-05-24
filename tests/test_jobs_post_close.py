@@ -183,3 +183,28 @@ def test_run_post_close_apply_no_open_trades_still_writes_summary(paths) -> None
     body = result.summary_path.read_text(encoding="utf-8")
     assert "0 open trades evaluated" in body
     assert "_(none today)_" in body  # matured predictions section
+
+
+def test_post_close_main_logging_and_failure(monkeypatch, tmp_path):
+    import pytest as _pytest
+    from trading.jobs import post_close as job
+    from trading.ops import logging_setup
+
+    logger_calls: list[str] = []
+    monkeypatch.setattr(logging_setup, "_configured", set())
+
+    def fake_configure(job_name, slack_on_error=True):
+        logger_calls.append(job_name)
+        return tmp_path / f"{job_name}.log"
+
+    monkeypatch.setattr(job, "configure_logging", fake_configure)
+
+    def fake_run(*a, **kw):
+        raise RuntimeError("simulated")
+
+    monkeypatch.setattr(job, "run_post_close", fake_run)
+
+    with _pytest.raises(RuntimeError, match="simulated"):
+        job._main("2026-05-25", apply=False)
+
+    assert logger_calls == ["post_close"]

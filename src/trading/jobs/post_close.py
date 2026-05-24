@@ -21,6 +21,7 @@ from trading.data.quotes_snapshot import (
     read_latest_quotes,
 )
 from trading.jobs.mid_day import _quotes_to_bars, gather_quote_symbols
+from trading.ops.logging_setup import configure_logging
 from trading.paper.mtm import MtmResult, mtm_open_trades
 from trading.paper.reconcile import ReconcileResult, reconcile_day
 from trading.store.db import get_conn
@@ -189,12 +190,15 @@ def _render_post_close_summary(
     return "\n".join(lines) + "\n"
 
 
-def _main(  # pragma: no cover — manual entry
+def _main(
     date_str: str,
     apply: bool = False,
     cash: float = 100_000.0,
 ) -> None:
     """`python -m trading.jobs.post_close <YYYY-MM-DD> [--apply] [--cash N]` entry."""
+    configure_logging("post_close")
+    from loguru import logger
+
     try:
         result = run_post_close(
             date.fromisoformat(date_str), apply=apply, cash=cash
@@ -202,6 +206,9 @@ def _main(  # pragma: no cover — manual entry
     except PostCloseAborted as e:
         print(f"Post-close aborted: {e}")
         raise SystemExit(2) from e
+    except Exception:
+        logger.exception("post_close failed")
+        raise
     if result.symbols_path:
         print(f"wrote {result.symbols_path}")
         print("Now run /kite-quotes-snapshot skill, then re-run with --apply")
