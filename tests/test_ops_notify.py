@@ -51,3 +51,46 @@ def test_post_slack_returns_false_on_network_error(monkeypatch):
     monkeypatch.setattr(requests, "post", boom)
     ok = notify_mod.post_slack("hello")
     assert ok is False
+
+
+def test_post_toast_calls_plyer(monkeypatch):
+    from trading.ops import notify as notify_mod
+
+    captured: dict[str, object] = {}
+
+    class FakeNotification:
+        def notify(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(notify_mod, "_plyer_notification", FakeNotification())
+    ok = notify_mod.post_toast("hello", "world")
+    assert ok is True
+    assert captured["title"] == "hello"
+    assert captured["message"] == "world"
+    assert captured["timeout"] == 10
+
+
+def test_post_toast_returns_false_when_plyer_raises(monkeypatch):
+    from trading.ops import notify as notify_mod
+
+    class BrokenNotification:
+        def notify(self, **kwargs):
+            raise RuntimeError("no notification backend")
+
+    monkeypatch.setattr(notify_mod, "_plyer_notification", BrokenNotification())
+    ok = notify_mod.post_toast("t", "m")
+    assert ok is False
+
+
+def test_post_toast_truncates_long_message(monkeypatch):
+    from trading.ops import notify as notify_mod
+
+    captured: dict[str, object] = {}
+
+    class Fake:
+        def notify(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(notify_mod, "_plyer_notification", Fake())
+    notify_mod.post_toast("t", "x" * 500)
+    assert len(captured["message"]) == 200
