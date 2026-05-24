@@ -129,6 +129,7 @@ def _settings_with_kite_creds(**overrides):
         "kite_api_key": "test-api-key",
         "kite_api_secret": "test-api-secret",
         "kite_access_token": None,
+        "slack_webhook_url": None,
         "log_level": "INFO",
         "news_user_agent": "test/0",
     }
@@ -239,6 +240,7 @@ def test_scan_no_parquet_exits_1(tmp_path: Path, monkeypatch) -> None:
 def _init_db(tmp_path: Path) -> Path:
     from trading.store.db import get_conn as _get_conn
     from trading.store.migrations import run_migrations as _run_migrations
+
     db_path = tmp_path / "data" / "app.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with _get_conn(db_path) as conn:
@@ -246,9 +248,7 @@ def _init_db(tmp_path: Path) -> Path:
     return db_path
 
 
-def test_brief_assemble_context_writes_bundle(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_brief_assemble_context_writes_bundle(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     _init_db(tmp_path)
     result = runner.invoke(
@@ -273,28 +273,22 @@ def test_brief_compile_assembles_brief(tmp_path: Path, monkeypatch) -> None:
     )
     (date_dir / "macro_brief.md").write_text("x\n", encoding="utf-8")
     (date_dir / "sector_commentary.md").write_text("x\n", encoding="utf-8")
-    result = runner.invoke(
-        app, ["brief", "compile", "--date", "2026-05-15"]
-    )
+    result = runner.invoke(app, ["brief", "compile", "--date", "2026-05-15"])
     assert result.exit_code == 0, result.stdout
     assert (date_dir / "brief.md").is_file()
     assert "brief.md" in result.stdout
 
 
-def test_pre_open_cli_writes_bundle_and_prints_next_step(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_pre_open_cli_writes_bundle_and_prints_next_step(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     _init_db(tmp_path)
     from trading.jobs import pre_open as po
-    monkeypatch.setattr(po, "_step_macro",
-                        lambda c, d, w: (False, "NEUTRAL"))
+
+    monkeypatch.setattr(po, "_step_macro", lambda c, d, w: (False, "NEUTRAL"))
     monkeypatch.setattr(po, "_step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr(po, "_step_scan", lambda p, d, w: [])
-    monkeypatch.setattr(po, "_step_portfolio",
-                        lambda p, s, w, *, as_of: [])
-    monkeypatch.setattr(po, "_step_auto_open",
-                        lambda *a, **kw: 0)
+    monkeypatch.setattr(po, "_step_portfolio", lambda p, s, w, *, as_of: [])
+    monkeypatch.setattr(po, "_step_auto_open", lambda *a, **kw: 0)
     result = runner.invoke(
         app,
         ["pre-open", "--date", "2026-05-15", "--skip-news"],
@@ -306,14 +300,12 @@ def test_pre_open_cli_writes_bundle_and_prints_next_step(
     assert "trading brief compile" in result.stdout
 
 
-def test_pre_open_cli_aborts_when_kite_snapshot_missing(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_pre_open_cli_aborts_when_kite_snapshot_missing(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     _init_db(tmp_path)
     from trading.jobs import pre_open as po
-    monkeypatch.setattr(po, "_step_macro",
-                        lambda c, d, w: (False, "NEUTRAL"))
+
+    monkeypatch.setattr(po, "_step_macro", lambda c, d, w: (False, "NEUTRAL"))
     monkeypatch.setattr(po, "_step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr(po, "_step_scan", lambda p, d, w: [])
     monkeypatch.setattr(po, "_step_auto_open", lambda *a, **kw: 0)
@@ -333,27 +325,22 @@ def test_portfolio_cli_reads_snapshot(tmp_path: Path, monkeypatch) -> None:
 
     from tests.conftest import seed_kite_snapshot
     from trading.config import get_paths as _gp
+
     seed_kite_snapshot(
         _gp(),
         _d(2026, 5, 15),
         holdings=[],
         gtts=[],
     )
-    result = runner.invoke(
-        app, ["portfolio", "--date", "2026-05-15"]
-    )
+    result = runner.invoke(app, ["portfolio", "--date", "2026-05-15"])
     assert result.exit_code == 0, result.stdout
     assert "0 holding" in result.stdout or "Loaded 0" in result.stdout
 
 
-def test_portfolio_cli_aborts_when_snapshot_missing(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_portfolio_cli_aborts_when_snapshot_missing(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     _init_db(tmp_path)
-    result = runner.invoke(
-        app, ["portfolio", "--date", "2026-05-15"]
-    )
+    result = runner.invoke(app, ["portfolio", "--date", "2026-05-15"])
     assert result.exit_code == 2, result.stdout
     assert "/kite-snapshot" in result.stdout
 
@@ -365,74 +352,76 @@ def test_kite_emergency_login_present_in_help() -> None:
     assert "kite-login " not in flat  # bare name renamed away
 
 
-def test_kite_emergency_snapshot_writes_files(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_kite_emergency_snapshot_writes_files(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     monkeypatch.setenv("KITE_API_KEY", "fake")
     monkeypatch.setenv("KITE_ACCESS_TOKEN", "fake")
 
     from trading.data.kite import GttOrder, Holding
+
     fake_holding = Holding(
-        tradingsymbol="RVNL", exchange="NSE", isin="INE415G01027",
-        quantity=32, average_price=305.0, last_price=329.6,
-        close_price=327.1, pnl=787.2, day_change=2.5,
+        tradingsymbol="RVNL",
+        exchange="NSE",
+        isin="INE415G01027",
+        quantity=32,
+        average_price=305.0,
+        last_price=329.6,
+        close_price=327.1,
+        pnl=787.2,
+        day_change=2.5,
         day_change_percentage=0.76,
     )
     fake_gtt = GttOrder(
-        id=1, type="single", status="active", tradingsymbol="RVNL",
-        exchange="NSE", trigger_values=[350.0], last_price=329.6,
+        id=1,
+        type="single",
+        status="active",
+        tradingsymbol="RVNL",
+        exchange="NSE",
+        trigger_values=[350.0],
+        last_price=329.6,
         created_at="2026-05-10T10:00:00",
         orders=[{"transaction_type": "SELL", "quantity": 32, "price": 350.0}],
     )
-    with patch("trading.cli.make_client", return_value=MagicMock()), \
-         patch("trading.cli.get_holdings", return_value=[fake_holding]), \
-         patch("trading.cli.get_gtts", return_value=[fake_gtt]):
-        result = runner.invoke(
-            app, ["kite-emergency-snapshot", "--date", "2026-05-15"]
-        )
+    with (
+        patch("trading.cli.make_client", return_value=MagicMock()),
+        patch("trading.cli.get_holdings", return_value=[fake_holding]),
+        patch("trading.cli.get_gtts", return_value=[fake_gtt]),
+    ):
+        result = runner.invoke(app, ["kite-emergency-snapshot", "--date", "2026-05-15"])
     assert result.exit_code == 0, result.stdout
     base = tmp_path / "data" / "raw" / "2026-05-15"
     assert (base / "holdings.json").is_file()
     assert (base / "gtts.json").is_file()
     assert (base / "_meta.json").is_file()
     import json as _j
+
     meta = _j.loads((base / "_meta.json").read_text(encoding="utf-8"))
     assert meta["source"] == "sdk-fallback"
 
 
-def test_mid_day_cli_prepare_writes_symbol_file(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_mid_day_cli_prepare_writes_symbol_file(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     _init_db(tmp_path)
-    result = runner.invoke(
-        app, ["mid-day", "--date", "2026-05-16"]
-    )
+    result = runner.invoke(app, ["mid-day", "--date", "2026-05-16"])
     assert result.exit_code == 0, result.stdout
     out_path = tmp_path / "data" / "raw" / "2026-05-16" / "_quote_symbols.txt"
     assert out_path.is_file()
     assert "/kite-quotes-snapshot" in result.stdout
 
 
-def test_mid_day_cli_apply_aborts_when_quotes_missing(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_mid_day_cli_apply_aborts_when_quotes_missing(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     _init_db(tmp_path)
-    result = runner.invoke(
-        app, ["mid-day", "--date", "2026-05-16", "--apply"]
-    )
+    result = runner.invoke(app, ["mid-day", "--date", "2026-05-16", "--apply"])
     assert result.exit_code == 2, result.stdout
     assert "/kite-quotes-snapshot" in result.stdout
 
 
-def test_mid_day_cli_apply_happy_path(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_mid_day_cli_apply_happy_path(tmp_path: Path, monkeypatch) -> None:
     """Stub run_mid_day to avoid full mtm setup; verify exit-code + summary line."""
     from datetime import date as _d
     from datetime import datetime as _dt
+
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     _init_db(tmp_path)
 
@@ -441,56 +430,49 @@ def test_mid_day_cli_apply_happy_path(
     fake_update.write_text("stub", encoding="utf-8")
 
     from trading.jobs import mid_day as mid_day_mod
+
     fake_result = mid_day_mod.MidDayResult(
         as_of=_d(2026, 5, 16),
         quotes_capture_ts=_dt(2026, 5, 16, 12, 32),
-        bars_built=3, trades_evaluated=2, trades_closed=1,
-        trades_held=1, trades_skipped=0,
-        update_path=fake_update, symbols_path=None, warnings=[],
+        bars_built=3,
+        trades_evaluated=2,
+        trades_closed=1,
+        trades_held=1,
+        trades_skipped=0,
+        update_path=fake_update,
+        symbols_path=None,
+        warnings=[],
     )
-    monkeypatch.setattr(
-        "trading.cli.run_mid_day", lambda *a, **kw: fake_result
-    )
-    result = runner.invoke(
-        app, ["mid-day", "--date", "2026-05-16", "--apply"]
-    )
+    monkeypatch.setattr("trading.cli.run_mid_day", lambda *a, **kw: fake_result)
+    result = runner.invoke(app, ["mid-day", "--date", "2026-05-16", "--apply"])
     assert result.exit_code == 0, result.stdout
     assert "evaluated" in result.stdout
     assert "mid_day_update.md" in result.stdout
 
 
-def test_post_close_cli_prepare_writes_symbol_file(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_post_close_cli_prepare_writes_symbol_file(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     _init_db(tmp_path)
-    result = runner.invoke(
-        app, ["post-close", "--date", "2026-05-16"]
-    )
+    result = runner.invoke(app, ["post-close", "--date", "2026-05-16"])
     assert result.exit_code == 0, result.stdout
     out_path = tmp_path / "data" / "raw" / "2026-05-16" / "_quote_symbols.txt"
     assert out_path.is_file()
     assert "/kite-quotes-snapshot" in result.stdout
 
 
-def test_post_close_cli_apply_aborts_when_quotes_missing(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_post_close_cli_apply_aborts_when_quotes_missing(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     _init_db(tmp_path)
-    result = runner.invoke(
-        app, ["post-close", "--date", "2026-05-16", "--apply"]
-    )
+    result = runner.invoke(app, ["post-close", "--date", "2026-05-16", "--apply"])
     assert result.exit_code == 2, result.stdout
     assert "/kite-quotes-snapshot" in result.stdout
 
 
-def test_post_close_cli_apply_happy_path(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_post_close_cli_apply_happy_path(tmp_path: Path, monkeypatch) -> None:
     """Stub run_post_close to verify exit-code + summary-line."""
     from datetime import date as _d
     from datetime import datetime as _dt
+
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     _init_db(tmp_path)
 
@@ -499,20 +481,24 @@ def test_post_close_cli_apply_happy_path(
     fake_summary.write_text("stub", encoding="utf-8")
 
     from trading.jobs import post_close as pc_mod
+
     fake_result = pc_mod.PostCloseResult(
         as_of=_d(2026, 5, 16),
         quotes_capture_ts=_dt(2026, 5, 16, 16, 1),
-        bars_built=11, trades_evaluated=2, trades_closed=1,
-        trades_held=1, trades_skipped=0, predictions_matured=2,
-        equity=527341.0, drawdown_pct=-1.2,
-        summary_path=fake_summary, symbols_path=None, warnings=[],
+        bars_built=11,
+        trades_evaluated=2,
+        trades_closed=1,
+        trades_held=1,
+        trades_skipped=0,
+        predictions_matured=2,
+        equity=527341.0,
+        drawdown_pct=-1.2,
+        summary_path=fake_summary,
+        symbols_path=None,
+        warnings=[],
     )
-    monkeypatch.setattr(
-        "trading.cli.run_post_close", lambda *a, **kw: fake_result
-    )
-    result = runner.invoke(
-        app, ["post-close", "--date", "2026-05-16", "--apply"]
-    )
+    monkeypatch.setattr("trading.cli.run_post_close", lambda *a, **kw: fake_result)
+    result = runner.invoke(app, ["post-close", "--date", "2026-05-16", "--apply"])
     assert result.exit_code == 0, result.stdout
     assert "evaluated" in result.stdout or "trades_evaluated" in result.stdout
     assert "post_close_summary.md" in result.stdout
@@ -524,7 +510,8 @@ def test_cli_remind_happy_path(monkeypatch):
     calls = []
     monkeypatch.setattr(runner_mod, "is_trading_day", lambda d: True)
     monkeypatch.setattr(
-        runner_mod, "notify",
+        runner_mod,
+        "notify",
         lambda level, title, body="": calls.append((title, body)),
     )
 
@@ -550,7 +537,8 @@ def test_cli_remind_holiday_silent(monkeypatch):
     calls = []
     monkeypatch.setattr(runner_mod, "is_trading_day", lambda d: False)
     monkeypatch.setattr(
-        runner_mod, "notify",
+        runner_mod,
+        "notify",
         lambda level, title, body="": calls.append(title),
     )
 
@@ -564,11 +552,13 @@ def test_cli_notify_test_dispatches(monkeypatch):
 
     calls = []
     monkeypatch.setattr(
-        notify_mod, "notify",
+        notify_mod,
+        "notify",
         lambda level, title, body="": calls.append((level, title, body)),
     )
     # cli imports the function as _notify, so patch the cli binding too
     import trading.cli as cli_mod
+
     monkeypatch.setattr(cli_mod, "_notify", notify_mod.notify)
 
     result = runner.invoke(app, ["notify-test"])

@@ -16,12 +16,12 @@ from pathlib import Path
 from trading.config import Paths, get_paths
 from trading.data.kite import Quote
 from trading.data.kite_snapshot import KiteSnapshotMissingError, read_holdings
-from trading.ops.logging_setup import configure_logging
 from trading.data.quotes_snapshot import (
     QuoteSnapshotMissingError,
     QuoteSnapshotStaleError,
     read_latest_quotes,
 )
+from trading.ops.logging_setup import configure_logging
 from trading.paper.mtm import MtmResult, mtm_open_trades
 from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
@@ -47,9 +47,7 @@ class MidDayResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def gather_quote_symbols(
-    conn: sqlite3.Connection, paths: Paths, as_of: date
-) -> list[str]:
+def gather_quote_symbols(conn: sqlite3.Connection, paths: Paths, as_of: date) -> list[str]:
     """Sorted, deduped union of: open paper-trade symbols ∪ today's signals
     ∪ holdings.json symbols. Holdings degrade silently if snapshot absent.
     """
@@ -91,9 +89,7 @@ def run_mid_day(
             base = p.raw_dir / as_of.isoformat()
             base.mkdir(parents=True, exist_ok=True)
             symbols_path = base / "_quote_symbols.txt"
-            symbols_path.write_text(
-                "\n".join(symbols) + "\n", encoding="utf-8"
-            )
+            symbols_path.write_text("\n".join(symbols) + "\n", encoding="utf-8")
             return MidDayResult(
                 as_of=as_of,
                 quotes_capture_ts=None,
@@ -148,15 +144,16 @@ def _quotes_to_bars(quotes: dict[str, Quote]) -> dict[str, Bar]:
     """
     return {
         sym: Bar(
-            open=q.open, high=q.high, low=q.low, close=q.last_price,
+            open=q.open,
+            high=q.high,
+            low=q.low,
+            close=q.last_price,
         )
         for sym, q in quotes.items()
     }
 
 
-def _render_mid_day_update(
-    capture_ts: datetime, results: list[MtmResult]
-) -> str:
+def _render_mid_day_update(capture_ts: datetime, results: list[MtmResult]) -> str:
     closed = [r for r in results if r.action.startswith("EXIT_")]
     held = [r for r in results if r.action == "HOLD"]
     skipped = [r for r in results if r.action == "SKIP"]
@@ -170,9 +167,7 @@ def _render_mid_day_update(
     for r in results:
         ep = f"{r.exit_price:.2f}" if r.exit_price is not None else "—"
         ns = f"{r.new_stop:.2f}" if r.new_stop is not None else "—"
-        lines.append(
-            f"| {r.symbol} | {r.action} | {ep} | {r.reason or '—'} | {ns} |"
-        )
+        lines.append(f"| {r.symbol} | {r.action} | {ep} | {r.reason or '—'} | {ns} |")
     lines.append("")
     lines.append(
         f"{len(results)} open trades evaluated; "
@@ -213,4 +208,5 @@ def _main(
 
 if __name__ == "__main__":  # pragma: no cover
     import typer
+
     typer.run(_main)

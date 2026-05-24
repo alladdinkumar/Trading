@@ -60,10 +60,7 @@ def _load_bundled_holidays(year: int) -> frozenset[date]:
         return frozenset()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        return frozenset(
-            date.fromisoformat(item["date"])
-            for item in payload.get("holidays", [])
-        )
+        return frozenset(date.fromisoformat(item["date"]) for item in payload.get("holidays", []))
     except (json.JSONDecodeError, KeyError, ValueError) as e:
         logger.error(f"Failed to parse bundled holidays for {year}: {e}")
         return frozenset()
@@ -80,9 +77,7 @@ def nse_holidays(year: int) -> frozenset[date]:
     try:
         return _fetch_holidays_from_nsepython(year)
     except Exception as e:
-        logger.warning(
-            f"nsepython holiday fetch failed for {year}: {e} — using bundled fallback"
-        )
+        logger.warning(f"nsepython holiday fetch failed for {year}: {e} — using bundled fallback")
         return _load_bundled_holidays(year)
 
 

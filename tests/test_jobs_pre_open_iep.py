@@ -32,6 +32,7 @@ from trading.store.ohlcv import write_ohlcv
 
 # Unit tests for gap calculation
 
+
 def test_compute_gaps_basic() -> None:
     """Gap calculation: (ltp - yesterday_close) / yesterday_close * 100."""
     quotes = {
@@ -134,6 +135,7 @@ def test_compute_gaps_missing_quote() -> None:
 
 # Unit tests for regime filter
 
+
 def test_filter_risk_on_keeps_positive_gaps() -> None:
     """RISK_ON regime keeps candidates with gap >= 0%."""
     candidates = ["RVNL", "NTPC", "RELIANCE"]
@@ -191,6 +193,7 @@ def test_filter_neutral_keeps_all() -> None:
 
 # Unit tests for sector momentum filter
 
+
 def test_sector_filter_removes_lagging_in_risk_on() -> None:
     """RISK_ON: remove candidates in sectors with negative momentum."""
     candidates = ["RELIANCE", "RVNL"]
@@ -229,6 +232,7 @@ def test_sector_percentile_ranking() -> None:
 
 
 # Unit tests for reranking score
+
 
 def test_rerank_score_formula() -> None:
     """Rerank score = (gap_normalized × 0.6) + (sector_pct × 0.4)."""
@@ -270,6 +274,7 @@ def test_rerank_ties_stable() -> None:
 
 
 # Unit tests for context parsing
+
 
 def test_parse_candidates_from_context_basic() -> None:
     """Extract candidate symbols from _context.md markdown."""
@@ -346,6 +351,7 @@ def test_update_context_appends_removed_list() -> None:
 
 # Integration tests for run_pre_open_iep orchestrator
 
+
 @pytest.fixture
 def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
@@ -381,9 +387,17 @@ def _seed_regime(paths, as_of: date, regime: str) -> None:
         upsert_macro_snapshot(
             conn,
             MacroSnapshot(
-                date=as_of.isoformat(), sgx_nifty=None, dow_fut=None,
-                nasdaq_fut=None, sp500=None, usdinr=None, crude=None,
-                vix=None, us_10y=None, fii_flow_cr=None, dii_flow_cr=None,
+                date=as_of.isoformat(),
+                sgx_nifty=None,
+                dow_fut=None,
+                nasdaq_fut=None,
+                sp500=None,
+                usdinr=None,
+                crude=None,
+                vix=None,
+                us_10y=None,
+                fii_flow_cr=None,
+                dii_flow_cr=None,
                 regime=regime,
             ),
         )
@@ -392,8 +406,7 @@ def _seed_regime(paths, as_of: date, regime: str) -> None:
 def _seed_context(paths, as_of: date, symbols: list[str]) -> Path:
     base = paths.research_dir / as_of.isoformat()
     base.mkdir(parents=True, exist_ok=True)
-    body = ["# Trading context bundle — " + as_of.isoformat(), "",
-            "## Today's candidates", ""]
+    body = ["# Trading context bundle — " + as_of.isoformat(), "", "## Today's candidates", ""]
     for sym in symbols:
         body.extend([f"### {sym} — passes 8/10 rules", "", "rule body here", ""])
     body.extend(["## Macro", "", "macro body here", ""])
@@ -404,11 +417,19 @@ def _seed_context(paths, as_of: date, symbols: list[str]) -> Path:
 
 def _quote_row(symbol: str, ltp: float) -> dict:
     return {
-        "tradingsymbol": symbol, "instrument_token": 0,
-        "last_price": ltp, "volume": 1000,
-        "open": ltp, "high": ltp + 1, "low": ltp - 1, "close": ltp - 2,
-        "bid": ltp - 0.1, "ask": ltp + 0.1, "oi": 0,
-        "upper_circuit_limit": None, "lower_circuit_limit": None,
+        "tradingsymbol": symbol,
+        "instrument_token": 0,
+        "last_price": ltp,
+        "volume": 1000,
+        "open": ltp,
+        "high": ltp + 1,
+        "low": ltp - 1,
+        "close": ltp - 2,
+        "bid": ltp - 0.1,
+        "ask": ltp + 0.1,
+        "oi": 0,
+        "upper_circuit_limit": None,
+        "lower_circuit_limit": None,
     }
 
 
@@ -451,11 +472,16 @@ def test_run_pre_open_iep_risk_on_filters_and_reorders(paths, monkeypatch) -> No
     _seed_parquet(paths, "RVNL", 304.0)
     _seed_parquet(paths, "NTPC", 175.0)
     _seed_parquet(paths, "COALINDIA", 400.0)
-    _seed_quotes(paths, as_of, "0855", [
-        _quote_row("RVNL", 312.0),       # +2.63%
-        _quote_row("NTPC", 177.0),       # +1.14%
-        _quote_row("COALINDIA", 395.0),  # -1.25% → dropped under RISK_ON
-    ])
+    _seed_quotes(
+        paths,
+        as_of,
+        "0855",
+        [
+            _quote_row("RVNL", 312.0),  # +2.63%
+            _quote_row("NTPC", 177.0),  # +1.14%
+            _quote_row("COALINDIA", 395.0),  # -1.25% → dropped under RISK_ON
+        ],
+    )
     _seed_regime(paths, as_of, "RISK_ON")
 
     result = run_pre_open_iep(as_of, paths=paths)
@@ -496,10 +522,9 @@ def test_run_pre_open_iep_neutral_when_regime_missing(paths) -> None:
     assert any("quotes" in w.lower() for w in result.warnings)
 
 
-
-
 def test_pre_open_iep_main_logging_and_failure(monkeypatch, tmp_path):
     import pytest as _pytest
+
     from trading.jobs import pre_open_iep as job
     from trading.ops import logging_setup
 

@@ -29,9 +29,15 @@ def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 _HOLDING_ROW = {
-    "tradingsymbol": "RVNL", "exchange": "NSE", "isin": "INE415G01027",
-    "quantity": 594, "average_price": 328.0, "last_price": 283.0,
-    "close_price": 287.2, "pnl": -26851.0, "day_change": -4.2,
+    "tradingsymbol": "RVNL",
+    "exchange": "NSE",
+    "isin": "INE415G01027",
+    "quantity": 594,
+    "average_price": 328.0,
+    "last_price": 283.0,
+    "close_price": 287.2,
+    "pnl": -26851.0,
+    "day_change": -4.2,
     "day_change_percentage": -1.46,
 }
 
@@ -44,9 +50,15 @@ _QUOTE_ROW_RVNL_TIME = {
     "instrument_token": 2445313,
     "last_price": 290.0,
     "volume": 100,
-    "open": 290.0, "high": 291.0, "low": 289.5, "close": 287.2,
-    "bid": 289.9, "ask": 290.1, "oi": None,
-    "upper_circuit_limit": None, "lower_circuit_limit": None,
+    "open": 290.0,
+    "high": 291.0,
+    "low": 289.5,
+    "close": 287.2,
+    "bid": 289.9,
+    "ask": 290.1,
+    "oi": None,
+    "upper_circuit_limit": None,
+    "lower_circuit_limit": None,
     "tradingsymbol": "RVNL",
 }
 
@@ -98,14 +110,12 @@ def test_run_post_close_apply_closes_time_stop_and_writes_summary(paths) -> None
         run_migrations(file_conn)
         _seed_open_trade_at_day_24(file_conn)
     _write_quotes(paths, date(2026, 5, 16), "1601", [_QUOTE_ROW_RVNL_TIME])
-    result = run_post_close(
-        date(2026, 5, 16), paths=paths, apply=True, cash=100_000.0
-    )
+    result = run_post_close(date(2026, 5, 16), paths=paths, apply=True, cash=100_000.0)
     assert isinstance(result, PostCloseResult)
     assert result.quotes_capture_ts == _dt(2026, 5, 16, 16, 1)
     assert result.bars_built == 1
     assert result.trades_evaluated == 1
-    assert result.trades_closed == 1   # day 24+1=25 → TIME exit
+    assert result.trades_closed == 1  # day 24+1=25 → TIME exit
     # paper_trade is now closed
     with get_conn(paths.db_path) as file_conn:
         closed = file_conn.execute(
@@ -172,9 +182,7 @@ def test_run_post_close_apply_no_open_trades_still_writes_summary(paths) -> None
     with get_conn(paths.db_path) as file_conn:
         run_migrations(file_conn)
     _write_quotes(paths, date(2026, 5, 16), "1601", [_QUOTE_ROW_RVNL_TIME])
-    result = run_post_close(
-        date(2026, 5, 16), paths=paths, apply=True, cash=100_000.0
-    )
+    result = run_post_close(date(2026, 5, 16), paths=paths, apply=True, cash=100_000.0)
     assert result.bars_built == 1
     assert result.trades_evaluated == 0
     assert result.trades_closed == 0
@@ -187,6 +195,7 @@ def test_run_post_close_apply_no_open_trades_still_writes_summary(paths) -> None
 
 def test_post_close_main_logging_and_failure(monkeypatch, tmp_path):
     import pytest as _pytest
+
     from trading.jobs import post_close as job
     from trading.ops import logging_setup
 

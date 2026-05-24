@@ -41,9 +41,15 @@ def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 _HOLDING_ROW = {
-    "tradingsymbol": "COALINDIA", "exchange": "NSE", "isin": "INE522F01014",
-    "quantity": 69, "average_price": 463.68, "last_price": 462.2,
-    "close_price": 454.05, "pnl": -102.25, "day_change": 8.15,
+    "tradingsymbol": "COALINDIA",
+    "exchange": "NSE",
+    "isin": "INE522F01014",
+    "quantity": 69,
+    "average_price": 463.68,
+    "last_price": 462.2,
+    "close_price": 454.05,
+    "pnl": -102.25,
+    "day_change": 8.15,
     "day_change_percentage": 1.79,
 }
 
@@ -63,9 +69,7 @@ def _seed_open_trade(conn: sqlite3.Connection, symbol: str = "RVNL") -> None:
     conn.commit()
 
 
-def test_gather_quote_symbols_unions_paper_signals_holdings(
-    conn, paths
-) -> None:
+def test_gather_quote_symbols_unions_paper_signals_holdings(conn, paths) -> None:
     _seed_open_trade(conn, "RVNL")
     conn.execute(
         "INSERT INTO signals (ts, symbol, side, entry, stop, target, "
@@ -78,9 +82,7 @@ def test_gather_quote_symbols_unions_paper_signals_holdings(
     assert out == sorted({"RVNL", "NTPC", "COALINDIA"})
 
 
-def test_gather_quote_symbols_degrades_when_holdings_missing(
-    conn, paths
-) -> None:
+def test_gather_quote_symbols_degrades_when_holdings_missing(conn, paths) -> None:
     _seed_open_trade(conn, "RVNL")
     out = gather_quote_symbols(conn, paths, date(2026, 5, 16))
     assert out == ["RVNL"]
@@ -90,6 +92,7 @@ def test_run_mid_day_prepare_writes_symbol_file(paths) -> None:
     # run_mid_day opens its own connection against paths.db_path, so seed
     # the file db (not an in-memory fixture).
     from trading.store.db import get_conn
+
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(paths.db_path) as file_conn:
         run_migrations(file_conn)
@@ -107,11 +110,17 @@ def test_run_mid_day_prepare_writes_symbol_file(paths) -> None:
 
 _QUOTE_ROW_RVNL = {
     "instrument_token": 2445313,
-    "last_price": 280.0,           # below current_stop=295 → triggers EXIT_STOP
+    "last_price": 280.0,  # below current_stop=295 → triggers EXIT_STOP
     "volume": 100,
-    "open": 305.0, "high": 305.5, "low": 280.0, "close": 305.0,
-    "bid": 279.9, "ask": 280.1, "oi": None,
-    "upper_circuit_limit": None, "lower_circuit_limit": None,
+    "open": 305.0,
+    "high": 305.5,
+    "low": 280.0,
+    "close": 305.0,
+    "bid": 279.9,
+    "ask": 280.1,
+    "oi": None,
+    "upper_circuit_limit": None,
+    "lower_circuit_limit": None,
     "tradingsymbol": "RVNL",
 }
 
@@ -126,20 +135,32 @@ def _write_quotes(paths, as_of, hhmm: str, rows: list) -> Path:
 
 def test_quotes_to_bars_uses_last_price_as_close() -> None:
     q = Quote(
-        instrument_token=1, last_price=395.25, volume=8123456,
-        open=396.30, high=397.10, low=393.80, close=396.30,
-        bid=395.20, ask=395.30, oi=None,
-        upper_circuit_limit=None, lower_circuit_limit=None,
+        instrument_token=1,
+        last_price=395.25,
+        volume=8123456,
+        open=396.30,
+        high=397.10,
+        low=393.80,
+        close=396.30,
+        bid=395.20,
+        ask=395.30,
+        oi=None,
+        upper_circuit_limit=None,
+        lower_circuit_limit=None,
     )
     bars = _quotes_to_bars({"NTPC": q})
     assert bars["NTPC"] == Bar(
-        open=396.30, high=397.10, low=393.80, close=395.25,
+        open=396.30,
+        high=397.10,
+        low=393.80,
+        close=395.25,
     )
 
 
 @freeze_time("2026-05-16T12:33:00")
 def test_run_mid_day_apply_closes_stop_hit_and_writes_markdown(paths) -> None:
     from trading.store.db import get_conn
+
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(paths.db_path) as file_conn:
         run_migrations(file_conn)
@@ -170,6 +191,7 @@ def test_run_mid_day_apply_closes_stop_hit_and_writes_markdown(paths) -> None:
 @freeze_time("2026-05-16T12:33:00")
 def test_run_mid_day_apply_aborts_when_quotes_missing(paths) -> None:
     from trading.store.db import get_conn
+
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(paths.db_path) as file_conn:
         run_migrations(file_conn)
@@ -182,6 +204,7 @@ def test_run_mid_day_apply_aborts_when_quotes_missing(paths) -> None:
 @freeze_time("2026-05-16T12:33:00")
 def test_run_mid_day_apply_idempotent_on_rerun(paths) -> None:
     from trading.store.db import get_conn
+
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(paths.db_path) as file_conn:
         run_migrations(file_conn)
@@ -197,6 +220,7 @@ def test_run_mid_day_apply_idempotent_on_rerun(paths) -> None:
 
 def test_mid_day_main_logging_and_failure(monkeypatch, tmp_path):
     import pytest as _pytest
+
     from trading.jobs import mid_day as job
     from trading.ops import logging_setup
 

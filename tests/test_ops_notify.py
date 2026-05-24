@@ -103,9 +103,7 @@ def test_notify_info_dispatches_to_both_channels(monkeypatch):
     toast_calls: list[tuple[str, str]] = []
 
     monkeypatch.setattr(notify_mod, "post_slack", lambda text: slack_calls.append(text) or True)
-    monkeypatch.setattr(
-        notify_mod, "post_toast", lambda t, m: toast_calls.append((t, m)) or True
-    )
+    monkeypatch.setattr(notify_mod, "post_toast", lambda t, m: toast_calls.append((t, m)) or True)
 
     notify_mod.notify("info", "Reminder", "Run /kite-snapshot")
 

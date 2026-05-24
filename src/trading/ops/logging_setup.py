@@ -23,17 +23,11 @@ _configured: set[str] = set()
 
 
 def _file_format() -> str:
-    return (
-        "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | "
-        "{name}:{function}:{line} | {message}"
-    )
+    return "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}"
 
 
 def _stderr_format() -> str:
-    return (
-        "<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | "
-        "<level>{message}</level>"
-    )
+    return "<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>"
 
 
 def configure_logging(job: str, *, slack_on_error: bool = True) -> Path:
@@ -104,10 +98,10 @@ def _install_slack_sink(job: str, log_path: Path) -> None:
         if tail:
             body_parts.append("Recent log:\n" + tail)
         body = "\n\n".join(body_parts)
-        try:
+        import contextlib
+
+        with contextlib.suppress(Exception):
             notify_mod.notify("error", f"{job} FAILED", body)
-        except Exception:
-            pass  # never crash from the logging layer
 
     logger.add(_sink, level="ERROR", enqueue=False)
 

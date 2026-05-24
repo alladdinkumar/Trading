@@ -69,16 +69,20 @@ def run_post_close(
             base = p.raw_dir / as_of.isoformat()
             base.mkdir(parents=True, exist_ok=True)
             symbols_path = base / "_quote_symbols.txt"
-            symbols_path.write_text(
-                "\n".join(symbols) + "\n", encoding="utf-8"
-            )
+            symbols_path.write_text("\n".join(symbols) + "\n", encoding="utf-8")
             return PostCloseResult(
                 as_of=as_of,
                 quotes_capture_ts=None,
-                bars_built=0, trades_evaluated=0, trades_closed=0,
-                trades_held=0, trades_skipped=0, predictions_matured=0,
-                equity=None, drawdown_pct=None,
-                summary_path=None, symbols_path=symbols_path,
+                bars_built=0,
+                trades_evaluated=0,
+                trades_closed=0,
+                trades_held=0,
+                trades_skipped=0,
+                predictions_matured=0,
+                equity=None,
+                drawdown_pct=None,
+                summary_path=None,
+                symbols_path=symbols_path,
                 warnings=warnings,
             )
 
@@ -95,17 +99,13 @@ def run_post_close(
         held = sum(1 for r in mtm_results if r.action == "HOLD")
         skipped = sum(1 for r in mtm_results if r.action == "SKIP")
 
-        reconcile_result = reconcile_day(
-            conn, as_of=as_of, cash=cash, bars=bars
-        )
+        reconcile_result = reconcile_day(conn, as_of=as_of, cash=cash, bars=bars)
 
         summary_dir = p.research_dir / as_of.isoformat()
         summary_dir.mkdir(parents=True, exist_ok=True)
         summary_path = summary_dir / "post_close_summary.md"
         summary_path.write_text(
-            _render_post_close_summary(
-                capture_ts, mtm_results, reconcile_result
-            ),
+            _render_post_close_summary(capture_ts, mtm_results, reconcile_result),
             encoding="utf-8",
         )
 
@@ -148,31 +148,31 @@ def _render_post_close_summary(
     for r in mtm_results:
         ep = f"{r.exit_price:.2f}" if r.exit_price is not None else "—"
         ns = f"{r.new_stop:.2f}" if r.new_stop is not None else "—"
-        lines.append(
-            f"| {r.symbol} | {r.action} | {ep} | {r.reason or '—'} | {ns} |"
-        )
+        lines.append(f"| {r.symbol} | {r.action} | {ep} | {r.reason or '—'} | {ns} |")
 
     open_positions = sum(1 for r in mtm_results if r.action == "HOLD")
-    drawdown = (
-        f"{snap.drawdown_pct:+.2f}%" if snap.drawdown_pct is not None else "—"
+    drawdown = f"{snap.drawdown_pct:+.2f}%" if snap.drawdown_pct is not None else "—"
+    lines.extend(
+        [
+            "",
+            "### Portfolio snapshot",
+            "",
+            f"- equity: ₹{snap.equity:,.0f}",
+            f"- cash: ₹{snap.cash:,.0f}",
+            f"- drawdown from peak: {drawdown}",
+            f"- open positions: {open_positions}",
+            "",
+            f"### Matured predictions ({len(updates)})",
+            "",
+        ]
     )
-    lines.extend([
-        "",
-        "### Portfolio snapshot",
-        "",
-        f"- equity: ₹{snap.equity:,.0f}",
-        f"- cash: ₹{snap.cash:,.0f}",
-        f"- drawdown from peak: {drawdown}",
-        f"- open positions: {open_positions}",
-        "",
-        f"### Matured predictions ({len(updates)})",
-        "",
-    ])
     if updates:
-        lines.extend([
-            "| symbol | predicted % | actual % | error % |",
-            "|---|---|---|---|",
-        ])
+        lines.extend(
+            [
+                "| symbol | predicted % | actual % | error % |",
+                "|---|---|---|---|",
+            ]
+        )
         for u in updates:
             lines.append(
                 f"| {u.symbol} | {u.predicted_return_pct:+.2f} | "
@@ -181,12 +181,14 @@ def _render_post_close_summary(
     else:
         lines.append("_(none today)_")
 
-    lines.extend([
-        "",
-        f"{len(closed)} closed (EXIT_STOP/TARGET/TIME); "
-        f"{len(held)} held; "
-        f"{len(skipped)} skipped (no quote).",
-    ])
+    lines.extend(
+        [
+            "",
+            f"{len(closed)} closed (EXIT_STOP/TARGET/TIME); "
+            f"{len(held)} held; "
+            f"{len(skipped)} skipped (no quote).",
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 
@@ -200,9 +202,7 @@ def _main(
     from loguru import logger
 
     try:
-        result = run_post_close(
-            date.fromisoformat(date_str), apply=apply, cash=cash
-        )
+        result = run_post_close(date.fromisoformat(date_str), apply=apply, cash=cash)
     except PostCloseAborted as e:
         print(f"Post-close aborted: {e}")
         raise SystemExit(2) from e
@@ -224,4 +224,5 @@ def _main(
 
 if __name__ == "__main__":  # pragma: no cover
     import typer
+
     typer.run(_main)

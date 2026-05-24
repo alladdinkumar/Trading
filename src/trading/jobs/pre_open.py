@@ -108,12 +108,21 @@ def run_pre_open(
         holdings = _step_portfolio(p, s, warnings, as_of=as_of)
 
         opened = _step_auto_open(
-            conn, as_of, passing_candidates, regime,
-            capital_per_trade, risk_pct, warnings,
+            conn,
+            as_of,
+            passing_candidates,
+            regime,
+            capital_per_trade,
+            risk_pct,
+            warnings,
         )
 
         bundle_path = _step_assemble(
-            conn, p, as_of, candidates, holdings,
+            conn,
+            p,
+            as_of,
+            candidates,
+            holdings,
         )
 
     return PreOpenResult(
@@ -130,9 +139,7 @@ def run_pre_open(
     )
 
 
-def _step_macro(
-    conn: sqlite3.Connection, as_of: date, warnings: list[str]
-) -> tuple[bool, Regime]:
+def _step_macro(conn: sqlite3.Connection, as_of: date, warnings: list[str]) -> tuple[bool, Regime]:
     """Pull macro inputs, classify regime, upsert snapshot. Degrade on error."""
     try:
         snap, rr = snapshot_and_classify(as_of)
@@ -143,9 +150,7 @@ def _step_macro(
     return True, rr.regime
 
 
-def _step_news(
-    conn: sqlite3.Connection, as_of: date, warnings: list[str]
-) -> tuple[int, int]:
+def _step_news(conn: sqlite3.Connection, as_of: date, warnings: list[str]) -> tuple[int, int]:
     """Fetch RSS + NSE events, score with FinBERT, insert + aggregate.
 
     Returns (news_inserted, sentiment_rollups). Degrades gracefully:
@@ -165,9 +170,7 @@ def _step_news(
     return inserted, len(rollups)
 
 
-def _step_scan(
-    paths: Paths, as_of: date, warnings: list[str]
-) -> list[Candidate]:
+def _step_scan(paths: Paths, as_of: date, warnings: list[str]) -> list[Candidate]:
     """Run Layer A scanner over the parquet universe."""
     ctx = ScanContext(scan_date=as_of)
     return scan(paths, as_of, ctx=ctx)
@@ -235,19 +238,19 @@ def _step_auto_open(
         stop_price = cand.close - 1.5 * cand.atr_14
         target_price = cand.close * 1.20
         if cand.close <= stop_price:
-            warnings.append(
-                f"{cand.symbol}: ATR={cand.atr_14:.2f} ≥ close — skip"
-            )
+            warnings.append(f"{cand.symbol}: ATR={cand.atr_14:.2f} ≥ close — skip")
             continue
-        sizing = position_size(SizingInput(
-            capital=capital, risk_pct=risk_pct,
-            entry=cand.close, stop=stop_price, regime=regime,
-        ))
-        if sizing.qty == 0:
-            warnings.append(
-                f"{cand.symbol}: sizing bound to zero "
-                f"({', '.join(sizing.reasons)})"
+        sizing = position_size(
+            SizingInput(
+                capital=capital,
+                risk_pct=risk_pct,
+                entry=cand.close,
+                stop=stop_price,
+                regime=regime,
             )
+        )
+        if sizing.qty == 0:
+            warnings.append(f"{cand.symbol}: sizing bound to zero ({', '.join(sizing.reasons)})")
             continue
         signal = Signal(
             id=None,
@@ -258,23 +261,23 @@ def _step_auto_open(
             stop=stop_price,
             target=target_price,
             horizon_days=25,
-            rules_passed_json=json.dumps(
-                [r.name for r in cand.rules if r.passed]
-            ),
+            rules_passed_json=json.dumps([r.name for r in cand.rules if r.passed]),
             created_by="pre_open",
         )
         log_signal_and_open_trade(
-            conn, signal=signal,
-            entry_ts=signal.ts, entry_price=cand.close, qty=sizing.qty,
-            atr_at_entry=cand.atr_14, predicted_return_pct=20.0,
+            conn,
+            signal=signal,
+            entry_ts=signal.ts,
+            entry_price=cand.close,
+            qty=sizing.qty,
+            atr_at_entry=cand.atr_14,
+            predicted_return_pct=20.0,
         )
         opened += 1
     return opened
 
 
-def _already_opened_today(
-    conn: sqlite3.Connection, symbol: str, as_of: date
-) -> bool:
+def _already_opened_today(conn: sqlite3.Connection, symbol: str, as_of: date) -> bool:
     """True if `symbol` has an OPEN paper-trade entered on `as_of`."""
     row = conn.execute(
         "SELECT 1 FROM paper_trades pt "
@@ -296,7 +299,10 @@ def _step_assemble(
 ) -> Path:
     """Render the input bundle. Real wiring; no upstream calls."""
     return assemble_context(
-        conn=conn, paths=paths, as_of=as_of, mode="pre_open",
+        conn=conn,
+        paths=paths,
+        as_of=as_of,
+        mode="pre_open",
         inputs=ContextInputs(candidates=candidates, holdings_health=holdings),
     )
 
@@ -329,4 +335,5 @@ def _main(
 
 if __name__ == "__main__":  # pragma: no cover
     import typer
+
     typer.run(_main)

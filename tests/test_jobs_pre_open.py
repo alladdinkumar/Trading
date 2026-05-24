@@ -45,9 +45,7 @@ def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return get_paths()
 
 
-def test_run_pre_open_returns_result_with_bundle_path(
-    paths, monkeypatch
-) -> None:
+def test_run_pre_open_returns_result_with_bundle_path(paths, monkeypatch) -> None:
     """Skeleton: orchestrator returns a PreOpenResult and writes a bundle.
 
     Stub every upstream call so the test runs offline. Subsequent tasks
@@ -91,20 +89,30 @@ def test_step_macro_writes_snapshot_and_returns_regime(
     conn: sqlite3.Connection,
 ) -> None:
     snap = MacroSnapshot(
-        date=date(2026, 5, 15), sgx_nifty=None, dow_fut=None,
-        nasdaq_fut=None, sp500=None, usdinr=95.0, crude=None,
-        vix=18.0, us_10y=None, fii_flow_cr=200.0, dii_flow_cr=500.0,
+        date=date(2026, 5, 15),
+        sgx_nifty=None,
+        dow_fut=None,
+        nasdaq_fut=None,
+        sp500=None,
+        usdinr=95.0,
+        crude=None,
+        vix=18.0,
+        us_10y=None,
+        fii_flow_cr=200.0,
+        dii_flow_cr=500.0,
         regime="RISK_ON",
     )
     rr = RegimeResult(
-        regime="RISK_ON", composite_score=2,
-        vix_vote=1, futures_vote=0, fii_vote=1, usdinr_vote=0,
+        regime="RISK_ON",
+        composite_score=2,
+        vix_vote=1,
+        futures_vote=0,
+        fii_vote=1,
+        usdinr_vote=0,
         reasons=["VIX low", "FII positive"],
     )
     warnings: list[str] = []
-    with patch(
-        "trading.jobs.pre_open.snapshot_and_classify", return_value=(snap, rr)
-    ):
+    with patch("trading.jobs.pre_open.snapshot_and_classify", return_value=(snap, rr)):
         ok, regime = _step_macro(conn, date(2026, 5, 15), warnings)
     assert ok is True
     assert regime == "RISK_ON"
@@ -130,9 +138,7 @@ def test_step_macro_degrades_gracefully_on_fetch_error(
     assert ok is False
     assert regime == "NEUTRAL"
     assert any("macro" in w.lower() for w in warnings)
-    assert conn.execute(
-        "SELECT COUNT(*) FROM macro_snapshot"
-    ).fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM macro_snapshot").fetchone()[0] == 0
 
 
 def _raw_headline(symbol: str = "RVNL") -> RawHeadline:
@@ -148,28 +154,29 @@ def test_step_news_inserts_headlines_and_aggregates(
     conn: sqlite3.Connection,
 ) -> None:
     warnings: list[str] = []
-    with patch(
-        "trading.jobs.pre_open.fetch_all_news",
-        return_value=[_raw_headline("RVNL")],
-    ), patch(
-        "trading.jobs.pre_open.score_news_items",
-        side_effect=lambda items: [
-            __import__("trading.data.news", fromlist=["NewsItem"]).NewsItem(
-                ts=i.ts.isoformat(),
-                symbol="RVNL",
-                source=i.source,
-                headline=i.headline,
-                url=i.url,
-                sentiment=0.5,
-                category="results",
-                is_critical=False,
-            )
-            for i in items
-        ],
+    with (
+        patch(
+            "trading.jobs.pre_open.fetch_all_news",
+            return_value=[_raw_headline("RVNL")],
+        ),
+        patch(
+            "trading.jobs.pre_open.score_news_items",
+            side_effect=lambda items: [
+                __import__("trading.data.news", fromlist=["NewsItem"]).NewsItem(
+                    ts=i.ts.isoformat(),
+                    symbol="RVNL",
+                    source=i.source,
+                    headline=i.headline,
+                    url=i.url,
+                    sentiment=0.5,
+                    category="results",
+                    is_critical=False,
+                )
+                for i in items
+            ],
+        ),
     ):
-        inserted, rollups = _step_news(
-            conn, date(2026, 5, 15), warnings
-        )
+        inserted, rollups = _step_news(conn, date(2026, 5, 15), warnings)
     assert inserted == 1
     assert rollups == 1
     assert warnings == []
@@ -183,23 +190,24 @@ def test_step_news_degrades_gracefully_on_fetch_error(
         "trading.jobs.pre_open.fetch_all_news",
         side_effect=RuntimeError("RSS down"),
     ):
-        inserted, rollups = _step_news(
-            conn, date(2026, 5, 15), warnings
-        )
+        inserted, rollups = _step_news(conn, date(2026, 5, 15), warnings)
     assert inserted == 0
     assert rollups == 0
     assert any("news" in w.lower() for w in warnings)
 
 
 def _candidate(symbol: str, n_passed: int) -> Candidate:
-    rules = tuple(
-        RuleResult(name=f"r{i}", passed=(i < n_passed), reason="")
-        for i in range(10)
-    )
+    rules = tuple(RuleResult(name=f"r{i}", passed=(i < n_passed), reason="") for i in range(10))
     return Candidate(
-        symbol=symbol, scan_date=date(2026, 5, 15),
-        close=100.0, rsi_14=40.0, sma_20=100.0, sma_50=100.0,
-        sma_200=100.0, atr_14=2.0, rules=rules,
+        symbol=symbol,
+        scan_date=date(2026, 5, 15),
+        close=100.0,
+        rsi_14=40.0,
+        sma_20=100.0,
+        sma_50=100.0,
+        sma_200=100.0,
+        atr_14=2.0,
+        rules=rules,
     )
 
 
@@ -214,23 +222,33 @@ def test_step_scan_delegates_to_strategy(paths) -> None:
 
 def _settings(token: str | None = None) -> Settings:
     return Settings(
-        anthropic_api_key=None, kite_api_key="k",
-        kite_api_secret="s", kite_access_token=token,
+        anthropic_api_key=None,
+        kite_api_key="k",
+        kite_api_secret="s",
+        kite_access_token=token,
         slack_webhook_url=None,
-        log_level="INFO", news_user_agent="test",
+        log_level="INFO",
+        news_user_agent="test",
     )
 
 
 _PRE_OPEN_HOLDING = {
-    "tradingsymbol": "RVNL", "exchange": "NSE", "isin": "INE415G01027",
-    "quantity": 32, "average_price": 305.0, "last_price": 329.6,
-    "close_price": 327.1, "pnl": 787.2, "day_change": 2.5,
+    "tradingsymbol": "RVNL",
+    "exchange": "NSE",
+    "isin": "INE415G01027",
+    "quantity": 32,
+    "average_price": 305.0,
+    "last_price": 329.6,
+    "close_price": 327.1,
+    "pnl": 787.2,
+    "day_change": 2.5,
     "day_change_percentage": 0.76,
 }
 
 
 def test_step_portfolio_reads_snapshot_and_scores(paths) -> None:
     from tests.conftest import seed_kite_snapshot
+
     seed_kite_snapshot(paths, date(2026, 5, 15), holdings=[_PRE_OPEN_HOLDING])
     warnings: list[str] = []
     out = _step_portfolio(paths, _settings(), warnings, as_of=date(2026, 5, 15))
@@ -244,6 +262,7 @@ def test_step_portfolio_raises_pre_open_aborted_when_snapshot_missing(
     paths,
 ) -> None:
     from trading.jobs.pre_open import PreOpenAborted
+
     warnings: list[str] = []
     with pytest.raises(PreOpenAborted) as exc:
         _step_portfolio(paths, _settings(), warnings, as_of=date(2026, 5, 15))
@@ -256,14 +275,17 @@ def test_step_auto_open_creates_signal_and_paper_trade(
     warnings: list[str] = []
     cand = _candidate("RVNL", 10)
     opened = _step_auto_open(
-        conn, date(2026, 5, 15), [cand], "NEUTRAL",
-        capital=100_000.0, risk_pct=0.02, warnings=warnings,
+        conn,
+        date(2026, 5, 15),
+        [cand],
+        "NEUTRAL",
+        capital=100_000.0,
+        risk_pct=0.02,
+        warnings=warnings,
     )
     assert opened == 1
     sig_count = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
-    pt_count = conn.execute(
-        "SELECT COUNT(*) FROM paper_trades WHERE ts_exit IS NULL"
-    ).fetchone()[0]
+    pt_count = conn.execute("SELECT COUNT(*) FROM paper_trades WHERE ts_exit IS NULL").fetchone()[0]
     assert sig_count == 1
     assert pt_count == 1
 
@@ -274,17 +296,25 @@ def test_step_auto_open_idempotent_on_rerun(
     warnings: list[str] = []
     cand = _candidate("RVNL", 10)
     _step_auto_open(
-        conn, date(2026, 5, 15), [cand], "NEUTRAL",
-        capital=100_000.0, risk_pct=0.02, warnings=warnings,
+        conn,
+        date(2026, 5, 15),
+        [cand],
+        "NEUTRAL",
+        capital=100_000.0,
+        risk_pct=0.02,
+        warnings=warnings,
     )
     opened2 = _step_auto_open(
-        conn, date(2026, 5, 15), [cand], "NEUTRAL",
-        capital=100_000.0, risk_pct=0.02, warnings=warnings,
+        conn,
+        date(2026, 5, 15),
+        [cand],
+        "NEUTRAL",
+        capital=100_000.0,
+        risk_pct=0.02,
+        warnings=warnings,
     )
     assert opened2 == 0
-    pt_count = conn.execute(
-        "SELECT COUNT(*) FROM paper_trades"
-    ).fetchone()[0]
+    pt_count = conn.execute("SELECT COUNT(*) FROM paper_trades").fetchone()[0]
     assert pt_count == 1
 
 
@@ -298,8 +328,7 @@ def test_already_opened_today_detects_open_trade(
     )
     sig_id = cur.lastrowid
     conn.execute(
-        "INSERT INTO paper_trades (signal_id, ts_entry, entry_price, qty) "
-        "VALUES (?, ?, ?, ?)",
+        "INSERT INTO paper_trades (signal_id, ts_entry, entry_price, qty) VALUES (?, ?, ?, ?)",
         (sig_id, "2026-05-15T08:30:00", 100.0, 10),
     )
     conn.commit()
@@ -321,9 +350,9 @@ def _all_pass_frame() -> pd.DataFrame:
     closes = [100.0] * (n - 30) + list(range(101, 116)) + [110.0] * 15
     df = pd.DataFrame(
         {
-            "open":  [c - 0.5 for c in closes],
-            "high":  [c + 1.0 for c in closes],
-            "low":   [c - 1.0 for c in closes],
+            "open": [c - 0.5 for c in closes],
+            "high": [c + 1.0 for c in closes],
+            "low": [c - 1.0 for c in closes],
             "close": closes,
             "volume": [2_000_000] * n,
         },
@@ -332,9 +361,7 @@ def _all_pass_frame() -> pd.DataFrame:
     return df
 
 
-def test_run_pre_open_full_happy_path_integration(
-    paths, monkeypatch
-) -> None:
+def test_run_pre_open_full_happy_path_integration(paths, monkeypatch) -> None:
     write_ohlcv(_all_pass_frame(), "TESTSYM", paths)
 
     monkeypatch.setattr(
@@ -351,7 +378,9 @@ def test_run_pre_open_full_happy_path_integration(
     )
 
     result = run_pre_open(
-        date(2026, 5, 15), paths=paths, skip_news=False,
+        date(2026, 5, 15),
+        paths=paths,
+        skip_news=False,
     )
     assert result.bundle_path.is_file()
     body = result.bundle_path.read_text(encoding="utf-8")
@@ -361,7 +390,9 @@ def test_run_pre_open_full_happy_path_integration(
     assert result.paper_trades_opened == result.candidates_passing
 
     result2 = run_pre_open(
-        date(2026, 5, 15), paths=paths, skip_news=False,
+        date(2026, 5, 15),
+        paths=paths,
+        skip_news=False,
     )
     assert result2.paper_trades_opened == 0
 
@@ -370,6 +401,7 @@ def test_pre_open_main_configures_logging_and_propagates_failure(monkeypatch, tm
     """When run_pre_open raises, _main configures logging, lets the Slack
     sink fire via logger.exception, and re-raises so exit code propagates."""
     import pytest as _pytest
+
     from trading.jobs import pre_open as job
     from trading.ops import logging_setup
 

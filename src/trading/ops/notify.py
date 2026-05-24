@@ -14,9 +14,9 @@ import requests
 from loguru import logger
 
 try:
-    from plyer import notification as _plyer_notification  # type: ignore[import-untyped]
+    from plyer import notification as _plyer_notification
 except Exception:  # pragma: no cover — plyer should be installed
-    _plyer_notification = None  # type: ignore[assignment]
+    _plyer_notification = None
 
 _SLACK_TIMEOUT_S = 5
 _warned_missing_webhook = False
@@ -71,9 +71,9 @@ def post_toast(title: str, message: str) -> bool:
 
 
 _EMOJI: dict[str, str] = {
-    "info": "\U0001f514",   # 🔔
+    "info": "\U0001f514",  # 🔔
     "warn": "⚠️",  # ⚠️
-    "error": "❌",      # ❌
+    "error": "❌",  # ❌
 }
 
 

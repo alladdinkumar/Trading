@@ -259,9 +259,7 @@ def kite_emergency_snapshot(
     def _atomic_dump(rows: list[Any], filename: str) -> None:
         tmp = base / (filename + ".tmp")
         final = base / filename
-        tmp.write_text(
-            json.dumps([_dc_asdict(r) for r in rows]), encoding="utf-8"
-        )
+        tmp.write_text(json.dumps([_dc_asdict(r) for r in rows]), encoding="utf-8")
         tmp.replace(final)
 
     _atomic_dump(holdings_list, "holdings.json")
@@ -838,9 +836,7 @@ def _render_portfolio_report(health_rows: list, viabilities: list) -> str:  # ty
         prob = f"{v.probability_hit:.1%}" if v.probability_hit is not None else "—"
         days = f"{v.expected_days_to_hit:.1f}" if v.expected_days_to_hit else "—"
         last = f"₹{v.last_price:,.2f}" if v.last_price is not None else "—"
-        lines.append(
-            f"| {v.symbol} | {trigger} | {last} | {prob} | {days} | {v.note or ''} |"
-        )
+        lines.append(f"| {v.symbol} | {trigger} | {last} | {prob} | {days} | {v.note or ''} |")
     return "\n".join(lines) + "\n"
 
 
@@ -924,8 +920,11 @@ def paper_mtm_cmd(
     table.add_column("Exit price", justify="right")
     table.add_column("Reason")
     color = {
-        "HOLD": "green", "EXIT_TARGET": "green",
-        "EXIT_STOP": "red", "EXIT_TIME": "yellow", "SKIP": "yellow",
+        "HOLD": "green",
+        "EXIT_TARGET": "green",
+        "EXIT_STOP": "red",
+        "EXIT_TIME": "yellow",
+        "SKIP": "yellow",
     }
     for r in results:
         c = color.get(r.action, "white")
@@ -943,9 +942,7 @@ def paper_mtm_cmd(
     n_closed = sum(1 for r in results if r.action.startswith("EXIT_"))
     n_hold = sum(1 for r in results if r.action == "HOLD")
     n_skip = sum(1 for r in results if r.action == "SKIP")
-    console.print(
-        f"\n[bold]{n_closed} closed[/bold] · {n_hold} held · {n_skip} skipped"
-    )
+    console.print(f"\n[bold]{n_closed} closed[/bold] · {n_hold} held · {n_skip} skipped")
 
 
 @app.command("paper-status")
@@ -979,8 +976,12 @@ def paper_status_cmd() -> None:
             sym = sig.symbol if sig else "?"
             curr_stop = t.current_stop if t.current_stop is not None else (sig.stop if sig else 0)
             table.add_row(
-                str(t.id), sym, f"{t.entry_price:.2f}", str(t.qty),
-                f"{curr_stop:.2f}", str(t.days_held or 0),
+                str(t.id),
+                sym,
+                f"{t.entry_price:.2f}",
+                str(t.qty),
+                f"{curr_stop:.2f}",
+                str(t.days_held or 0),
             )
         console.print(table)
     else:
@@ -1015,9 +1016,9 @@ def paper_status_cmd() -> None:
             f"cash Rs {snap_row['cash']:,.0f}, "
             f"equity Rs {snap_row['equity']:,.0f}, "
             f"drawdown {snap_row['drawdown_pct']:.2f}%"
-            if snap_row['drawdown_pct'] is not None
+            if snap_row["drawdown_pct"] is not None
             else f"\n[bold]Latest snapshot ({snap_row['date']})[/bold]: "
-                 f"cash Rs {snap_row['cash']:,.0f}, equity Rs {snap_row['equity']:,.0f}"
+            f"cash Rs {snap_row['cash']:,.0f}, equity Rs {snap_row['equity']:,.0f}"
         )
 
 
@@ -1084,9 +1085,7 @@ app.add_typer(brief_app, name="brief")
 @brief_app.command("assemble-context")
 def brief_assemble_context_cmd(
     date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD")],
-    mode: Annotated[
-        str, typer.Option("--mode", help="pre_open or post_close")
-    ] = "pre_open",
+    mode: Annotated[str, typer.Option("--mode", help="pre_open or post_close")] = "pre_open",
 ) -> None:
     """Write data/research/YYYY-MM-DD/_context.md for the analyst skill."""
     if mode not in ("pre_open", "post_close"):
@@ -1133,8 +1132,10 @@ def pre_open_cmd(
     as_of = date.fromisoformat(date_str)
     try:
         result = run_pre_open(
-            as_of, skip_news=skip_news,
-            capital_per_trade=capital, risk_pct=risk_pct,
+            as_of,
+            skip_news=skip_news,
+            capital_per_trade=capital,
+            risk_pct=risk_pct,
         )
     except PreOpenAborted as e:
         console.print(f"[red]Pre-open aborted:[/red] {e}")
@@ -1156,8 +1157,7 @@ def pre_open_cmd(
             console.print(f"  - {w}")
     console.print(f"[green]wrote[/green] {result.bundle_path}")
     console.print(
-        f"[bold]Now run /analyst skill, then "
-        f"`trading brief compile --date {date_str}`[/bold]"
+        f"[bold]Now run /analyst skill, then `trading brief compile --date {date_str}`[/bold]"
     )
 
 

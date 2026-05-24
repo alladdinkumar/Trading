@@ -85,7 +85,8 @@ def test_slack_sink_fires_on_error(tmp_path, monkeypatch, isolated_logger):
 
     calls: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
-        notify_mod, "notify",
+        notify_mod,
+        "notify",
         lambda level, title, body="": calls.append((level, title, body)),
     )
 
@@ -110,7 +111,8 @@ def test_slack_sink_includes_traceback_for_exception(tmp_path, monkeypatch, isol
 
     calls: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
-        notify_mod, "notify",
+        notify_mod,
+        "notify",
         lambda level, title, body="": calls.append((level, title, body)),
     )
 
@@ -136,7 +138,8 @@ def test_slack_sink_disabled_when_flag_false(tmp_path, monkeypatch, isolated_log
 
     calls = []
     monkeypatch.setattr(
-        notify_mod, "notify",
+        notify_mod,
+        "notify",
         lambda level, title, body="": calls.append((level, title, body)),
     )
 

@@ -17,10 +17,18 @@ def test_schedule_slot_names():
     from trading.ops.runner import SCHEDULE
 
     expected = {
-        "pre_open_kite", "pre_open_scan", "pre_open_analyst", "pre_open_compile",
-        "iep_quotes", "iep_filter",
-        "mid_day_prepare", "mid_day_quotes", "mid_day_apply",
-        "post_close_prepare", "post_close_quotes", "post_close_apply",
+        "pre_open_kite",
+        "pre_open_scan",
+        "pre_open_analyst",
+        "pre_open_compile",
+        "iep_quotes",
+        "iep_filter",
+        "mid_day_prepare",
+        "mid_day_quotes",
+        "mid_day_apply",
+        "post_close_prepare",
+        "post_close_quotes",
+        "post_close_apply",
     }
     assert set(SCHEDULE.keys()) == expected
 
@@ -33,10 +41,12 @@ def test_schedule_times_are_sorted():
 
 
 def test_reminder_slot_is_frozen():
+    from dataclasses import FrozenInstanceError
+
     from trading.ops.runner import ReminderSlot
 
     slot = ReminderSlot(when="08:30", title="t", body="b")
-    with pytest.raises(Exception):
+    with pytest.raises(FrozenInstanceError):
         slot.when = "09:00"  # type: ignore[misc]
 
 
@@ -46,7 +56,8 @@ def test_fire_reminder_holiday_short_circuits(monkeypatch):
     calls = []
     monkeypatch.setattr(runner, "is_trading_day", lambda d: False)
     monkeypatch.setattr(
-        runner, "notify",
+        runner,
+        "notify",
         lambda level, title, body="": calls.append((level, title, body)),
     )
 
@@ -60,7 +71,8 @@ def test_fire_reminder_substitutes_date(monkeypatch):
     calls = []
     monkeypatch.setattr(runner, "is_trading_day", lambda d: True)
     monkeypatch.setattr(
-        runner, "notify",
+        runner,
+        "notify",
         lambda level, title, body="": calls.append((level, title, body)),
     )
 
@@ -87,7 +99,8 @@ def test_fire_reminder_uses_today_when_no_arg(monkeypatch):
     monkeypatch.setattr(runner, "is_trading_day", lambda d: True)
     captured: dict[str, str] = {}
     monkeypatch.setattr(
-        runner, "notify",
+        runner,
+        "notify",
         lambda level, title, body="": captured.update(body=body),
     )
 

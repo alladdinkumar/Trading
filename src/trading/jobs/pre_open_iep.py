@@ -15,13 +15,13 @@ from pathlib import Path
 
 from trading.config import Paths, get_paths
 from trading.data.kite import Quote
-from trading.ops.logging_setup import configure_logging
 from trading.data.quotes_snapshot import (
     QuoteSnapshotMissingError,
     QuoteSnapshotStaleError,
     read_latest_quotes,
 )
 from trading.features.regime import Regime
+from trading.ops.logging_setup import configure_logging
 from trading.store.db import get_conn
 from trading.store.macro_store import get_macro_snapshot
 from trading.store.migrations import run_migrations
@@ -71,17 +71,20 @@ def run_pre_open_iep(
     context_path = p.research_dir / as_of.isoformat() / "_context.md"
     if not context_path.is_file():
         raise PreOpenIepAborted(
-            f"Context bundle missing at {context_path}. "
-            "Run `trading pre-open` first."
+            f"Context bundle missing at {context_path}. Run `trading pre-open` first."
         )
     context_md = context_path.read_text(encoding="utf-8")
     candidates = _parse_candidates_from_context(context_md)
     if not candidates:
         return PreOpenIepResult(
-            as_of=as_of, regime="NEUTRAL",
-            candidates_input=0, candidates_filtered=0,
-            candidates_removed=0, rerank_applied=False,
-            context_path=context_path, removed_symbols=[],
+            as_of=as_of,
+            regime="NEUTRAL",
+            candidates_input=0,
+            candidates_filtered=0,
+            candidates_removed=0,
+            rerank_applied=False,
+            context_path=context_path,
+            removed_symbols=[],
             warnings=["No candidates in _context.md — nothing to filter."],
         )
 
@@ -100,21 +103,16 @@ def run_pre_open_iep(
 
     kept, removed = _filter_by_regime(candidates, gaps, regime)
     if sector_map and sector_momentum:
-        kept, sector_removed = _filter_by_sector(
-            kept, sector_map, sector_momentum, regime
-        )
+        kept, sector_removed = _filter_by_sector(kept, sector_map, sector_momentum, regime)
         removed = [*removed, *sector_removed]
         sector_percentiles = _sector_percentile(sector_momentum)
         candidate_sector_pcts = {
-            sym: sector_percentiles.get(sector_map.get(sym, ""), 50.0)
-            for sym in kept
+            sym: sector_percentiles.get(sector_map.get(sym, ""), 50.0) for sym in kept
         }
     else:
         candidate_sector_pcts = {}
         if sector_map is None and sector_momentum is None:
-            warnings.append(
-                "Sector data unavailable; filtering by gap + regime only."
-            )
+            warnings.append("Sector data unavailable; filtering by gap + regime only.")
 
     rerank_applied = bool(gaps)
     new_order = _rerank(kept, gaps, candidate_sector_pcts) if rerank_applied else kept
@@ -123,7 +121,8 @@ def run_pre_open_iep(
     context_path.write_text(updated_md, encoding="utf-8")
 
     return PreOpenIepResult(
-        as_of=as_of, regime=regime,
+        as_of=as_of,
+        regime=regime,
         candidates_input=len(candidates),
         candidates_filtered=len(new_order),
         candidates_removed=len(removed),
@@ -134,15 +133,11 @@ def run_pre_open_iep(
     )
 
 
-def _load_regime(
-    conn: sqlite3.Connection, as_of: date, warnings: list[str]
-) -> Regime:
+def _load_regime(conn: sqlite3.Connection, as_of: date, warnings: list[str]) -> Regime:
     """Look up today's regime from macro_snapshot, default NEUTRAL if absent."""
     snap = get_macro_snapshot(conn, as_of.isoformat())
     if snap is None or snap.regime is None:
-        warnings.append(
-            "Regime not yet classified; using NEUTRAL (no directional filter)."
-        )
+        warnings.append("Regime not yet classified; using NEUTRAL (no directional filter).")
         return "NEUTRAL"
     regime_str = snap.regime
     if regime_str not in ("RISK_ON", "RISK_OFF", "NEUTRAL"):
@@ -457,7 +452,7 @@ def _update_context_markdown(
         candidate_blocks[current_symbol] = current_block
 
     # Rebuild candidates section in new order
-    new_lines = lines[:candidates_idx + 1]
+    new_lines = lines[: candidates_idx + 1]
 
     for sym in new_order:
         if sym in candidate_blocks:
@@ -480,4 +475,5 @@ def _update_context_markdown(
 
 if __name__ == "__main__":  # pragma: no cover
     import typer
+
     typer.run(_main)

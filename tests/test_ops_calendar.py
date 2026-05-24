@@ -36,7 +36,8 @@ def test_known_holiday_is_not_trading_day(monkeypatch):
     from trading.ops import calendar as cal
 
     monkeypatch.setattr(
-        cal, "_fetch_holidays_from_nsepython",
+        cal,
+        "_fetch_holidays_from_nsepython",
         lambda year: frozenset({date(2026, 1, 26)}),
     )
     assert cal.is_trading_day(date(2026, 1, 26)) is False
