@@ -1325,5 +1325,197 @@ def notify_test_cmd() -> None:
     console.print("[green]ok[/green] — check Slack + Windows notification area")
 
 
+@app.command("ranker-status")
+def ranker_status() -> None:
+    """Show the current model registry (Phase 16)."""
+    from trading.store.model_registry import all_rows
+
+    paths = get_paths()
+    rows = all_rows(paths)
+    if not rows:
+        console.print("no models registered")
+        raise typer.Exit(code=0)
+    table = Table(title="Model registry")
+    table.add_column("version")
+    table.add_column("trained_at")
+    table.add_column("OOS Sharpe", justify="right")
+    table.add_column("OOS hit", justify="right")
+    table.add_column("examples", justify="right")
+    table.add_column("active")
+    table.add_column("path")
+    for r in rows:
+        trained_at_short = r.trained_at.split("T")[0] if "T" in r.trained_at else r.trained_at
+        table.add_row(
+            r.version,
+            trained_at_short,
+            f"{r.oos_sharpe:.2f}" if r.oos_sharpe == r.oos_sharpe else "—",
+            f"{r.oos_hit_rate:.2f}" if r.oos_hit_rate == r.oos_hit_rate else "—",
+            str(r.n_train_examples),
+            "✓" if r.active else "",
+            r.path,
+        )
+    console.print(table)
+
+
+@app.command("train-ranker")
+def train_ranker(
+    start: Annotated[str, typer.Option(help="Train period start (YYYY-MM-DD).")],
+    end: Annotated[str, typer.Option(help="Train period end (YYYY-MM-DD).")],
+    promote: Annotated[
+        bool, typer.Option("--promote/--no-promote", help="Apply soft-promotion gate.")
+    ] = False,
+    report: Annotated[
+        bool, typer.Option("--report", help="Write markdown report to data/research/.")
+    ] = False,
+) -> None:
+    """Train the Phase 16 LightGBM ranker over a walk-forward window."""
+    from datetime import datetime, timezone
+
+    from trading.features.technicals import add_indicators
+    from trading.store.model_registry import (
+        RegistryRow,
+        register,
+        save_model,
+    )
+    from trading.store.news_store import SentimentDailyRow
+    from trading.strategy.ranker_features import FEATURE_NAMES
+    from trading.strategy.ranker_train import (
+        InsufficientDataError,
+        train_walkforward,
+    )
+
+    paths = get_paths()
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end)
+
+    syms = list_symbols(paths)
+    if not syms:
+        console.print("[red]no parquet symbols found — run ingest-history first[/red]")
+        raise typer.Exit(code=2)
+
+    enriched: dict[str, pd.DataFrame] = {}
+    for s in syms:
+        try:
+            df = read_ohlcv(s, paths)
+        except FileNotFoundError:
+            continue
+        if len(df) < 200:
+            continue
+        enriched[s] = add_indicators(df)
+    if not enriched:
+        console.print("[red]no symbols with sufficient history (200+ bars)[/red]")
+        raise typer.Exit(code=2)
+
+    # Pull macro_history + sentiment_lookup from DB.
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        macro_rows = conn.execute(
+            "SELECT date, vix, usdinr, fii_flow_cr FROM macro_snapshot ORDER BY date"
+        ).fetchall()
+        macro_history = pd.DataFrame(
+            {
+                "vix": [r["vix"] for r in macro_rows],
+                "usdinr": [r["usdinr"] for r in macro_rows],
+                "fii_flow_cr": [r["fii_flow_cr"] for r in macro_rows],
+            },
+            index=[r["date"] for r in macro_rows],
+        )
+        sentiment_lookup: dict[tuple[str, str], SentimentDailyRow] = {}
+        for s in enriched:
+            for r in conn.execute(
+                "SELECT * FROM sentiment_daily WHERE symbol = ?", (s,)
+            ).fetchall():
+                sentiment_lookup[(r["date"], s)] = SentimentDailyRow(
+                    date=r["date"],
+                    symbol=s,
+                    score_7d=r["score_7d"],
+                    score_30d=r["score_30d"],
+                    news_count=r["news_count"],
+                    negative_news_count=r["negative_news_count"],
+                    has_critical=bool(r["has_critical"]),
+                )
+
+    try:
+        result = train_walkforward(
+            enriched=enriched,
+            macro_history=macro_history,
+            sentiment_lookup=sentiment_lookup,
+            negative_news_lookup={},
+            start=start_ts,
+            end=end_ts,
+        )
+    except InsufficientDataError as e:
+        console.print(f"[red]train-ranker:[/red] {e}")
+        raise typer.Exit(code=2) from e
+
+    table = Table(title="Walk-forward fold metrics")
+    table.add_column("train")
+    table.add_column("test")
+    table.add_column("examples", justify="right")
+    table.add_column("OOS trades", justify="right")
+    table.add_column("OOS Sharpe", justify="right")
+    table.add_column("OOS hit", justify="right")
+    table.add_column("skipped")
+    for f in result.folds:
+        table.add_row(
+            f"{f.train_start.date()}→{f.train_end.date()}",
+            f"{f.test_start.date()}→{f.test_end.date()}",
+            str(f.n_train_examples),
+            str(f.n_trades_oos),
+            f"{f.sharpe_oos:.2f}" if f.sharpe_oos == f.sharpe_oos else "—",
+            f"{f.hit_rate_oos:.2f}" if f.hit_rate_oos == f.hit_rate_oos else "—",
+            "✓" if f.skipped else "",
+        )
+    console.print(table)
+    console.print(
+        f"OOS Sharpe mean: {result.oos_sharpe_mean:.3f} | "
+        f"OOS hit-rate mean: {result.oos_hit_rate_mean:.3f} | "
+        f"final examples: {result.n_final_examples}"
+    )
+
+    version = end_ts.strftime("%Y-%m-%d")
+    pkl_rel = f"models/ranker_{version}.pkl"
+    pkl_path = paths.project_root / pkl_rel
+    save_model(pkl_path, result.final_model, FEATURE_NAMES)
+    row = RegistryRow(
+        version=version,
+        trained_at=datetime.now(timezone.utc).isoformat(),
+        train_start=str(result.final_train_start.date()),
+        train_end=str(result.final_train_end.date()),
+        oos_sharpe=result.oos_sharpe_mean,
+        oos_hit_rate=result.oos_hit_rate_mean,
+        n_train_examples=result.n_final_examples,
+        n_features=len(FEATURE_NAMES),
+        path=pkl_rel,
+        active=False,
+        notes="",
+    )
+    became_active = register(paths, row=row, promote=promote)
+    console.print(f"saved {pkl_rel} (active={became_active})")
+
+    if report:
+        out_path = paths.research_dir / f"ranker_{datetime.now().strftime('%Y%m%dT%H%M%S')}.md"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
+            f"# Ranker training run {version}\n\n"
+            f"- Train period: {result.final_train_start.date()} → {result.final_train_end.date()}\n"
+            f"- Final examples: {result.n_final_examples}\n"
+            f"- OOS Sharpe mean: {result.oos_sharpe_mean:.3f}\n"
+            f"- OOS hit-rate mean: {result.oos_hit_rate_mean:.3f}\n"
+            f"- Active: {became_active}\n\n"
+            f"## Per-fold metrics\n\n"
+            + "\n".join(
+                f"- {f.train_start.date()}→{f.train_end.date()} test "
+                f"{f.test_start.date()}→{f.test_end.date()}: "
+                f"n={f.n_train_examples} sharpe={f.sharpe_oos:.2f} hit={f.hit_rate_oos:.2f} "
+                f"{'(skipped)' if f.skipped else ''}"
+                for f in result.folds
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        console.print(f"report written to {out_path}")
+
+
 if __name__ == "__main__":  # pragma: no cover — manual entry
     app()
