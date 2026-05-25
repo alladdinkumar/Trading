@@ -188,3 +188,39 @@ def test_k_larger_than_candidates_selects_all(tmp_path: Path) -> None:
         cands = [_candidate("A", date(2024, 12, 31)), _candidate("B", date(2024, 12, 31))]
         out = score_and_filter(cands, paths, conn, date(2024, 12, 31), k=10)
     assert all(sc.selected for sc in out)
+
+
+# ---------------------------------------------------------------------------
+# RankerSignalProvider
+# ---------------------------------------------------------------------------
+
+
+def test_ranker_signal_provider_truncates_to_top_k(tmp_path: Path) -> None:
+    from trading.backtest.engine import Signal
+    from trading.features.technicals import add_indicators
+    from trading.store.model_registry import active as load_active
+    from trading.strategy.ranker import RankerSignalProvider
+
+    paths = _paths(tmp_path)
+    paths.data_dir.mkdir(parents=True, exist_ok=True)
+    paths.parquet_dir.mkdir(parents=True, exist_ok=True)
+    paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    _register_active_model(paths)
+
+    enriched: dict[str, pd.DataFrame] = {}
+    for i in range(6):
+        sym = f"SYM{i}"
+        df = _ohlcv(seed=i + 10, n=260)
+        enriched[sym] = add_indicators(df)
+        write_ohlcv(df, sym, paths)
+
+    sd = enriched["SYM0"].index[-1]
+    signals = [Signal(symbol=f"SYM{i}", close=100.0, atr=2.0, stop_price=97.0) for i in range(6)]
+
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        am = load_active(paths)
+        assert am is not None
+        provider = RankerSignalProvider(am.model, am.feature_names, paths, conn, top_k=3)
+        out = provider.score_signals(signals, enriched, sd)
+    assert len(out) == 3
