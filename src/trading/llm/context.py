@@ -28,6 +28,10 @@ class ContextInputs:
 
     candidates: list[Candidate] = field(default_factory=list)
     holdings_health: list[HealthScore] = field(default_factory=list)
+    # Phase 16: optional Layer-B ranker output. Renderer added in Task 12;
+    # for now the field is accepted (and ignored by the renderer) so
+    # pre_open._step_assemble can pass it without coupling.
+    scored_candidates: object | None = None
 
 
 def assemble_context(

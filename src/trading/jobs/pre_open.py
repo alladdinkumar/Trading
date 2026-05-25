@@ -41,9 +41,12 @@ from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import insert_news_items
 from trading.store.ohlcv import read_ohlcv
-from trading.store.repo import Signal
+from trading.store.repo import Signal, insert_signal
+from trading.strategy.ranker import ScoredCandidate, score_and_filter
 from trading.strategy.rules import Candidate, ScanContext, passing, scan
 from trading.strategy.sizing import SizingInput, position_size
+
+RANKER_TOP_K = 5
 
 
 class PreOpenAborted(RuntimeError):  # noqa: N818 — "Aborted" is a state, not an error suffix
@@ -66,6 +69,7 @@ class PreOpenResult:
     sentiment_rows: int
     candidates_total: int
     candidates_passing: int
+    candidates_selected: int
     paper_trades_opened: int
     holdings_scored: int
     warnings: list[str] = field(default_factory=list)
@@ -104,13 +108,14 @@ def run_pre_open(
 
         candidates = _step_scan(p, as_of, warnings)
         passing_candidates = passing(candidates)
+        scored = _step_rank(conn, p, as_of, passing_candidates, warnings)
 
         holdings = _step_portfolio(p, s, warnings, as_of=as_of)
 
         opened = _step_auto_open(
             conn,
             as_of,
-            passing_candidates,
+            scored,
             regime,
             capital_per_trade,
             risk_pct,
@@ -123,6 +128,7 @@ def run_pre_open(
             as_of,
             candidates,
             holdings,
+            scored,
         )
 
     return PreOpenResult(
@@ -133,10 +139,34 @@ def run_pre_open(
         sentiment_rows=sentiment_rows,
         candidates_total=len(candidates),
         candidates_passing=len(passing_candidates),
+        candidates_selected=sum(1 for sc in scored if sc.selected),
         paper_trades_opened=opened,
         holdings_scored=len(holdings),
         warnings=warnings,
     )
+
+
+def _step_rank(
+    conn: sqlite3.Connection,
+    paths: Paths,
+    as_of: date,
+    passing_candidates: list[Candidate],
+    warnings: list[str],
+    k: int = RANKER_TOP_K,
+) -> list[ScoredCandidate]:
+    """Score rules-passing candidates and mark top-K as selected.
+
+    Cold-start path (no active model, missing pkl, feature-name mismatch,
+    or any IO error inside score_and_filter) returns each candidate marked
+    selected=True with ml_score=None — preserving pre-Phase-16 behaviour.
+    """
+    if not passing_candidates:
+        return []
+    try:
+        return score_and_filter(passing_candidates, paths, conn, as_of, k=k)
+    except Exception as e:  # pragma: no cover — defensive
+        warnings.append(f"ranker scoring failed — cold start ({e!s})")
+        return [ScoredCandidate(c, None, True) for c in passing_candidates]
 
 
 def _step_macro(conn: sqlite3.Connection, as_of: date, warnings: list[str]) -> tuple[bool, Regime]:
@@ -218,22 +248,27 @@ def _step_portfolio(
 def _step_auto_open(
     conn: sqlite3.Connection,
     as_of: date,
-    passing: list[Candidate],
+    scored: list[ScoredCandidate],
     regime: Regime,
     capital: float,
     risk_pct: float,
     warnings: list[str],
 ) -> int:
-    """For each all-pass candidate: size + open paper-trade.
+    """Persist a signal for each scored candidate; open paper-trade for the
+    top-K (selected=True).
 
     Entry price = `cand.close` (D-1's close — the most recent bar in the
     parquet at pre_open time, per spec §4.4 'limit order at close').
     Skips if (a) idempotency guard finds an open trade for symbol+date,
     or (b) sizing returns qty=0 (caps bound to zero).
+
+    Signals for non-selected candidates are still logged with ml_score so
+    they appear in the dashboard / brief — they just don't open trades.
     """
     opened = 0
-    for cand in passing:
-        if _already_opened_today(conn, cand.symbol, as_of):
+    for sc in scored:
+        cand = sc.candidate
+        if sc.selected and _already_opened_today(conn, cand.symbol, as_of):
             continue
         stop_price = cand.close - 1.5 * cand.atr_14
         target_price = cand.close * 1.20
@@ -262,8 +297,14 @@ def _step_auto_open(
             target=target_price,
             horizon_days=25,
             rules_passed_json=json.dumps([r.name for r in cand.rules if r.passed]),
+            ml_score=sc.ml_score,
             created_by="pre_open",
         )
+        if not sc.selected:
+            # Visibility-only: log the signal (with ml_score) but don't
+            # open a paper-trade.
+            insert_signal(conn, signal)
+            continue
         log_signal_and_open_trade(
             conn,
             signal=signal,
@@ -296,6 +337,7 @@ def _step_assemble(
     as_of: date,
     candidates: list[Candidate],
     holdings: list[HealthScore],
+    scored: list[ScoredCandidate] | None = None,
 ) -> Path:
     """Render the input bundle. Real wiring; no upstream calls."""
     return assemble_context(
@@ -303,7 +345,11 @@ def _step_assemble(
         paths=paths,
         as_of=as_of,
         mode="pre_open",
-        inputs=ContextInputs(candidates=candidates, holdings_health=holdings),
+        inputs=ContextInputs(
+            candidates=candidates,
+            holdings_health=holdings,
+            scored_candidates=scored,
+        ),
     )
 
 

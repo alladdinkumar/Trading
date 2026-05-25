@@ -27,7 +27,13 @@ from trading.jobs.pre_open import (
 )
 from trading.store.migrations import run_migrations
 from trading.store.ohlcv import write_ohlcv
+from trading.strategy.ranker import ScoredCandidate
 from trading.strategy.rules import Candidate, RuleResult
+
+
+def _sc(cand: Candidate, *, ml_score: float | None = None, selected: bool = True) -> ScoredCandidate:
+    """Wrap a Candidate in a default-selected ScoredCandidate."""
+    return ScoredCandidate(candidate=cand, ml_score=ml_score, selected=selected)
 
 
 @pytest.fixture
@@ -277,7 +283,7 @@ def test_step_auto_open_creates_signal_and_paper_trade(
     opened = _step_auto_open(
         conn,
         date(2026, 5, 15),
-        [cand],
+        [_sc(cand)],
         "NEUTRAL",
         capital=100_000.0,
         risk_pct=0.02,
@@ -298,7 +304,7 @@ def test_step_auto_open_idempotent_on_rerun(
     _step_auto_open(
         conn,
         date(2026, 5, 15),
-        [cand],
+        [_sc(cand)],
         "NEUTRAL",
         capital=100_000.0,
         risk_pct=0.02,
@@ -307,7 +313,7 @@ def test_step_auto_open_idempotent_on_rerun(
     opened2 = _step_auto_open(
         conn,
         date(2026, 5, 15),
-        [cand],
+        [_sc(cand)],
         "NEUTRAL",
         capital=100_000.0,
         risk_pct=0.02,
@@ -316,6 +322,31 @@ def test_step_auto_open_idempotent_on_rerun(
     assert opened2 == 0
     pt_count = conn.execute("SELECT COUNT(*) FROM paper_trades").fetchone()[0]
     assert pt_count == 1
+
+
+def test_step_auto_open_non_selected_logs_signal_only(
+    conn: sqlite3.Connection,
+) -> None:
+    """Visibility-only path: selected=False candidates write a signals row
+    (with ml_score) but do NOT open a paper-trade."""
+    warnings: list[str] = []
+    cand = _candidate("RVNL", 10)
+    opened = _step_auto_open(
+        conn,
+        date(2026, 5, 15),
+        [_sc(cand, ml_score=0.42, selected=False)],
+        "NEUTRAL",
+        capital=100_000.0,
+        risk_pct=0.02,
+        warnings=warnings,
+    )
+    assert opened == 0
+    sig_count = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+    pt_count = conn.execute("SELECT COUNT(*) FROM paper_trades").fetchone()[0]
+    score = conn.execute("SELECT ml_score FROM signals").fetchone()["ml_score"]
+    assert sig_count == 1
+    assert pt_count == 0
+    assert score == pytest.approx(0.42)
 
 
 def test_already_opened_today_detects_open_trade(
@@ -395,6 +426,124 @@ def test_run_pre_open_full_happy_path_integration(paths, monkeypatch) -> None:
         skip_news=False,
     )
     assert result2.paper_trades_opened == 0
+
+
+def _register_passive_top1_model(paths) -> None:
+    """Register a tiny active model that prefers higher-RSI inputs."""
+    from datetime import datetime, timezone
+
+    import lightgbm as lgb
+    import numpy as np
+
+    from trading.store.model_registry import RegistryRow, register, save_model
+    from trading.strategy.ranker_features import FEATURE_NAMES
+
+    rng = np.random.default_rng(0)
+    X = rng.normal(loc=0, scale=1, size=(80, len(FEATURE_NAMES)))
+    rsi_idx = FEATURE_NAMES.index("rsi_14")
+    X[:, rsi_idx] = rng.uniform(20, 70, size=80)
+    y = (X[:, rsi_idx] > 40).astype(int)
+    m = lgb.LGBMClassifier(n_estimators=20, num_leaves=8, verbose=-1)
+    m.fit(X, y)
+    paths.models_dir.mkdir(parents=True, exist_ok=True)
+    pkl = paths.models_dir / "ranker_test.pkl"
+    save_model(pkl, m, FEATURE_NAMES)
+    register(
+        paths,
+        row=RegistryRow(
+            version="test",
+            trained_at=datetime.now(timezone.utc).isoformat(),
+            train_start="2022-01-01",
+            train_end="2024-12-31",
+            oos_sharpe=1.0,
+            oos_hit_rate=0.5,
+            n_train_examples=80,
+            n_features=len(FEATURE_NAMES),
+            path=str(pkl.relative_to(paths.project_root)),
+            active=True,
+            notes="test",
+        ),
+        promote=True,
+    )
+
+
+def _multi_pass_universe(paths, syms: list[str]) -> None:
+    """Write the engineered all-pass parquet for each symbol."""
+    for s in syms:
+        write_ohlcv(_all_pass_frame(), s, paths)
+
+
+def test_pre_open_persists_ml_score_on_all_passing(paths, monkeypatch) -> None:
+    """Ranker active → every passing candidate gets ml_score, top-K open.
+
+    Stubs `_step_scan` to return 7 all-pass candidates and seeds the
+    corresponding parquet so score_and_filter can read OHLCV history.
+    """
+    import sqlite3 as _sql
+
+    syms = [f"S{i}" for i in range(7)]
+    _multi_pass_universe(paths, syms)
+    _register_passive_top1_model(paths)
+
+    fake_cands = [_candidate(s, n_passed=10) for s in syms]
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_macro", lambda c, d, w: (True, "RISK_ON")
+    )
+    monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_scan", lambda p, d, w: fake_cands
+    )
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: []
+    )
+
+    result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=False)
+    assert result.candidates_passing == 7
+    assert result.candidates_selected == 5
+    assert result.paper_trades_opened == result.candidates_selected
+
+    db = _sql.connect(paths.db_path)
+    db.row_factory = _sql.Row
+    rows = db.execute(
+        "SELECT symbol, ml_score FROM signals WHERE substr(ts, 1, 10) = ?",
+        ("2026-05-15",),
+    ).fetchall()
+    db.close()
+    assert len(rows) == result.candidates_passing
+    assert all(r["ml_score"] is not None for r in rows)
+
+
+def test_pre_open_without_active_model_opens_all_passing(paths, monkeypatch) -> None:
+    """No registry → cold-start path; ml_score=None; all passing candidates open."""
+    import sqlite3 as _sql
+
+    syms = ["A", "B", "C"]
+    _multi_pass_universe(paths, syms)
+
+    fake_cands = [_candidate(s, n_passed=10) for s in syms]
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_macro", lambda c, d, w: (True, "RISK_ON")
+    )
+    monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_scan", lambda p, d, w: fake_cands
+    )
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: []
+    )
+
+    result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=False)
+    assert result.candidates_selected == result.candidates_passing
+
+    db = _sql.connect(paths.db_path)
+    db.row_factory = _sql.Row
+    rows = db.execute(
+        "SELECT ml_score FROM signals WHERE substr(ts, 1, 10) = ?",
+        ("2026-05-15",),
+    ).fetchall()
+    db.close()
+    for r in rows:
+        assert r["ml_score"] is None
 
 
 def test_pre_open_main_configures_logging_and_propagates_failure(monkeypatch, tmp_path):
