@@ -209,3 +209,61 @@ def test_regime_ord_nan_when_regime_unknown() -> None:
     ctx = LiveContext(macro=snap)
     row = build_feature_row(df, sd, ctx)
     assert math.isnan(row["regime_ord"])
+
+
+# ---------------------------------------------------------------------------
+# Sentiment features
+# ---------------------------------------------------------------------------
+
+from trading.store.news_store import SentimentDailyRow
+
+
+def test_sentiment_features_nan_when_no_row() -> None:
+    df = _synthetic_uptrend()
+    row = build_feature_row(df, df.index[-1], LiveContext())
+    for k in ("sentiment_7d", "sentiment_30d", "negative_news_count_7d"):
+        assert math.isnan(row[k])
+
+
+def test_sentiment_features_populated_from_row() -> None:
+    df = _synthetic_uptrend()
+    sd = df.index[-1]
+    sent = SentimentDailyRow(
+        date=sd.strftime("%Y-%m-%d"),
+        symbol="RELIANCE",
+        score_7d=0.32,
+        score_30d=0.18,
+        news_count=12,
+        negative_news_count=3,
+        has_critical=False,
+    )
+    ctx = LiveContext(sentiment=sent, negative_news_count_7d=2)
+    row = build_feature_row(df, sd, ctx)
+    assert row["sentiment_7d"] == pytest.approx(0.32)
+    assert row["sentiment_30d"] == pytest.approx(0.18)
+    assert row["negative_news_count_7d"] == 2
+
+
+def test_sentiment_features_handle_partial_row() -> None:
+    df = _synthetic_uptrend()
+    sd = df.index[-1]
+    sent = SentimentDailyRow(
+        date=sd.strftime("%Y-%m-%d"),
+        symbol="X",
+        score_7d=None,
+        score_30d=0.05,
+        news_count=4,
+        negative_news_count=1,
+        has_critical=False,
+    )
+    ctx = LiveContext(sentiment=sent, negative_news_count_7d=None)
+    row = build_feature_row(df, sd, ctx)
+    assert math.isnan(row["sentiment_7d"])
+    assert row["sentiment_30d"] == pytest.approx(0.05)
+    assert math.isnan(row["negative_news_count_7d"])
+
+
+def test_feature_row_columns_exactly_match_feature_names() -> None:
+    df = _synthetic_uptrend()
+    row = build_feature_row(df, df.index[-1], LiveContext())
+    assert tuple(sorted(row.keys())) == tuple(sorted(FEATURE_NAMES))

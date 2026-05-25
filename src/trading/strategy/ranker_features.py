@@ -178,6 +178,23 @@ def _macro_features(live_ctx: LiveContext, sd: pd.Timestamp) -> dict[str, float]
     return out
 
 
+def _sentiment_features(live_ctx: LiveContext) -> dict[str, float]:
+    out: dict[str, float] = {
+        "sentiment_7d": math.nan,
+        "sentiment_30d": math.nan,
+        "negative_news_count_7d": math.nan,
+    }
+    sent = live_ctx.sentiment
+    if sent is not None:
+        if sent.score_7d is not None:
+            out["sentiment_7d"] = float(sent.score_7d)
+        if sent.score_30d is not None:
+            out["sentiment_30d"] = float(sent.score_30d)
+    if live_ctx.negative_news_count_7d is not None:
+        out["negative_news_count_7d"] = float(live_ctx.negative_news_count_7d)
+    return out
+
+
 def _volume_features(df: pd.DataFrame, sd: pd.Timestamp) -> dict[str, float]:
     until = df.loc[:sd]
     vol_today = _f(until.at[sd, "volume"])
@@ -219,13 +236,7 @@ def build_feature_row(
     row.update(_trend_features(enriched_df, signal_date))
     row.update(_volume_features(enriched_df, signal_date))
     row.update(_macro_features(live_ctx, signal_date))
-    # Sentiment filled by Task 4. NaN preserves FEATURE_NAMES parity until then.
-    for k in (
-        "sentiment_7d",
-        "sentiment_30d",
-        "negative_news_count_7d",
-    ):
-        row[k] = math.nan
+    row.update(_sentiment_features(live_ctx))
     assert set(row.keys()) == set(FEATURE_NAMES), (
         f"build_feature_row mismatch: extra={set(row) - set(FEATURE_NAMES)}, "
         f"missing={set(FEATURE_NAMES) - set(row)}"
