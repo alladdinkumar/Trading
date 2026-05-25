@@ -6,11 +6,30 @@ with `selected=True, ml_score=None` so pre_open behaviour is unchanged.
 
 from __future__ import annotations
 
+import math
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
+import pandas as pd
+from loguru import logger
+
+from trading.features.technicals import add_indicators
+from trading.store.macro_store import get_macro_snapshot
+from trading.store.model_registry import (
+    ActiveModel,
+    RegistryFeatureMismatch,
+)
+from trading.store.model_registry import active as load_active
+from trading.store.news_store import get_sentiment_daily
+from trading.store.ohlcv import read_ohlcv
+from trading.strategy.ranker_features import (
+    FEATURE_NAMES,
+    LiveContext,
+    build_feature_row,
+)
 from trading.strategy.rules import Candidate
 
 if TYPE_CHECKING:
@@ -28,6 +47,83 @@ class ScoredCandidate:
     selected: bool
 
 
+# ---------------------------------------------------------------------------
+# Module-internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _cold_start(candidates: list[Candidate]) -> list[ScoredCandidate]:
+    return [ScoredCandidate(c, None, True) for c in candidates]
+
+
+def _load_active_or_none(paths: "Paths") -> ActiveModel | None:
+    try:
+        am = load_active(paths)
+    except Exception as e:  # corrupt registry, IO error
+        logger.warning("ranker: failed to load active model — cold start ({})", e)
+        return None
+    if am is None:
+        return None
+    if tuple(am.feature_names) != FEATURE_NAMES:
+        logger.warning(
+            "ranker: active model feature_names mismatch — cold start "
+            "(model={} != current={})",
+            am.feature_names,
+            FEATURE_NAMES,
+        )
+        return None
+    return am
+
+
+def _macro_history_df(
+    conn: sqlite3.Connection, as_of: date, lookback_days: int = 14
+) -> pd.DataFrame:
+    """Pull recent macro_snapshot rows as a DataFrame indexed by ISO date."""
+    start = (as_of - timedelta(days=lookback_days)).isoformat()
+    end = as_of.isoformat()
+    rows = conn.execute(
+        "SELECT date, vix, usdinr, fii_flow_cr FROM macro_snapshot "
+        "WHERE date >= ? AND date <= ? ORDER BY date",
+        (start, end),
+    ).fetchall()
+    if not rows:
+        return pd.DataFrame(columns=["vix", "usdinr", "fii_flow_cr"])
+    return pd.DataFrame(
+        {
+            "vix": [r["vix"] for r in rows],
+            "usdinr": [r["usdinr"] for r in rows],
+            "fii_flow_cr": [r["fii_flow_cr"] for r in rows],
+        },
+        index=[r["date"] for r in rows],
+    )
+
+
+def _negative_news_count_7d(
+    conn: sqlite3.Connection, symbol: str, as_of: date
+) -> int | None:
+    """Count negative-sentiment news (sentiment < -0.20) in the last 7d.
+
+    Returns None if no news rows in window — caller propagates as NaN.
+    Returns 0 when news rows exist but none are negative.
+    """
+    start = (as_of - timedelta(days=7)).isoformat()
+    end_ts = f"{as_of.isoformat()}T23:59:59"
+    row = conn.execute(
+        "SELECT COUNT(*) AS c, SUM(CASE WHEN sentiment < -0.20 THEN 1 ELSE 0 END) AS n "
+        "FROM news_items "
+        "WHERE symbol = ? AND ts >= ? AND ts <= ?",
+        (symbol, start, end_ts),
+    ).fetchone()
+    if row is None or row["c"] == 0:
+        return None
+    return int(row["n"] or 0)
+
+
+# ---------------------------------------------------------------------------
+# Public entry points
+# ---------------------------------------------------------------------------
+
+
 def score_and_filter(
     candidates: list[Candidate],
     paths: "Paths",
@@ -36,20 +132,131 @@ def score_and_filter(
     *,
     k: int = 5,
 ) -> list[ScoredCandidate]:
-    raise NotImplementedError
+    """Score every rules-passing candidate and mark top-K as selected.
+
+    Cold-start path (no active model, missing .pkl, feature-name mismatch,
+    or any IO error) returns ScoredCandidate(c, None, True) for every input.
+    """
+    if not candidates:
+        return []
+    am = _load_active_or_none(paths)
+    if am is None:
+        return _cold_start(candidates)
+
+    macro_snap = get_macro_snapshot(conn, as_of.isoformat())
+    macro_hist = _macro_history_df(conn, as_of)
+    as_of_ts = pd.Timestamp(as_of)
+
+    rows: list[dict[str, float]] = []
+    cand_index: list[Candidate] = []
+    for cand in candidates:
+        try:
+            raw = read_ohlcv(cand.symbol, paths, end=as_of)
+        except FileNotFoundError:
+            rows.append({k_: math.nan for k_ in FEATURE_NAMES})
+            cand_index.append(cand)
+            continue
+        if as_of_ts not in raw.index:
+            as_of_actual = raw.index[-1]
+        else:
+            as_of_actual = as_of_ts
+        enriched = add_indicators(raw)
+        sent = get_sentiment_daily(conn, as_of.isoformat(), cand.symbol)
+        neg7 = _negative_news_count_7d(conn, cand.symbol, as_of)
+        ctx = LiveContext(
+            macro=macro_snap,
+            sentiment=sent,
+            macro_history=macro_hist,
+            negative_news_count_7d=neg7,
+        )
+        rows.append(build_feature_row(enriched, as_of_actual, ctx))
+        cand_index.append(cand)
+
+    X = pd.DataFrame(rows, columns=list(FEATURE_NAMES)).astype(float)
+    proba = am.model.predict_proba(X.values)[:, 1]
+    ranked_idx = sorted(range(len(proba)), key=lambda i: -proba[i])
+    selected = set(ranked_idx[:k])
+    return [
+        ScoredCandidate(
+            candidate=cand_index[i],
+            ml_score=float(proba[i]),
+            selected=i in selected,
+        )
+        for i in range(len(cand_index))
+    ]
 
 
 class RankerSignalProvider:
-    """Companion to `rule_signal_provider` — used inside walk-forward test folds."""
+    """Engine-compatible signal_provider used inside walk-forward test folds.
 
-    def __init__(self, model: object, top_k: int = 5) -> None:
-        raise NotImplementedError
+    Two entry paths:
+      __call__(d, enriched, ctx, config) — engine API.
+      score_signals(signals, enriched, signal_date) — testable helper.
+    """
+
+    def __init__(
+        self,
+        model: object,
+        feature_names: tuple[str, ...],
+        paths: "Paths",
+        conn: sqlite3.Connection,
+        top_k: int = 5,
+    ) -> None:
+        if tuple(feature_names) != FEATURE_NAMES:
+            raise RegistryFeatureMismatch(
+                f"model feature_names {feature_names} != current {FEATURE_NAMES}"
+            )
+        self._model = model
+        self._paths = paths
+        self._conn = conn
+        self._top_k = top_k
+
+    def score_signals(
+        self,
+        signals: list["Signal"],
+        enriched: Mapping[str, pd.DataFrame],
+        signal_date: pd.Timestamp,
+    ) -> list["Signal"]:
+        if not signals:
+            return []
+        macro_snap = get_macro_snapshot(self._conn, signal_date.strftime("%Y-%m-%d"))
+        macro_hist = _macro_history_df(
+            self._conn, signal_date.date(), lookback_days=14
+        )
+        rows: list[dict[str, float]] = []
+        for sig in signals:
+            df = enriched.get(sig.symbol)
+            if df is None or signal_date not in df.index:
+                rows.append({k_: math.nan for k_ in FEATURE_NAMES})
+                continue
+            sent = get_sentiment_daily(
+                self._conn, signal_date.strftime("%Y-%m-%d"), sig.symbol
+            )
+            neg7 = _negative_news_count_7d(
+                self._conn, sig.symbol, signal_date.date()
+            )
+            ctx = LiveContext(
+                macro=macro_snap,
+                sentiment=sent,
+                macro_history=macro_hist,
+                negative_news_count_7d=neg7,
+            )
+            rows.append(build_feature_row(df, signal_date, ctx))
+
+        X = pd.DataFrame(rows, columns=list(FEATURE_NAMES)).astype(float)
+        proba = self._model.predict_proba(X.values)[:, 1]  # type: ignore[attr-defined]
+        order = sorted(range(len(proba)), key=lambda i: -proba[i])
+        kept = order[: self._top_k]
+        return [signals[i] for i in kept]
 
     def __call__(
         self,
-        d: object,
-        enriched: object,
+        d: pd.Timestamp,
+        enriched: Mapping[str, pd.DataFrame],
         ctx: "ScanContext",
         config: "BacktestConfig",
     ) -> list["Signal"]:
-        raise NotImplementedError
+        from trading.backtest.engine import rule_signal_provider
+
+        base = rule_signal_provider(d, enriched, ctx, config)
+        return self.score_signals(base, enriched, d)
