@@ -131,6 +131,53 @@ def _trend_features(df: pd.DataFrame, sd: pd.Timestamp) -> dict[str, float]:
     }
 
 
+_REGIME_ORD: dict[str, int] = {"RISK_OFF": 0, "NEUTRAL": 1, "RISK_ON": 2}
+
+
+def _macro_features(live_ctx: LiveContext, sd: pd.Timestamp) -> dict[str, float]:
+    out: dict[str, float] = {
+        "vix": math.nan,
+        "vix_change_5d": math.nan,
+        "fii_flow_5d_sum": math.nan,
+        "usdinr_change_5d": math.nan,
+        "regime_ord": math.nan,
+    }
+    snap = live_ctx.macro
+    if snap is not None:
+        if snap.vix is not None:
+            out["vix"] = float(snap.vix)
+        if snap.regime is not None and snap.regime in _REGIME_ORD:
+            out["regime_ord"] = float(_REGIME_ORD[snap.regime])
+
+    hist = live_ctx.macro_history
+    if hist is not None and len(hist) >= 5:
+        sd_iso = sd.strftime("%Y-%m-%d")
+        # Locate the rightmost row whose index ≤ sd_iso. Falls back to the last
+        # row when sd_iso isn't present.
+        try:
+            end_pos = int(hist.index.get_loc(sd_iso))
+        except KeyError:
+            mask = hist.index <= sd_iso
+            if not mask.any():
+                return out
+            end_pos = int(mask.sum() - 1)
+        if end_pos >= 4:
+            window = hist.iloc[end_pos - 4 : end_pos + 1]  # 5 rows ending at sd
+            if "vix" in window.columns:
+                vix_now = window["vix"].iloc[-1]
+                vix_5d_ago = window["vix"].iloc[0]
+                if pd.notna(vix_now) and pd.notna(vix_5d_ago) and vix_5d_ago != 0:
+                    out["vix_change_5d"] = float((vix_now - vix_5d_ago) / vix_5d_ago)
+            if "usdinr" in window.columns:
+                u_now = window["usdinr"].iloc[-1]
+                u_5d_ago = window["usdinr"].iloc[0]
+                if pd.notna(u_now) and pd.notna(u_5d_ago) and u_5d_ago != 0:
+                    out["usdinr_change_5d"] = float((u_now - u_5d_ago) / u_5d_ago)
+            if "fii_flow_cr" in window.columns and window["fii_flow_cr"].notna().any():
+                out["fii_flow_5d_sum"] = float(window["fii_flow_cr"].sum(skipna=True))
+    return out
+
+
 def _volume_features(df: pd.DataFrame, sd: pd.Timestamp) -> dict[str, float]:
     until = df.loc[:sd]
     vol_today = _f(until.at[sd, "volume"])
@@ -171,14 +218,9 @@ def build_feature_row(
     row.update(_setup_features(enriched_df, signal_date))
     row.update(_trend_features(enriched_df, signal_date))
     row.update(_volume_features(enriched_df, signal_date))
-    # Macro + sentiment filled by Tasks 3 + 4. Until then, NaN preserves
-    # FEATURE_NAMES parity.
+    row.update(_macro_features(live_ctx, signal_date))
+    # Sentiment filled by Task 4. NaN preserves FEATURE_NAMES parity until then.
     for k in (
-        "vix",
-        "vix_change_5d",
-        "fii_flow_5d_sum",
-        "usdinr_change_5d",
-        "regime_ord",
         "sentiment_7d",
         "sentiment_30d",
         "negative_news_count_7d",

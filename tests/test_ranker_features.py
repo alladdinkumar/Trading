@@ -111,3 +111,101 @@ def test_short_history_yields_nan_for_long_lookbacks() -> None:
     row = build_feature_row(df, df.index[-1], LiveContext())
     # sma_200 not defined at bar 60 → slope should be NaN, not raise
     assert math.isnan(row["sma_200_slope_20d"])
+
+
+# ---------------------------------------------------------------------------
+# Macro features
+# ---------------------------------------------------------------------------
+
+
+from trading.data.macro import MacroSnapshot
+
+
+def _macro_history(end: pd.Timestamp, n: int = 10) -> pd.DataFrame:
+    idx = pd.bdate_range(end=end, periods=n).strftime("%Y-%m-%d")
+    return pd.DataFrame(
+        {
+            "vix": np.linspace(15.0, 20.0, n),
+            "usdinr": np.linspace(83.0, 84.0, n),
+            "fii_flow_cr": [100.0, -50.0, 200.0, 0.0, -100.0, 50.0, 75.0, -25.0, 30.0, 60.0][:n],
+        },
+        index=idx,
+    )
+
+
+def test_macro_features_nan_when_ctx_empty() -> None:
+    df = _synthetic_uptrend()
+    row = build_feature_row(df, df.index[-1], LiveContext())
+    for k in ("vix", "vix_change_5d", "fii_flow_5d_sum", "usdinr_change_5d", "regime_ord"):
+        assert math.isnan(row[k])
+
+
+def test_macro_features_populated_from_macro_snapshot() -> None:
+    df = _synthetic_uptrend()
+    sd = df.index[-1]
+    snap = MacroSnapshot(
+        date=sd.strftime("%Y-%m-%d"),
+        sgx_nifty=None,
+        dow_fut=None,
+        nasdaq_fut=None,
+        sp500=None,
+        usdinr=84.1,
+        crude=None,
+        vix=18.5,
+        us_10y=None,
+        fii_flow_cr=60.0,
+        dii_flow_cr=None,
+        regime="RISK_ON",
+    )
+    ctx = LiveContext(macro=snap, macro_history=_macro_history(sd, n=10))
+    row = build_feature_row(df, sd, ctx)
+    assert row["vix"] == pytest.approx(18.5)
+    assert row["regime_ord"] == 2  # RISK_ON
+    assert not math.isnan(row["vix_change_5d"])
+    assert not math.isnan(row["fii_flow_5d_sum"])
+    assert not math.isnan(row["usdinr_change_5d"])
+
+
+@pytest.mark.parametrize("regime,expected", [("RISK_OFF", 0), ("NEUTRAL", 1), ("RISK_ON", 2)])
+def test_regime_ord_mapping(regime: str, expected: int) -> None:
+    df = _synthetic_uptrend()
+    sd = df.index[-1]
+    snap = MacroSnapshot(
+        date=sd.strftime("%Y-%m-%d"),
+        sgx_nifty=None,
+        dow_fut=None,
+        nasdaq_fut=None,
+        sp500=None,
+        usdinr=None,
+        crude=None,
+        vix=None,
+        us_10y=None,
+        fii_flow_cr=None,
+        dii_flow_cr=None,
+        regime=regime,
+    )
+    ctx = LiveContext(macro=snap)
+    row = build_feature_row(df, sd, ctx)
+    assert row["regime_ord"] == expected
+
+
+def test_regime_ord_nan_when_regime_unknown() -> None:
+    df = _synthetic_uptrend()
+    sd = df.index[-1]
+    snap = MacroSnapshot(
+        date=sd.strftime("%Y-%m-%d"),
+        sgx_nifty=None,
+        dow_fut=None,
+        nasdaq_fut=None,
+        sp500=None,
+        usdinr=None,
+        crude=None,
+        vix=None,
+        us_10y=None,
+        fii_flow_cr=None,
+        dii_flow_cr=None,
+        regime=None,
+    )
+    ctx = LiveContext(macro=snap)
+    row = build_feature_row(df, sd, ctx)
+    assert math.isnan(row["regime_ord"])
