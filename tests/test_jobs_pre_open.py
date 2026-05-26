@@ -14,6 +14,7 @@ import pytest
 from trading.config import Settings, get_paths
 from trading.data.macro import MacroSnapshot
 from trading.data.news import RawHeadline
+from trading.data.sector import SectorRow
 from trading.features.regime import RegimeResult
 from trading.jobs.pre_open import (
     PreOpenResult,
@@ -23,6 +24,7 @@ from trading.jobs.pre_open import (
     _step_news,
     _step_portfolio,
     _step_scan,
+    _step_sector,
     run_pre_open,
 )
 from trading.store.migrations import run_migrations
@@ -60,6 +62,10 @@ def test_run_pre_open_returns_result_with_bundle_path(paths, monkeypatch) -> Non
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_macro",
         lambda conn, as_of, warnings: (False, "NEUTRAL"),
+    )
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_sector",
+        lambda conn, as_of, warnings: False,
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_news",
@@ -400,6 +406,10 @@ def test_run_pre_open_full_happy_path_integration(paths, monkeypatch) -> None:
         lambda c, d, w: (True, "RISK_ON"),
     )
     monkeypatch.setattr(
+        "trading.jobs.pre_open._step_sector",
+        lambda c, d, w: False,
+    )
+    monkeypatch.setattr(
         "trading.jobs.pre_open._step_news",
         lambda c, d, w: (0, 0),
     )
@@ -489,6 +499,9 @@ def test_pre_open_persists_ml_score_on_all_passing(paths, monkeypatch) -> None:
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_macro", lambda c, d, w: (True, "RISK_ON")
     )
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_sector", lambda c, d, w: False
+    )
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_scan", lambda p, d, w: fake_cands
@@ -523,6 +536,9 @@ def test_pre_open_without_active_model_opens_all_passing(paths, monkeypatch) -> 
     fake_cands = [_candidate(s, n_passed=10) for s in syms]
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_macro", lambda c, d, w: (True, "RISK_ON")
+    )
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_sector", lambda c, d, w: False
     )
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr(
@@ -572,3 +588,55 @@ def test_pre_open_main_configures_logging_and_propagates_failure(monkeypatch, tm
         job._main("2026-05-25")
 
     assert logger_calls == ["pre_open"]
+
+
+def test_step_sector_writes_rows_and_returns_true(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = [
+        SectorRow(
+            date="2026-05-26", sector="IT", close=36000.0,
+            rs_5d=0.012, rs_20d=0.035, rs_60d=0.02, regime="LEADING",
+        ),
+        SectorRow(
+            date="2026-05-26", sector="METAL", close=9000.0,
+            rs_5d=-0.01, rs_20d=-0.03, rs_60d=-0.04, regime="LAGGING",
+        ),
+    ]
+    monkeypatch.setattr("trading.jobs.pre_open.fetch_all_sectors", lambda _as_of: rows)
+    warnings: list[str] = []
+    ok = _step_sector(conn, date(2026, 5, 26), warnings)
+    assert ok is True
+    assert warnings == []
+    fetched = conn.execute(
+        "SELECT sector, regime FROM sector_daily WHERE date = ? ORDER BY sector",
+        ("2026-05-26",),
+    ).fetchall()
+    assert [r["sector"] for r in fetched] == ["IT", "METAL"]
+    assert [r["regime"] for r in fetched] == ["LEADING", "LAGGING"]
+
+
+def test_step_sector_degrades_on_fetch_failure(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(_as_of: date) -> list:
+        raise RuntimeError("yfinance down")
+
+    monkeypatch.setattr("trading.jobs.pre_open.fetch_all_sectors", boom)
+    warnings: list[str] = []
+    ok = _step_sector(conn, date(2026, 5, 26), warnings)
+    assert ok is False
+    assert any("sector snapshot failed" in w for w in warnings)
+    n = conn.execute("SELECT COUNT(*) AS n FROM sector_daily").fetchone()["n"]
+    assert n == 0
+
+
+def test_step_sector_returns_false_when_no_rows(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("trading.jobs.pre_open.fetch_all_sectors", lambda _as_of: [])
+    warnings: list[str] = []
+    ok = _step_sector(conn, date(2026, 5, 26), warnings)
+    assert ok is False
+    assert any("no sector rows fetched" in w for w in warnings)
+

@@ -23,6 +23,7 @@ from trading.data.kite_snapshot import (
 )
 from trading.data.macro import snapshot_and_classify
 from trading.data.news import DEFAULT_ALIASES, fetch_all_news
+from trading.data.sector import fetch_all_sectors
 from trading.features.regime import Regime
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.llm.context import ContextInputs, assemble_context
@@ -40,6 +41,7 @@ from trading.store.db import get_conn
 from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import insert_news_items
+from trading.store.sector_store import upsert_sector_daily
 from trading.store.ohlcv import read_ohlcv
 from trading.store.repo import Signal, insert_signal
 from trading.strategy.ranker import ScoredCandidate, score_and_filter
@@ -65,6 +67,7 @@ class PreOpenResult:
     as_of: date
     bundle_path: Path
     macro_written: bool
+    sector_written: bool
     news_inserted: int
     sentiment_rows: int
     candidates_total: int
@@ -99,6 +102,7 @@ def run_pre_open(
         run_migrations(conn)
 
         macro_written, regime = _step_macro(conn, as_of, warnings)
+        sector_written = _step_sector(conn, as_of, warnings)
 
         if skip_news:
             news_inserted, sentiment_rows = 0, 0
@@ -135,6 +139,7 @@ def run_pre_open(
         as_of=as_of,
         bundle_path=bundle_path,
         macro_written=macro_written,
+        sector_written=sector_written,
         news_inserted=news_inserted,
         sentiment_rows=sentiment_rows,
         candidates_total=len(candidates),
@@ -178,6 +183,24 @@ def _step_macro(conn: sqlite3.Connection, as_of: date, warnings: list[str]) -> t
         return False, "NEUTRAL"
     upsert_macro_snapshot(conn, snap)
     return True, rr.regime
+
+
+def _step_sector(conn: sqlite3.Connection, as_of: date, warnings: list[str]) -> bool:
+    """Pull NSE sectoral indices, compute RS vs Nifty 50, upsert sector_daily.
+
+    Graceful: any error (yfinance down, benchmark missing) yields a warning
+    and returns False so the wider pre-open continues.
+    """
+    try:
+        rows = fetch_all_sectors(as_of)
+    except Exception as e:  # pragma: no cover — defensive
+        warnings.append(f"sector snapshot failed: {e!s}")
+        return False
+    if not rows:
+        warnings.append("no sector rows fetched (benchmark or all sectors failed)")
+        return False
+    upsert_sector_daily(conn, rows)
+    return True
 
 
 def _step_news(conn: sqlite3.Connection, as_of: date, warnings: list[str]) -> tuple[int, int]:
