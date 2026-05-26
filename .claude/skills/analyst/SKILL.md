@@ -26,7 +26,7 @@ Write each file under the same `data/research/YYYY-MM-DD/` directory. Follow the
 | pre_open   | `macro_brief.md`, `candidates/{SYMBOL}.md` for every symbol in the bundle's `## Today's candidates` section                           | `sector_commentary.md` |
 | post_close | `macro_brief.md`, `candidates/{SYMBOL}.md` for every candidate (if any), `post_close_recap.md`                                        | `sector_commentary.md` |
 
-`sector_commentary.md` is OPTIONAL while `sector_daily` is unwired (Phase 12.6 will build it). If the bundle has no sector data, you may skip writing this file — `compile_brief` will substitute a placeholder under the `## Sector commentary` header.
+`sector_commentary.md` is optional. Write it when the bundle's `## Sector momentum` section is non-empty — cite specific sector codes and their 20d RS values from that table. When the section says `_(no data)_`, skip writing this file and `compile_brief` will substitute a placeholder under the `## Sector commentary` header.
 
 ## Style rules
 

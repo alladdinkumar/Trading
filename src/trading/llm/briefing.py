@@ -20,7 +20,9 @@ class MissingNarrativeError(RuntimeError):
     """Raised by `compile_brief` when one or more required parts are absent."""
 
 
-SECTOR_COMMENTARY_PLACEHOLDER = "_(sector commentary not yet wired — see Phase 12.6)_"
+SECTOR_COMMENTARY_PLACEHOLDER = (
+    "_(analyst did not write a sector commentary for this run)_"
+)
 
 
 def required_parts(mode: Mode, candidate_symbols: list[str]) -> list[str]:

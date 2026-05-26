@@ -146,7 +146,7 @@ def test_compile_brief_substitutes_placeholder_when_sector_missing(
     out = compile_brief(date_dir, mode="pre_open")
     body = out.read_text(encoding="utf-8")
     assert "## Sector commentary" in body
-    assert "_(sector commentary not yet wired — see Phase 12.6)_" in body
+    assert "_(analyst did not write a sector commentary for this run)_" in body
 
 
 def test_compile_brief_mid_day_appends_update_when_present(
