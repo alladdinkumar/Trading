@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from trading.config import Paths, get_paths
@@ -20,12 +20,14 @@ from trading.data.quotes_snapshot import (
     QuoteSnapshotStaleError,
     read_latest_quotes,
 )
+from trading.data.sector import load_sector_map
 from trading.features.regime import Regime
 from trading.ops.logging_setup import configure_logging
 from trading.store.db import get_conn
 from trading.store.macro_store import get_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.ohlcv import read_ohlcv
+from trading.store.sector_store import get_sector_daily
 
 
 class PreOpenIepAborted(RuntimeError):  # noqa: N818
@@ -102,6 +104,14 @@ def run_pre_open_iep(
     gaps = _compute_gaps(set(candidates), quotes, yesterday_closes)
 
     kept, removed = _filter_by_regime(candidates, gaps, regime)
+
+    if sector_map is None and sector_momentum is None:
+        sector_map, sector_momentum = _autoload_sector_inputs(p, as_of, warnings)
+    elif sector_map is None:
+        sector_map = load_sector_map(p)
+    elif sector_momentum is None:
+        sector_momentum = {}
+
     if sector_map and sector_momentum:
         kept, sector_removed = _filter_by_sector(kept, sector_map, sector_momentum, regime)
         removed = [*removed, *sector_removed]
@@ -111,8 +121,6 @@ def run_pre_open_iep(
         }
     else:
         candidate_sector_pcts = {}
-        if sector_map is None and sector_momentum is None:
-            warnings.append("Sector data unavailable; filtering by gap + regime only.")
 
     rerank_applied = bool(gaps)
     new_order = _rerank(kept, gaps, candidate_sector_pcts) if rerank_applied else kept
@@ -165,6 +173,37 @@ def _load_yesterday_closes(
             continue
         closes[sym] = float(df["close"].iloc[-1])
     return closes
+
+
+def _autoload_sector_inputs(
+    paths: Paths,
+    as_of: date,
+    warnings: list[str],
+) -> tuple[dict[str, str], dict[str, float]]:
+    """Load sector_map.csv + sector_daily rows. D-1 fallback if today empty.
+
+    Returns ({}, {}) when neither today nor D-1 has rows. Appends a
+    warning the caller can match on:
+      - "sector data fallback to <D-1 iso date>" when D-1 data is used.
+      - "Sector data unavailable; …" when neither today nor D-1 has rows.
+    """
+    sector_map = load_sector_map(paths)
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        rows = get_sector_daily(conn, as_of)
+        fallback_used: date | None = None
+        if not rows:
+            d_minus_1 = as_of - timedelta(days=1)
+            rows = get_sector_daily(conn, d_minus_1)
+            if rows:
+                fallback_used = d_minus_1
+    if not rows:
+        warnings.append("Sector data unavailable; filtering by gap + regime only.")
+        return sector_map, {}
+    if fallback_used is not None:
+        warnings.append(f"sector data fallback to {fallback_used.isoformat()}")
+    momentum = {r.sector: r.rs_5d for r in rows if r.rs_5d is not None}
+    return sector_map, momentum
 
 
 def _main(

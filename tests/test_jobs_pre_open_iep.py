@@ -546,3 +546,124 @@ def test_pre_open_iep_main_logging_and_failure(monkeypatch, tmp_path):
         job._main("2026-05-25")
 
     assert logger_calls == ["pre_open_iep"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 12.6 — auto-load sector_map + sector_momentum
+# ---------------------------------------------------------------------------
+
+
+def _seed_iep_context(paths, as_of: date, candidates: list[str]) -> None:
+    """Write a minimal _context.md with the candidate symbols."""
+    p = paths.research_dir / as_of.isoformat()
+    p.mkdir(parents=True, exist_ok=True)
+    lines = [
+        f"# Trading context bundle — {as_of.isoformat()}  (mode: pre_open)",
+        "",
+        "## Today's candidates",
+        "",
+    ]
+    for sym in candidates:
+        lines.append(f"### {sym} — passes 10/10 rules")
+        lines.append("- close 100.00, RSI 60.0, ATR(14) 1.50")
+        lines.append("- SMA20 99.00 · SMA50 95.00 · SMA200 90.00")
+        lines.append("")
+    (p / "_context.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_sector_map(paths, mapping: dict[str, str]) -> None:
+    static_dir = paths.project_root / "data" / "static"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    body = "symbol,sector\n" + "\n".join(f"{s},{c}" for s, c in mapping.items())
+    (static_dir / "sector_map.csv").write_text(body, encoding="utf-8")
+
+
+def test_pre_open_iep_autoloads_sector_map_and_momentum(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from trading.data.sector import SectorRow
+    from trading.store.sector_store import upsert_sector_daily
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    paths = get_paths()
+    as_of = date(2026, 5, 26)
+    _seed_iep_context(paths, as_of, ["INFY", "TATASTEEL"])
+    _write_sector_map(paths, {"INFY": "IT", "TATASTEEL": "METAL"})
+
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        upsert_sector_daily(
+            conn,
+            [
+                SectorRow(date="2026-05-26", sector="IT", close=36000.0,
+                          rs_5d=0.02, rs_20d=0.035, rs_60d=0.01, regime="LEADING"),
+                SectorRow(date="2026-05-26", sector="METAL", close=9000.0,
+                          rs_5d=-0.01, rs_20d=-0.03, rs_60d=-0.02, regime="LAGGING"),
+            ],
+        )
+
+    result = run_pre_open_iep(as_of)
+    assert result.candidates_input == 2
+    assert result.candidates_filtered == 2
+    assert not any("Sector data unavailable" in w for w in result.warnings)
+
+
+def test_pre_open_iep_falls_back_to_d_minus_1_sector_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from trading.data.sector import SectorRow
+    from trading.store.sector_store import upsert_sector_daily
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    paths = get_paths()
+    as_of = date(2026, 5, 26)
+    _seed_iep_context(paths, as_of, ["INFY"])
+    _write_sector_map(paths, {"INFY": "IT"})
+
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        upsert_sector_daily(
+            conn,
+            [SectorRow(date="2026-05-25", sector="IT", close=36000.0,
+                       rs_5d=0.02, rs_20d=0.035, rs_60d=0.01, regime="LEADING")],
+        )
+
+    result = run_pre_open_iep(as_of)
+    assert any("sector data fallback" in w for w in result.warnings)
+
+
+def test_pre_open_iep_warns_when_no_sector_data_anywhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    paths = get_paths()
+    as_of = date(2026, 5, 26)
+    _seed_iep_context(paths, as_of, ["INFY"])
+
+    result = run_pre_open_iep(as_of)
+    assert any("Sector data unavailable" in w for w in result.warnings)
+
+
+def test_pre_open_iep_explicit_empty_dicts_suppress_autoload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Passing sector_map={} should NOT trigger auto-load."""
+    from trading.data.sector import SectorRow
+    from trading.store.sector_store import upsert_sector_daily
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    paths = get_paths()
+    as_of = date(2026, 5, 26)
+    _seed_iep_context(paths, as_of, ["INFY"])
+    _write_sector_map(paths, {"INFY": "IT"})
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        upsert_sector_daily(
+            conn,
+            [SectorRow(date="2026-05-26", sector="IT", close=36000.0,
+                       rs_5d=0.02, rs_20d=0.035, rs_60d=0.01, regime="LEADING")],
+        )
+
+    result = run_pre_open_iep(as_of, sector_map={}, sector_momentum={})
+    assert not any("Sector data unavailable" in w for w in result.warnings)
+    assert not any("sector data fallback" in w for w in result.warnings)
