@@ -110,6 +110,15 @@ ignore = [
 # label), which also fails N999's snake_case rule.
 "src/trading/ui/pages/*.py" = ["N999"]
 "src/trading/ui/Home.py" = ["N999"]
+# X / y are universal ML conventions for the feature matrix and label
+# vector; Phase 16 modules + their tests use them throughout.
+"src/trading/strategy/ranker_train.py" = ["N803", "N806"]
+"src/trading/strategy/ranker.py" = ["N806"]
+"src/trading/cli.py" = ["N806"]
+"tests/test_ranker*.py" = ["N806"]
+"tests/test_model_registry.py" = ["N806"]
+"tests/test_cli_ranker.py" = ["N806"]
+"tests/test_jobs_pre_open.py" = ["N806"]
 
 [tool.ruff.format]
 quote-style = "double"

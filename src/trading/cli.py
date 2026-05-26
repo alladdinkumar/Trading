@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 from dataclasses import asdict
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -1369,7 +1369,7 @@ def train_ranker(
     ] = False,
 ) -> None:
     """Train the Phase 16 LightGBM ranker over a walk-forward window."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from trading.features.technicals import add_indicators
     from trading.store.model_registry import (
@@ -1479,7 +1479,7 @@ def train_ranker(
     save_model(pkl_path, result.final_model, FEATURE_NAMES)
     row = RegistryRow(
         version=version,
-        trained_at=datetime.now(timezone.utc).isoformat(),
+        trained_at=datetime.now(UTC).isoformat(),
         train_start=str(result.final_train_start.date()),
         train_end=str(result.final_train_end.date()),
         oos_sharpe=result.oos_sharpe_mean,

@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import lightgbm as lgb
 import numpy as np
@@ -33,17 +33,20 @@ if TYPE_CHECKING:
 
 MIN_TRAIN_EXAMPLES = 30
 
-LGBM_PARAMS: dict[str, object] = {
-    "objective": "binary",
-    "metric": "binary_logloss",
-    "num_leaves": 15,
-    "min_data_in_leaf": 10,
-    "learning_rate": 0.05,
-    "n_estimators": 200,
-    "is_unbalance": True,
-    "feature_pre_filter": False,
-    "verbose": -1,
-}
+def _new_lgbm() -> lgb.LGBMClassifier:
+    """Construct a fresh LightGBM classifier with Phase-16 small-data hyperparameters."""
+    return lgb.LGBMClassifier(
+        objective="binary",
+        metric="binary_logloss",
+        num_leaves=15,
+        min_data_in_leaf=10,
+        learning_rate=0.05,
+        n_estimators=200,
+        is_unbalance=True,
+        feature_pre_filter=False,
+        verbose=-1,
+        random_state=42,
+    )
 
 
 class InsufficientDataError(RuntimeError):
@@ -83,7 +86,7 @@ def _build_xy_for_window(
     negative_news_lookup: Mapping[tuple[str, str], int],
     train_start: pd.Timestamp,
     train_end: pd.Timestamp,
-) -> tuple[pd.DataFrame, np.ndarray]:
+) -> tuple[pd.DataFrame, "np.ndarray[Any, Any]"]:
     """Walk each (symbol, date) in [train_start, train_end), evaluate Layer A,
     and build (X, y) for every all-pass candidate with a resolvable forward
     window."""
@@ -117,8 +120,8 @@ def _build_xy_for_window(
     return X, y
 
 
-def _fit(X: pd.DataFrame, y: np.ndarray) -> lgb.LGBMClassifier:
-    model = lgb.LGBMClassifier(**LGBM_PARAMS, random_state=42)
+def _fit(X: pd.DataFrame, y: "np.ndarray[Any, Any]") -> lgb.LGBMClassifier:
+    model = _new_lgbm()
     n = len(X)
     if n >= 50 and len(set(y.tolist())) >= 2:
         rng = np.random.default_rng(0)
@@ -176,7 +179,7 @@ def _evaluate_fold_oos(
     # vs the active model is.
     returns = pd.Series(arr * 2 - 1)
     return (
-        int(len(realised)),
+        len(realised),
         float(sharpe(returns, periods_per_year=12)),
         float(arr.mean()),
     )
@@ -191,7 +194,7 @@ def train_walkforward(
     end: pd.Timestamp,
     *,
     wf_cfg: WalkForwardConfig | None = None,
-    bt_cfg: "BacktestConfig | None" = None,
+    bt_cfg: BacktestConfig | None = None,
 ) -> TrainResult:
     wf = wf_cfg or WalkForwardConfig()
     folds_out: list[FoldMetrics] = []
@@ -211,7 +214,7 @@ def train_walkforward(
                     train_end=win.train_end,
                     test_start=win.test_start,
                     test_end=win.test_end,
-                    n_train_examples=int(len(X)),
+                    n_train_examples=len(X),
                     n_trades_oos=0,
                     sharpe_oos=float("nan"),
                     hit_rate_oos=float("nan"),
@@ -235,7 +238,7 @@ def train_walkforward(
                 train_end=win.train_end,
                 test_start=win.test_start,
                 test_end=win.test_end,
-                n_train_examples=int(len(X)),
+                n_train_examples=len(X),
                 n_trades_oos=n_trades,
                 sharpe_oos=sh,
                 hit_rate_oos=hr,
@@ -277,7 +280,7 @@ def train_walkforward(
         final_model=final_model,
         final_train_start=final_train_start,
         final_train_end=final_train_end,
-        n_final_examples=int(len(Xf)),
+        n_final_examples=len(Xf),
         oos_sharpe_mean=oos_sharpe_mean,
         oos_hit_rate_mean=oos_hit_rate_mean,
         feature_names=FEATURE_NAMES,

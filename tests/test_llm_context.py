@@ -166,6 +166,68 @@ def test_assemble_context_candidates_no_data_when_empty(
     assert body.count("_(no data)_") >= 1  # at least the candidates section
 
 
+def test_context_includes_ranker_section_when_scored_supplied(
+    conn: sqlite3.Connection, paths
+) -> None:
+    from trading.strategy.ranker import ScoredCandidate
+
+    cand_a = _candidate("A", n_passed=10)
+    cand_b = _candidate("B", n_passed=10)
+    scored = [
+        ScoredCandidate(cand_a, 0.74, True),
+        ScoredCandidate(cand_b, 0.31, False),
+    ]
+    out = assemble_context(
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(
+            candidates=[cand_a, cand_b],
+            holdings_health=[],
+            scored_candidates=scored,
+        ),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "## Layer B ranker" in body
+    assert "0.740" in body  # ml_score formatted to 3dp
+    assert "✓" in body
+
+
+def test_context_omits_ranker_section_when_scored_none(
+    conn: sqlite3.Connection, paths
+) -> None:
+    cand = _candidate("A", n_passed=10)
+    out = assemble_context(
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(
+            candidates=[cand], holdings_health=[], scored_candidates=None
+        ),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "## Layer B ranker" not in body
+
+
+def test_context_omits_ranker_section_when_scored_empty(
+    conn: sqlite3.Connection, paths
+) -> None:
+    cand = _candidate("A", n_passed=10)
+    out = assemble_context(
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(
+            candidates=[cand], holdings_health=[], scored_candidates=[]
+        ),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "## Layer B ranker" not in body
+
+
 def test_assemble_context_includes_holdings_health(
     conn: sqlite3.Connection, paths
 ) -> None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import lightgbm as lgb
@@ -101,7 +101,7 @@ def _register_active_model(paths: Paths) -> None:
         paths,
         row=RegistryRow(
             version="2024-12-31",
-            trained_at=datetime.now(timezone.utc).isoformat(),
+            trained_at=datetime.now(UTC).isoformat(),
             train_start="2022-01-01",
             train_end="2024-12-31",
             oos_sharpe=1.0,

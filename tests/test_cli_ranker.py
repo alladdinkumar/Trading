@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import lightgbm as lgb
@@ -50,7 +50,7 @@ def test_ranker_status_lists_rows(isolated_paths: Paths) -> None:
         isolated_paths,
         row=RegistryRow(
             version="test",
-            trained_at=datetime.now(timezone.utc).isoformat(),
+            trained_at=datetime.now(UTC).isoformat(),
             train_start="2022-01-01",
             train_end="2024-12-31",
             oos_sharpe=1.23,

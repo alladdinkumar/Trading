@@ -4,7 +4,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from trading.data.macro import MacroSnapshot
 from trading.features.technicals import add_indicators
+from trading.store.news_store import SentimentDailyRow
 from trading.strategy.ranker_features import (
     FEATURE_NAMES,
     LiveContext,
@@ -118,9 +120,6 @@ def test_short_history_yields_nan_for_long_lookbacks() -> None:
 # ---------------------------------------------------------------------------
 
 
-from trading.data.macro import MacroSnapshot
-
-
 def _macro_history(end: pd.Timestamp, n: int = 10) -> pd.DataFrame:
     idx = pd.bdate_range(end=end, periods=n).strftime("%Y-%m-%d")
     return pd.DataFrame(
@@ -214,8 +213,6 @@ def test_regime_ord_nan_when_regime_unknown() -> None:
 # ---------------------------------------------------------------------------
 # Sentiment features
 # ---------------------------------------------------------------------------
-
-from trading.store.news_store import SentimentDailyRow
 
 
 def test_sentiment_features_nan_when_no_row() -> None:

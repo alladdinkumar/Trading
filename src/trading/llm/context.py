@@ -17,6 +17,7 @@ from typing import Literal
 
 from trading.config import Paths
 from trading.portfolio.health import HealthScore
+from trading.strategy.ranker import ScoredCandidate
 from trading.strategy.rules import Candidate
 
 Mode = Literal["pre_open", "mid_day", "post_close"]
@@ -28,10 +29,10 @@ class ContextInputs:
 
     candidates: list[Candidate] = field(default_factory=list)
     holdings_health: list[HealthScore] = field(default_factory=list)
-    # Phase 16: optional Layer-B ranker output. Renderer added in Task 12;
-    # for now the field is accepted (and ignored by the renderer) so
-    # pre_open._step_assemble can pass it without coupling.
-    scored_candidates: object | None = None
+    # Phase 16: optional Layer-B ranker output. Rendered as a separate section
+    # only when non-empty; otherwise the section is omitted (additive-only,
+    # safe across modes).
+    scored_candidates: list[ScoredCandidate] | None = None
 
 
 def assemble_context(
@@ -56,6 +57,9 @@ def assemble_context(
     parts.append(_render_header(as_of, mode))
     parts.append(_render_macro(conn, as_of))
     parts.append(_render_candidates(conn, as_of, inputs.candidates))
+    ranker_section = _render_ranker_section(inputs.scored_candidates)
+    if ranker_section:
+        parts.append(ranker_section)
     parts.append(_render_holdings_health(inputs.holdings_health))
     parts.append(_render_open_trades(conn))
     if mode == "post_close":
@@ -163,6 +167,26 @@ def _render_news_for_symbol(
             cat = r["category"] or "—"
             out.append(f"  - {r['ts'][:10]} · [{cat}] {r['headline']} ({score})")
     return out
+
+
+def _render_ranker_section(scored: list[ScoredCandidate] | None) -> str:
+    """Phase 16 — optional Layer-B ranker section.
+
+    Renders nothing (empty string) when `scored` is None or empty; caller
+    skips the section in that case. Sorts by ml_score descending; rows with
+    no ml_score (cold-start) sort last and render as "—".
+    """
+    if not scored:
+        return ""
+    lines = ["## Layer B ranker", "", "| Rank | Symbol | Score | Selected |", "|---:|---|---:|:---:|"]
+    sorted_scored = sorted(
+        scored, key=lambda s: (-(s.ml_score if s.ml_score is not None else -1.0), s.candidate.symbol)
+    )
+    for i, sc in enumerate(sorted_scored, start=1):
+        score_str = f"{sc.ml_score:.3f}" if sc.ml_score is not None else "—"
+        mark = "✓" if sc.selected else ""
+        lines.append(f"| {i} | {sc.candidate.symbol} | {score_str} | {mark} |")
+    return "\n".join(lines)
 
 
 def _render_holdings_health(rows: list[HealthScore]) -> str:

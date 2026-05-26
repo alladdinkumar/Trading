@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import lightgbm as lgb
@@ -36,7 +36,7 @@ def _paths(tmp_path: Path) -> Paths:
 def _row(version: str, sharpe: float = 1.0, *, active_flag: bool = False) -> RegistryRow:
     return RegistryRow(
         version=version,
-        trained_at=datetime.now(timezone.utc).isoformat(),
+        trained_at=datetime.now(UTC).isoformat(),
         train_start="2023-05-01",
         train_end="2026-05-01",
         oos_sharpe=sharpe,

@@ -155,12 +155,27 @@ def _macro_features(live_ctx: LiveContext, sd: pd.Timestamp) -> dict[str, float]
         # Locate the rightmost row whose index ≤ sd_iso. Falls back to the last
         # row when sd_iso isn't present.
         try:
-            end_pos = int(hist.index.get_loc(sd_iso))
+            raw_pos = hist.index.get_loc(sd_iso)
         except KeyError:
             mask = hist.index <= sd_iso
             if not mask.any():
                 return out
             end_pos = int(mask.sum() - 1)
+        else:
+            # get_loc may return int / slice / boolean ndarray for duplicates.
+            # We expect a unique date index; coerce defensively.
+            if isinstance(raw_pos, int):
+                end_pos = raw_pos
+            else:
+                # Duplicate index — pick the last occurrence.
+                if isinstance(raw_pos, slice):
+                    end_pos = (raw_pos.stop or 0) - 1
+                else:
+                    # boolean ndarray
+                    nonzero = list(raw_pos.nonzero()[0])
+                    if not nonzero:
+                        return out
+                    end_pos = int(nonzero[-1])
         if end_pos >= 4:
             window = hist.iloc[end_pos - 4 : end_pos + 1]  # 5 rows ending at sd
             if "vix" in window.columns:

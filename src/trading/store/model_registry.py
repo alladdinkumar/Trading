@@ -58,15 +58,15 @@ class RegistryRow:
 @dataclass(frozen=True)
 class ActiveModel:
     row: RegistryRow
-    model: "lgb.LGBMClassifier"
+    model: lgb.LGBMClassifier
     feature_names: tuple[str, ...]
 
 
-class RegistryFeatureMismatch(RuntimeError):
+class RegistryFeatureMismatch(RuntimeError):  # noqa: N818 — domain term, not an "Error"
     """Raised when a loaded model's feature names diverge from current FEATURE_NAMES."""
 
 
-def _registry_path(paths: "Paths") -> Path:
+def _registry_path(paths: Paths) -> Path:
     return paths.models_dir / REGISTRY_FILENAME
 
 
@@ -105,7 +105,7 @@ def _csv_to_row(d: dict[str, str]) -> RegistryRow:
     )
 
 
-def all_rows(paths: "Paths") -> list[RegistryRow]:
+def all_rows(paths: Paths) -> list[RegistryRow]:
     p = _registry_path(paths)
     if not p.is_file():
         return []
@@ -114,7 +114,7 @@ def all_rows(paths: "Paths") -> list[RegistryRow]:
         return [_csv_to_row(r) for r in reader]
 
 
-def _write_all_rows(paths: "Paths", rows: list[RegistryRow]) -> None:
+def _write_all_rows(paths: Paths, rows: list[RegistryRow]) -> None:
     paths.models_dir.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
         prefix="registry-", suffix=".csv", dir=str(paths.models_dir)
@@ -132,7 +132,7 @@ def _write_all_rows(paths: "Paths", rows: list[RegistryRow]) -> None:
         raise
 
 
-def active(paths: "Paths") -> ActiveModel | None:
+def active(paths: Paths) -> ActiveModel | None:
     rows = all_rows(paths)
     active_rows = [r for r in rows if r.active]
     if not active_rows:
@@ -169,7 +169,7 @@ def _with_active(row: RegistryRow, active_flag: bool) -> RegistryRow:
     )
 
 
-def register(paths: "Paths", *, row: RegistryRow, promote: bool) -> bool:
+def register(paths: Paths, *, row: RegistryRow, promote: bool) -> bool:
     """Append `row` to registry.csv. Returns True iff this row became active.
 
     Promotion logic:
@@ -214,7 +214,7 @@ def register(paths: "Paths", *, row: RegistryRow, promote: bool) -> bool:
 
 def save_model(
     path: Path,
-    model: "lgb.LGBMClassifier",
+    model: lgb.LGBMClassifier,
     feature_names: tuple[str, ...],
 ) -> None:
     """Persist model + feature_names via joblib. Atomic write."""

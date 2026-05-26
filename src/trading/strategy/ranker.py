@@ -56,7 +56,7 @@ def _cold_start(candidates: list[Candidate]) -> list[ScoredCandidate]:
     return [ScoredCandidate(c, None, True) for c in candidates]
 
 
-def _load_active_or_none(paths: "Paths") -> ActiveModel | None:
+def _load_active_or_none(paths: Paths) -> ActiveModel | None:
     try:
         am = load_active(paths)
     except Exception as e:  # corrupt registry, IO error
@@ -126,7 +126,7 @@ def _negative_news_count_7d(
 
 def score_and_filter(
     candidates: list[Candidate],
-    paths: "Paths",
+    paths: Paths,
     conn: sqlite3.Connection,
     as_of: date,
     *,
@@ -153,13 +153,10 @@ def score_and_filter(
         try:
             raw = read_ohlcv(cand.symbol, paths, end=as_of)
         except FileNotFoundError:
-            rows.append({k_: math.nan for k_ in FEATURE_NAMES})
+            rows.append(dict.fromkeys(FEATURE_NAMES, math.nan))
             cand_index.append(cand)
             continue
-        if as_of_ts not in raw.index:
-            as_of_actual = raw.index[-1]
-        else:
-            as_of_actual = as_of_ts
+        as_of_actual = raw.index[-1] if as_of_ts not in raw.index else as_of_ts
         enriched = add_indicators(raw)
         sent = get_sentiment_daily(conn, as_of.isoformat(), cand.symbol)
         neg7 = _negative_news_count_7d(conn, cand.symbol, as_of)
@@ -198,7 +195,7 @@ class RankerSignalProvider:
         self,
         model: object,
         feature_names: tuple[str, ...],
-        paths: "Paths",
+        paths: Paths,
         conn: sqlite3.Connection,
         top_k: int = 5,
     ) -> None:
@@ -213,10 +210,10 @@ class RankerSignalProvider:
 
     def score_signals(
         self,
-        signals: list["Signal"],
+        signals: list[Signal],
         enriched: Mapping[str, pd.DataFrame],
         signal_date: pd.Timestamp,
-    ) -> list["Signal"]:
+    ) -> list[Signal]:
         if not signals:
             return []
         macro_snap = get_macro_snapshot(self._conn, signal_date.strftime("%Y-%m-%d"))
@@ -227,7 +224,7 @@ class RankerSignalProvider:
         for sig in signals:
             df = enriched.get(sig.symbol)
             if df is None or signal_date not in df.index:
-                rows.append({k_: math.nan for k_ in FEATURE_NAMES})
+                rows.append(dict.fromkeys(FEATURE_NAMES, math.nan))
                 continue
             sent = get_sentiment_daily(
                 self._conn, signal_date.strftime("%Y-%m-%d"), sig.symbol
@@ -253,9 +250,9 @@ class RankerSignalProvider:
         self,
         d: pd.Timestamp,
         enriched: Mapping[str, pd.DataFrame],
-        ctx: "ScanContext",
-        config: "BacktestConfig",
-    ) -> list["Signal"]:
+        ctx: ScanContext,
+        config: BacktestConfig,
+    ) -> list[Signal]:
         from trading.backtest.engine import rule_signal_provider
 
         base = rule_signal_provider(d, enriched, ctx, config)

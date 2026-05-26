@@ -430,7 +430,7 @@ def test_run_pre_open_full_happy_path_integration(paths, monkeypatch) -> None:
 
 def _register_passive_top1_model(paths) -> None:
     """Register a tiny active model that prefers higher-RSI inputs."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     import lightgbm as lgb
     import numpy as np
@@ -452,7 +452,7 @@ def _register_passive_top1_model(paths) -> None:
         paths,
         row=RegistryRow(
             version="test",
-            trained_at=datetime.now(timezone.utc).isoformat(),
+            trained_at=datetime.now(UTC).isoformat(),
             train_start="2022-01-01",
             train_end="2024-12-31",
             oos_sharpe=1.0,
