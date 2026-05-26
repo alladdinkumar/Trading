@@ -16,7 +16,9 @@ from pathlib import Path
 from typing import Literal
 
 from trading.config import Paths
+from trading.data.sector import SectorRow, load_sector_map
 from trading.portfolio.health import HealthScore
+from trading.store.sector_store import get_sector_daily
 from trading.strategy.ranker import ScoredCandidate
 from trading.strategy.rules import Candidate
 
@@ -53,10 +55,16 @@ def assemble_context(
     date_dir.mkdir(parents=True, exist_ok=True)
     out_path = date_dir / "_context.md"
 
+    sector_map = load_sector_map(paths)
+    sector_rows = {r.sector: r for r in get_sector_daily(conn, as_of)}
+
     parts: list[str] = []
     parts.append(_render_header(as_of, mode))
     parts.append(_render_macro(conn, as_of))
-    parts.append(_render_candidates(conn, as_of, inputs.candidates))
+    parts.append(_render_sector_snapshot(conn, as_of))
+    parts.append(
+        _render_candidates(conn, as_of, inputs.candidates, sector_map, sector_rows)
+    )
     ranker_section = _render_ranker_section(inputs.scored_candidates)
     if ranker_section:
         parts.append(ranker_section)
@@ -100,8 +108,60 @@ def _render_macro(conn: sqlite3.Connection, as_of: date) -> str:
     return "\n".join(lines)
 
 
+def _render_sector_snapshot(conn: sqlite3.Connection, as_of: date) -> str:
+    rows = get_sector_daily(conn, as_of)
+    if not rows:
+        return "## Sector momentum\n\n_(no data)_"
+
+    def _sort_key(r: SectorRow) -> tuple[int, float]:
+        # rows with rs_20d=None sort last
+        return (0, -r.rs_20d) if r.rs_20d is not None else (1, 0.0)
+
+    sorted_rows = sorted(rows, key=_sort_key)
+    lines = [
+        "## Sector momentum",
+        "",
+        "| Sector | Close | 5d RS | 20d RS | 60d RS | Regime |",
+        "|---|---:|---:|---:|---:|:---:|",
+    ]
+    for r in sorted_rows:
+        lines.append(
+            f"| {r.sector} | {r.close:,.0f} | {_fmt_rs(r.rs_5d)} | "
+            f"{_fmt_rs(r.rs_20d)} | {_fmt_rs(r.rs_60d)} | {r.regime or '—'} |"
+        )
+    return "\n".join(lines)
+
+
+def _fmt_rs(v: float | None) -> str:
+    """Format RS as a signed percent string. `None` → em-dash."""
+    if v is None:
+        return "—"
+    return f"{v * 100:+.2f}%"
+
+
+def _sector_bullet_for(
+    symbol: str,
+    sector_map: dict[str, str],
+    sector_rows: dict[str, SectorRow],
+) -> str | None:
+    """Return a single bullet line tagging a candidate with its sector RS."""
+    sec = sector_map.get(symbol)
+    if sec is None:
+        return None
+    row = sector_rows.get(sec)
+    if row is None:
+        return None
+    rs = _fmt_rs(row.rs_20d)
+    regime = row.regime or "—"
+    return f"- sector: {sec} — 20d RS {rs} ({regime})"
+
+
 def _render_candidates(
-    conn: sqlite3.Connection, as_of: date, candidates: list[Candidate]
+    conn: sqlite3.Connection,
+    as_of: date,
+    candidates: list[Candidate],
+    sector_map: dict[str, str],
+    sector_rows: dict[str, SectorRow],
 ) -> str:
     if not candidates:
         return "## Today's candidates\n\n_(no data)_"
@@ -122,6 +182,9 @@ def _render_candidates(
         blocks.append(
             f"- SMA20 {c.sma_20:.2f} · SMA50 {c.sma_50:.2f} · SMA200 {c.sma_200:.2f}"
         )
+        sector_line = _sector_bullet_for(c.symbol, sector_map, sector_rows)
+        if sector_line:
+            blocks.append(sector_line)
         blocks.extend(_render_news_for_symbol(conn, c.symbol, as_of))
     return "\n".join(blocks)
 

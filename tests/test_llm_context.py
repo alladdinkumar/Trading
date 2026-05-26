@@ -400,3 +400,102 @@ def test_assemble_context_excludes_future_dated_news(
     body = out.read_text(encoding="utf-8")
     assert "Past RVNL story" in body
     assert "Financial Results on 21-May-2026" not in body
+
+
+# ---------------------------------------------------------------------------
+# Phase 12.6 — sector momentum section + per-candidate sector bullet
+# ---------------------------------------------------------------------------
+
+
+def _seed_sector(conn: sqlite3.Connection) -> None:
+    from trading.data.sector import SectorRow
+    from trading.store.sector_store import upsert_sector_daily
+
+    upsert_sector_daily(
+        conn,
+        [
+            SectorRow(date="2026-05-15", sector="IT", close=36000.0,
+                      rs_5d=0.012, rs_20d=0.035, rs_60d=0.02, regime="LEADING"),
+            SectorRow(date="2026-05-15", sector="METAL", close=9000.0,
+                      rs_5d=-0.01, rs_20d=-0.03, rs_60d=-0.04, regime="LAGGING"),
+            SectorRow(date="2026-05-15", sector="FMCG", close=58000.0,
+                      rs_5d=0.001, rs_20d=0.005, rs_60d=0.002, regime="NEUTRAL"),
+        ],
+    )
+    conn.commit()
+
+
+def test_assemble_context_includes_sector_snapshot(
+    conn: sqlite3.Connection, paths
+) -> None:
+    _seed_sector(conn)
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(candidates=[], holdings_health=[]),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "## Sector momentum" in body
+    assert "IT" in body and "+3.50%" in body and "LEADING" in body
+    assert "METAL" in body and "-3.00%" in body and "LAGGING" in body
+
+
+def test_assemble_context_sector_empty_when_no_rows(
+    conn: sqlite3.Connection, paths
+) -> None:
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(candidates=[], holdings_health=[]),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "## Sector momentum" in body
+    sector_chunk = body.split("## Sector momentum")[1].split("##")[0]
+    assert "_(no data)_" in sector_chunk
+
+
+def test_assemble_context_per_candidate_sector_bullet(
+    conn: sqlite3.Connection, paths
+) -> None:
+    """When a candidate's symbol is in sector_map AND sector_daily, the
+    candidate block gains a one-line 'sector: <code> — 20d RS …' bullet."""
+    static_dir = paths.project_root / "data" / "static"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    (static_dir / "sector_map.csv").write_text(
+        "symbol,sector\nRVNL,IT\n", encoding="utf-8"
+    )
+    _seed_sector(conn)
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(
+            candidates=[_candidate("RVNL", n_passed=9)],
+            holdings_health=[],
+        ),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "sector: IT — 20d RS +3.50% (LEADING)" in body
+
+
+def test_assemble_context_no_sector_bullet_when_unmapped(
+    conn: sqlite3.Connection, paths
+) -> None:
+    """Candidate not present in sector_map.csv → no sector bullet rendered."""
+    static_dir = paths.project_root / "data" / "static"
+    static_dir.mkdir(parents=True, exist_ok=True)
+    (static_dir / "sector_map.csv").write_text(
+        "symbol,sector\nINFY,IT\n", encoding="utf-8"
+    )
+    _seed_sector(conn)
+    out = assemble_context(
+        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        mode="pre_open",
+        inputs=ContextInputs(
+            candidates=[_candidate("BHARTIARTL", n_passed=9)],
+            holdings_health=[],
+        ),
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "BHARTIARTL" in body
+    bharti_block = body.split("### BHARTIARTL")[1].split("###")[0]
+    assert "sector:" not in bharti_block
