@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 from typer.testing import CliRunner
 
 from trading.cli import app
@@ -567,3 +568,92 @@ def test_cli_notify_test_dispatches(monkeypatch):
     level, title, _ = calls[0]
     assert level == "info"
     assert "notify-test" in title or "Test" in title
+
+
+# ---------------------------------------------------------------------------
+# Phase 12.6 — `trading sector` CLI
+# ---------------------------------------------------------------------------
+
+
+def test_trading_sector_happy_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`trading sector --date YYYY-MM-DD` writes rows + renders table."""
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    from trading.data.sector import SectorRow
+
+    fake_rows = [
+        SectorRow(date="2026-05-26", sector="IT", close=36000.0,
+                  rs_5d=0.012, rs_20d=0.035, rs_60d=0.02, regime="LEADING"),
+        SectorRow(date="2026-05-26", sector="METAL", close=9000.0,
+                  rs_5d=-0.01, rs_20d=-0.03, rs_60d=-0.04, regime="LAGGING"),
+    ]
+    monkeypatch.setattr("trading.cli.fetch_all_sectors", lambda _as_of: fake_rows)
+
+    from typer.testing import CliRunner
+
+    from trading.cli import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["sector", "--date", "2026-05-26"])
+    assert result.exit_code == 0, result.output
+    assert "IT" in result.output and "METAL" in result.output
+
+    from trading.config import get_paths
+    from trading.store.db import get_conn
+    from trading.store.migrations import run_migrations
+
+    paths = get_paths()
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        n = conn.execute("SELECT COUNT(*) AS n FROM sector_daily").fetchone()["n"]
+    assert n == 2
+
+
+def test_trading_sector_dry_run_does_not_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    from trading.data.sector import SectorRow
+
+    monkeypatch.setattr(
+        "trading.cli.fetch_all_sectors",
+        lambda _as_of: [
+            SectorRow(date="2026-05-26", sector="IT", close=36000.0,
+                      rs_5d=0.01, rs_20d=0.02, rs_60d=0.0, regime="NEUTRAL"),
+        ],
+    )
+
+    from typer.testing import CliRunner
+
+    from trading.cli import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["sector", "--date", "2026-05-26", "--dry-run"])
+    assert result.exit_code == 0
+    assert "Dry run" in result.output
+
+    from trading.config import get_paths
+    from trading.store.db import get_conn
+    from trading.store.migrations import run_migrations
+
+    paths = get_paths()
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        n = conn.execute("SELECT COUNT(*) AS n FROM sector_daily").fetchone()["n"]
+    assert n == 0
+
+
+def test_trading_sector_exits_nonzero_when_no_rows_fetched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr("trading.cli.fetch_all_sectors", lambda _as_of: [])
+
+    from typer.testing import CliRunner
+
+    from trading.cli import app
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["sector", "--date", "2026-05-26"])
+    assert result.exit_code == 1

@@ -50,6 +50,7 @@ from trading.data.kite_snapshot import (
 )
 from trading.data.macro import snapshot_and_classify
 from trading.data.news import DEFAULT_ALIASES, fetch_all_news
+from trading.data.sector import fetch_all_sectors
 from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
 from trading.features.sentiment import aggregate_daily, score_news_items
@@ -77,6 +78,7 @@ from trading.store.db import get_conn
 from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import get_sentiment_daily, insert_news_items
+from trading.store.sector_store import upsert_sector_daily
 from trading.store.ohlcv import list_symbols, parquet_path, read_ohlcv, write_ohlcv
 from trading.store.repo import Signal, get_signal
 from trading.strategy.rules import ScanContext, passing, scan
@@ -657,6 +659,69 @@ def macro_cmd(
     console.print(f"\n[green]macro_snapshot written for {snap.date}.[/green]")
 
 
+@app.command("sector")
+def sector_cmd(
+    as_of: Annotated[
+        str | None,
+        typer.Option(
+            "--date",
+            help="Snapshot date (YYYY-MM-DD). Defaults to today.",
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Print the snapshot without writing to SQLite."),
+    ] = False,
+) -> None:
+    """Pull NSE sectoral indices, compute RS vs Nifty 50, upsert sector_daily."""
+    paths = get_paths()
+    target_date = date.fromisoformat(as_of) if as_of else date.today()
+
+    console.print(f"[bold]Pulling sector snapshot for {target_date}…[/bold]")
+    rows = fetch_all_sectors(target_date)
+
+    if not rows:
+        console.print(
+            "[red]No sector rows fetched (benchmark or all sectors failed).[/red]"
+        )
+        raise typer.Exit(code=1)
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Sector")
+    table.add_column("Close", justify="right")
+    table.add_column("5d RS", justify="right")
+    table.add_column("20d RS", justify="right")
+    table.add_column("60d RS", justify="right")
+    table.add_column("Regime", justify="center")
+    for r in rows:
+        table.add_row(
+            r.sector,
+            f"{r.close:,.0f}",
+            _fmt_rs_pct(r.rs_5d),
+            _fmt_rs_pct(r.rs_20d),
+            _fmt_rs_pct(r.rs_60d),
+            r.regime or "—",
+        )
+    console.print(table)
+
+    if dry_run:
+        console.print("\n[yellow]Dry run — nothing written.[/yellow]")
+        return
+
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        upsert_sector_daily(conn, rows)
+    console.print(
+        f"\n[green]sector_daily written for {target_date.isoformat()} ({len(rows)} rows).[/green]"
+    )
+
+
+def _fmt_rs_pct(v: float | None) -> str:
+    if v is None:
+        return "—"
+    return f"{v * 100:+.2f}%"
+
+
 def _fmt(v: float | None) -> str:
     if v is None:
         return "-"
@@ -1148,6 +1213,7 @@ def pre_open_cmd(
     table.add_column("step")
     table.add_column("count", justify="right")
     table.add_row("macro_written", "yes" if result.macro_written else "no")
+    table.add_row("sector_written", "yes" if result.sector_written else "no")
     table.add_row("news_inserted", str(result.news_inserted))
     table.add_row("sentiment_rows", str(result.sentiment_rows))
     table.add_row("candidates_total", str(result.candidates_total))
