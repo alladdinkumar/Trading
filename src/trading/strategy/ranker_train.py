@@ -86,7 +86,7 @@ def _build_xy_for_window(
     negative_news_lookup: Mapping[tuple[str, str], int],
     train_start: pd.Timestamp,
     train_end: pd.Timestamp,
-) -> tuple[pd.DataFrame, "np.ndarray[Any, Any]"]:
+) -> tuple[pd.DataFrame, np.ndarray[Any, Any]]:
     """Walk each (symbol, date) in [train_start, train_end), evaluate Layer A,
     and build (X, y) for every all-pass candidate with a resolvable forward
     window."""
@@ -120,7 +120,7 @@ def _build_xy_for_window(
     return X, y
 
 
-def _fit(X: pd.DataFrame, y: "np.ndarray[Any, Any]") -> lgb.LGBMClassifier:
+def _fit(X: pd.DataFrame, y: np.ndarray[Any, Any]) -> lgb.LGBMClassifier:
     model = _new_lgbm()
     n = len(X)
     if n >= 50 and len(set(y.tolist())) >= 2:

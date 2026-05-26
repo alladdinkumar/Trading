@@ -1152,6 +1152,7 @@ def pre_open_cmd(
     table.add_row("sentiment_rows", str(result.sentiment_rows))
     table.add_row("candidates_total", str(result.candidates_total))
     table.add_row("candidates_passing", str(result.candidates_passing))
+    table.add_row("candidates_selected", str(result.candidates_selected))
     table.add_row("paper_trades_opened", str(result.paper_trades_opened))
     table.add_row("holdings_scored", str(result.holdings_scored))
     console.print(table)

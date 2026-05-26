@@ -38,11 +38,11 @@ Granular task tracker for the trading system build. Update as work completes.
 | 14.B | post_close MVP | `[x]` |
 | 14.C | pre-open IEP gap filter | `[x]` |
 | 15 | Streamlit dashboard | `[x]` |
-| 16 | LightGBM ranker (Layer B) | `[ ]` |
+| 16 | LightGBM ranker (Layer B) | `[x]` |
 | 17 | Task Scheduler + logging | `[x]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 17 complete (manual smoke 2026-05-24 ✓)_
+**Currently working on:** _Phase 16 complete (manual smoke 2026-05-26 ✓ — model trained, registered, cold-start path verified)_
 **Next up:** _Phase 18 — Live paper-trading (3-6 month run)_
 
 ---
@@ -451,13 +451,92 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 16 — LightGBM ranker (Layer B)
 
-- [ ] 16.1 `src/trading/strategy/ranker.py`: feature builder pulling from features + paper-trade labels
-- [ ] 16.2 Training script: walk-forward LightGBM training, hyperparameter defaults
-- [ ] 16.3 Model persistence: pickle to `models/ranker_YYYY-MM-DD.pkl` + update `registry.csv`
-- [ ] 16.4 Integration: scanner pipeline now calls ranker after rules
-- [ ] 16.5 Backtest comparison: rules-only vs rules+ranker; promote only if Sharpe improves
-- [ ] 16.6 Tests: training pipeline with synthetic labels; frozen-input ranker output
-- [ ] 16.7 Update PROGRESS.md → commit `feat(strategy): LightGBM ranker`
+> Spec at [`docs/superpowers/specs/2026-05-24-phase-16-ranker-design.md`](docs/superpowers/specs/2026-05-24-phase-16-ranker-design.md).
+> Plan at [`docs/superpowers/plans/2026-05-25-phase-16-ranker.md`](docs/superpowers/plans/2026-05-25-phase-16-ranker.md).
+> 20-feature pilot (technicals + macro + sentiment); labels via Phase 6 exit
+> replay; cold-start preserves all rules-passing candidates; soft promotion
+> gated by 0.05 walk-forward Sharpe deadband; visibility-only signals row
+> persisted for non-selected candidates so the dashboard can surface them.
+
+- [x] 16.1 `src/trading/strategy/ranker_features.py`: `FEATURE_NAMES` (20-tuple
+       — setup/trend/volume/macro/sentiment) + `LiveContext` dataclass +
+       `build_feature_row(enriched_df, signal_date, live_ctx)`. Pure
+       functional, NaN-safe; `_REGIME_ORD` maps RISK_OFF/NEUTRAL/RISK_ON to
+       0/1/2 ordinals; 52w high/low via rolling(252, min_periods=1). 19 unit
+       tests in `test_ranker_features.py`.
+- [x] 16.2 `src/trading/strategy/ranker_labels.py`:
+       `label_candidate(enriched_df, signal_date, *, atr_stop_multiple=1.5,
+       max_days=25, cost_config=None) -> 1 | 0 | None`. Re-uses Phase 6
+       `evaluate_exit` + `apply_slippage` + buy/sell charges so the model
+       trains on the exact outcome distribution the live system produces.
+       Returns `None` when the forward window is incomplete (truncated at
+       enriched-frame end). 5 unit tests in `test_ranker_labels.py`.
+- [x] 16.3 `src/trading/store/model_registry.py`: CSV at
+       `models/registry.csv` (one row per training run; exactly one row may
+       have `active=true`), `save_model(path, model, feature_names)` via
+       joblib pickle (model + feature_names) with atomic temp-file writes,
+       `register(paths, *, row, promote)` with soft-promotion gate
+       (`SHARPE_PROMOTION_DEADBAND = 0.05`; NaN sharpe never promotes;
+       requires `row.oos_sharpe > current.oos_sharpe + 0.05`),
+       `active(paths) -> ActiveModel | None` for inference, and
+       `RegistryFeatureMismatch` for stale-model detection. 7 unit tests
+       in `test_model_registry.py`.
+- [x] 16.4 `src/trading/strategy/ranker.py`: `ScoredCandidate(candidate,
+       ml_score, selected)`; `score_and_filter(candidates, paths, conn,
+       as_of, *, k=5)` — cold-start path (no model / missing pkl /
+       feature-name mismatch / any IO error) returns
+       `ScoredCandidate(c, None, True)` for every candidate; scored path
+       loads enriched parquet + macro snapshot + sentiment_daily +
+       negative-news count + macro history, builds the feature matrix,
+       calls `predict_proba`, marks top-K by score. `RankerSignalProvider`
+       slots into the Phase 7 backtest engine via existing
+       `signal_provider` extension point. 5 tests across `test_ranker.py`.
+- [x] 16.5 `src/trading/strategy/ranker_train.py`: `train_walkforward(...)`
+       — iterates `walkforward.windows()` (3y train / 6mo test / 3mo step),
+       builds (X, y) per fold from Layer-A all-pass candidates labelled by
+       Phase 6 exit replay, fits LightGBM (small-data hyperparameters via
+       `_new_lgbm()`: 15 leaves, min_data_in_leaf=10, lr=0.05, n_estimators=200,
+       is_unbalance=True, random_state=42; early stopping when n≥50 with
+       both classes in the val slice), evaluates OOS per fold (replays
+       Phase 6 exits on test slice → fold-level Sharpe + hit rate), and
+       fits the final production model on the most-recent train window.
+       `InsufficientDataError` raised when the final window has <30
+       examples or only one class. 4 tests in `test_ranker_train.py`.
+- [x] 16.6 `src/trading/jobs/pre_open.py`: `_step_rank` inserted between
+       `_step_scan` and `_step_auto_open`. `_step_auto_open` opens a
+       paper-trade only when `sc.selected`; non-selected candidates still
+       persist a signals row (with `ml_score`) so the dashboard can
+       surface low-scoring rules-passes (visibility-only). New
+       `candidates_selected` field on `PreOpenResult`; `RANKER_TOP_K = 5`.
+       `_step_assemble` accepts optional `scored` to render the new Layer-B
+       brief section. 3 new tests in `test_jobs_pre_open.py`.
+- [x] 16.7 `src/trading/cli.py`: `trading train-ranker --start --end
+       [--promote] [--report]` runs the walk-forward + soft-promotion
+       gate end-to-end, pulling macro_history + sentiment_lookup from
+       SQLite; saves the pickle to `models/ranker_YYYY-MM-DD.pkl`, appends
+       a row to the registry, and (with `--report`) writes a markdown
+       summary to `data/research/ranker_<ts>.md`. `trading ranker-status`
+       renders the registry as a Rich table. 3 tests in
+       `test_cli_ranker.py`. Pre-open CLI table extended with a
+       `candidates_selected` row.
+- [x] 16.8 `src/trading/llm/context.py`: `ContextInputs.scored_candidates`
+       (optional list); `_render_ranker_section` prints a
+       `## Layer B ranker` table (Rank/Symbol/Score/Selected, sorted by
+       `ml_score` desc) when scored candidates exist; section omitted
+       cleanly otherwise. 3 new tests in `test_llm_context.py`.
+- [x] 16.9 Real-data smoke (2026-05-26): `uv run trading train-ranker
+       --start 2023-05-01 --end 2026-04-01 --report` trained on 12-symbol
+       universe → 203 final examples, `models/ranker_2026-04-01.pkl`
+       written, registry row appended (active=false; soft-promotion gate
+       declined to activate without measurable OOS Sharpe — first model,
+       NaN sharpe). `uv run trading ranker-status` rendered the registry
+       cleanly. `uv run trading pre-open --date 2026-05-22` ran the full
+       pipeline with the inactive model → cold-start path took over →
+       12 candidates evaluated, 0 passing (correction day), 0 selected,
+       holdings_scored 11, bundle written with Layer-B section omitted
+       (correctly absent — no scored candidates). Suite **657 passed**,
+       1 skipped (live), ruff + mypy clean. Commit `feat(strategy):
+       LightGBM ranker (Phase 16)` and pushed to origin/main.
 
 ## Phase 17 — Task Scheduler + logging
 

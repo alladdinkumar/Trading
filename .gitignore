@@ -234,6 +234,7 @@ data/raw/
 models/*.pkl
 models/*.joblib
 models/*.bin
+models/registry.csv
 
 # Hugging Face cache (FinBERT lives here once downloaded)
 .cache/huggingface/
