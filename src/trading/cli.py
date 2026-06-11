@@ -1585,5 +1585,46 @@ def weekly_train_cmd(
     console.print(table)
 
 
+@app.command("sip")
+def sip_cmd(
+    date_str: Annotated[str, typer.Option("--date", help="Plan date (YYYY-MM-DD).")],
+    budget: Annotated[
+        float, typer.Option("--budget", help="Monthly SIP budget in ₹.")
+    ] = 100_000.0,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Print only — no file write, no Slack.")
+    ] = False,
+) -> None:
+    """Monthly ₹1L SIP allocation plan (Phase 18). Needs today's /kite-snapshot."""
+    from datetime import date as _date
+
+    from trading.jobs.monthly_sip import MonthlySipAborted, run_monthly_sip
+    from trading.ops.logging_setup import configure_logging
+
+    configure_logging("monthly_sip")
+    try:
+        result = run_monthly_sip(
+            _date.fromisoformat(date_str), budget=budget, dry_run=dry_run
+        )
+    except MonthlySipAborted as e:
+        console.print(f"[red]sip aborted:[/red] {e}")
+        console.print("Run /kite-snapshot in Claude Code first, then retry.")
+        raise typer.Exit(code=2) from e
+
+    table = Table(title=f"monthly_sip — {result.as_of.isoformat()}")
+    table.add_column("field")
+    table.add_column("value")
+    table.add_row("budget", f"₹{result.budget:,.0f}")
+    table.add_row("holdings", str(result.holdings_count))
+    table.add_row("candidates", str(result.candidates_considered))
+    table.add_row("deployed", f"₹{result.deployed:,.0f}")
+    table.add_row("cash_reserve", f"₹{result.cash_reserve:,.0f}")
+    table.add_row("allocations", str(result.allocations))
+    table.add_row("plan", str(result.plan_path) if result.plan_path else "— (dry run)")
+    console.print(table)
+    for w in result.warnings:
+        console.print(f"[yellow]warning:[/yellow] {w}")
+
+
 if __name__ == "__main__":  # pragma: no cover — manual entry
     app()

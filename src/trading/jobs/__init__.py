@@ -1,6 +1,11 @@
 """Top-level jobs package — orchestrators that wire phases together."""
 
 from trading.jobs.mid_day import MidDayAborted, MidDayResult, run_mid_day
+from trading.jobs.monthly_sip import (
+    MonthlySipAborted,
+    MonthlySipResult,
+    run_monthly_sip,
+)
 from trading.jobs.post_close import (
     PostCloseAborted,
     PostCloseResult,
@@ -17,6 +22,8 @@ from trading.jobs.weekly_train import WeeklyTrainResult, run_weekly_train
 __all__ = [
     "MidDayAborted",
     "MidDayResult",
+    "MonthlySipAborted",
+    "MonthlySipResult",
     "PostCloseAborted",
     "PostCloseResult",
     "PreOpenIepAborted",
@@ -24,6 +31,7 @@ __all__ = [
     "PreOpenResult",
     "WeeklyTrainResult",
     "run_mid_day",
+    "run_monthly_sip",
     "run_post_close",
     "run_pre_open",
     "run_pre_open_iep",

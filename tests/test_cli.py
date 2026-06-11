@@ -666,3 +666,51 @@ def test_cli_weekly_train_happy(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert "weekly_train" in result.output
     assert "skip_train requested" in result.output
+
+
+def test_cli_sip_aborts_without_snapshot(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "trading.jobs.monthly_sip.is_trading_day", lambda d: d.weekday() < 5
+    )
+    result = runner.invoke(app, ["sip", "--date", "2026-07-01"])
+    assert result.exit_code == 2
+    assert "kite-snapshot" in result.output
+
+
+def test_cli_sip_happy(tmp_path, monkeypatch) -> None:
+    from datetime import date as _date
+
+    from tests.conftest import seed_kite_snapshot
+    from trading.config import get_paths
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "trading.jobs.monthly_sip.is_trading_day", lambda d: d.weekday() < 5
+    )
+    monkeypatch.setattr("trading.jobs.monthly_sip.notify", lambda *a, **kw: None)
+    paths = get_paths()
+    seed_kite_snapshot(
+        paths,
+        _date(2026, 7, 1),
+        holdings=[
+            {
+                "tradingsymbol": "COALINDIA",
+                "exchange": "NSE",
+                "isin": None,
+                "quantity": 20,
+                "average_price": 400.0,
+                "last_price": 460.0,
+                "close_price": 460.0,
+                "pnl": 1200.0,
+                "day_change": 0.0,
+                "day_change_percentage": 0.0,
+            }
+        ],
+        gtts=[],
+    )
+
+    result = runner.invoke(app, ["sip", "--date", "2026-07-01"])
+    assert result.exit_code == 0
+    assert "monthly_sip" in result.output
+    assert (paths.research_dir / "2026-07-01" / "sip_plan.md").is_file()
