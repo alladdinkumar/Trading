@@ -125,9 +125,7 @@ def has_row_for_train_end(paths: Paths, train_end: str) -> bool:
 
 def _write_all_rows(paths: Paths, rows: list[RegistryRow]) -> None:
     paths.models_dir.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix="registry-", suffix=".csv", dir=str(paths.models_dir)
-    )
+    fd, tmp_name = tempfile.mkstemp(prefix="registry-", suffix=".csv", dir=str(paths.models_dir))
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=list(REGISTRY_COLUMNS))
@@ -228,14 +226,10 @@ def save_model(
 ) -> None:
     """Persist model + feature_names via joblib. Atomic write."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(
-        prefix=path.stem + "-", suffix=".pkl", dir=str(path.parent)
-    )
+    fd, tmp_name = tempfile.mkstemp(prefix=path.stem + "-", suffix=".pkl", dir=str(path.parent))
     try:
         with os.fdopen(fd, "wb") as fh:
-            joblib.dump(
-                {"model": model, "feature_names": list(feature_names)}, fh
-            )
+            joblib.dump({"model": model, "feature_names": list(feature_names)}, fh)
         os.replace(tmp_name, path)
     except Exception:
         if os.path.exists(tmp_name):

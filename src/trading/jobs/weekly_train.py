@@ -178,9 +178,7 @@ def gather_review_data(conn: sqlite3.Connection, as_of: date) -> ReviewData:
             "WHERE pt.ts_exit IS NULL ORDER BY pt.ts_entry"
         )
     ]
-    eq_rows = conn.execute(
-        "SELECT date, equity FROM portfolio_snapshots ORDER BY date"
-    ).fetchall()
+    eq_rows = conn.execute("SELECT date, equity FROM portfolio_snapshots ORDER BY date").fetchall()
     equity = pd.Series(
         [r["equity"] for r in eq_rows],
         index=pd.to_datetime([r["date"] for r in eq_rows]),
@@ -338,9 +336,7 @@ def _step_retrain(
         )
     inputs = load_training_inputs(paths, conn)
     if not inputs.enriched:
-        return RetrainOutcome(
-            False, "no parquet symbols with 200+ bars", None, None, False, None
-        )
+        return RetrainOutcome(False, "no parquet symbols with 200+ bars", None, None, False, None)
     try:
         result = train_walkforward(
             enriched=inputs.enriched,

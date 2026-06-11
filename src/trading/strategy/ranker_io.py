@@ -53,9 +53,7 @@ def load_training_inputs(paths: Paths, conn: sqlite3.Connection) -> TrainingInpu
 
     sentiment_lookup: dict[tuple[str, str], SentimentDailyRow] = {}
     for s in enriched:
-        for r in conn.execute(
-            "SELECT * FROM sentiment_daily WHERE symbol = ?", (s,)
-        ).fetchall():
+        for r in conn.execute("SELECT * FROM sentiment_daily WHERE symbol = ?", (s,)).fetchall():
             sentiment_lookup[(r["date"], s)] = SentimentDailyRow(
                 date=r["date"],
                 symbol=s,

@@ -129,9 +129,7 @@ def test_promotion_above_deadband_flips_active(tmp_path: Path) -> None:
 def test_active_loads_model_and_feature_names(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     paths.models_dir.mkdir(parents=True, exist_ok=True)
-    save_model(
-        paths.models_dir / "ranker_2026-05-01.pkl", _toy_model(), ("a", "b", "c", "d")
-    )
+    save_model(paths.models_dir / "ranker_2026-05-01.pkl", _toy_model(), ("a", "b", "c", "d"))
     register(paths, row=_row("2026-05-01"), promote=True)
     am = active(paths)
     assert am is not None

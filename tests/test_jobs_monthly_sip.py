@@ -26,9 +26,7 @@ def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture
 def weekday_calendar(monkeypatch: pytest.MonkeyPatch):
     """Deterministic, offline trading-day calendar (no holiday fetch)."""
-    monkeypatch.setattr(
-        "trading.jobs.monthly_sip.is_trading_day", lambda d: d.weekday() < 5
-    )
+    monkeypatch.setattr("trading.jobs.monthly_sip.is_trading_day", lambda d: d.weekday() < 5)
 
 
 @pytest.fixture
@@ -57,9 +55,7 @@ def _frame(n: int) -> pd.DataFrame:
     )
 
 
-def _holding_row(
-    symbol: str, qty: int = 10, last_price: float = 100.0, avg: float = 90.0
-) -> dict:
+def _holding_row(symbol: str, qty: int = 10, last_price: float = 100.0, avg: float = 90.0) -> dict:
     return {
         "tradingsymbol": symbol,
         "exchange": "NSE",
@@ -81,9 +77,7 @@ def _memdb() -> sqlite3.Connection:
     return c
 
 
-def _insert_signal(
-    conn: sqlite3.Connection, ts: str, symbol: str, ml_score: float | None
-) -> None:
+def _insert_signal(conn: sqlite3.Connection, ts: str, symbol: str, ml_score: float | None) -> None:
     conn.execute(
         "INSERT INTO signals (ts, symbol, side, entry, stop, target, horizon_days, "
         "ml_score, created_by) VALUES (?, ?, 'LONG', 100.0, 95.0, 120.0, 25, ?, 'test')",

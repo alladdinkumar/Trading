@@ -217,8 +217,7 @@ def render_sip_plan(
     if weights:
         lines += ["| Sector | Value | Weight | Flag |", "|---|---|---|---|"]
         lines += [
-            f"| {sec} | ₹{val:,.0f} | {w:.0%} "
-            f"| {'⚠️ over 30%' if w > SECTOR_WARN_PCT else ''} |"
+            f"| {sec} | ₹{val:,.0f} | {w:.0%} | {'⚠️ over 30%' if w > SECTOR_WARN_PCT else ''} |"
             for sec, val, w in weights
         ]
     else:

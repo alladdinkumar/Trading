@@ -575,18 +575,30 @@ def test_cli_notify_test_dispatches(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_trading_sector_happy_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_trading_sector_happy_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`trading sector --date YYYY-MM-DD` writes rows + renders table."""
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     from trading.data.sector import SectorRow
 
     fake_rows = [
-        SectorRow(date="2026-05-26", sector="IT", close=36000.0,
-                  rs_5d=0.012, rs_20d=0.035, rs_60d=0.02, regime="LEADING"),
-        SectorRow(date="2026-05-26", sector="METAL", close=9000.0,
-                  rs_5d=-0.01, rs_20d=-0.03, rs_60d=-0.04, regime="LAGGING"),
+        SectorRow(
+            date="2026-05-26",
+            sector="IT",
+            close=36000.0,
+            rs_5d=0.012,
+            rs_20d=0.035,
+            rs_60d=0.02,
+            regime="LEADING",
+        ),
+        SectorRow(
+            date="2026-05-26",
+            sector="METAL",
+            close=9000.0,
+            rs_5d=-0.01,
+            rs_20d=-0.03,
+            rs_60d=-0.04,
+            regime="LAGGING",
+        ),
     ]
     monkeypatch.setattr("trading.cli.fetch_all_sectors", lambda _as_of: fake_rows)
 
@@ -619,8 +631,15 @@ def test_trading_sector_dry_run_does_not_write(
     monkeypatch.setattr(
         "trading.cli.fetch_all_sectors",
         lambda _as_of: [
-            SectorRow(date="2026-05-26", sector="IT", close=36000.0,
-                      rs_5d=0.01, rs_20d=0.02, rs_60d=0.0, regime="NEUTRAL"),
+            SectorRow(
+                date="2026-05-26",
+                sector="IT",
+                close=36000.0,
+                rs_5d=0.01,
+                rs_20d=0.02,
+                rs_60d=0.0,
+                regime="NEUTRAL",
+            ),
         ],
     )
 
@@ -670,9 +689,7 @@ def test_cli_weekly_train_happy(tmp_path, monkeypatch) -> None:
 
 def test_cli_sip_aborts_without_snapshot(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
-    monkeypatch.setattr(
-        "trading.jobs.monthly_sip.is_trading_day", lambda d: d.weekday() < 5
-    )
+    monkeypatch.setattr("trading.jobs.monthly_sip.is_trading_day", lambda d: d.weekday() < 5)
     result = runner.invoke(app, ["sip", "--date", "2026-07-01"])
     assert result.exit_code == 2
     assert "kite-snapshot" in result.output
@@ -685,9 +702,7 @@ def test_cli_sip_happy(tmp_path, monkeypatch) -> None:
     from trading.config import get_paths
 
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
-    monkeypatch.setattr(
-        "trading.jobs.monthly_sip.is_trading_day", lambda d: d.weekday() < 5
-    )
+    monkeypatch.setattr("trading.jobs.monthly_sip.is_trading_day", lambda d: d.weekday() < 5)
     monkeypatch.setattr("trading.jobs.monthly_sip.notify", lambda *a, **kw: None)
     paths = get_paths()
     seed_kite_snapshot(

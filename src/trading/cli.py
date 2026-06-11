@@ -681,9 +681,7 @@ def sector_cmd(
     rows = fetch_all_sectors(target_date)
 
     if not rows:
-        console.print(
-            "[red]No sector rows fetched (benchmark or all sectors failed).[/red]"
-        )
+        console.print("[red]No sector rows fetched (benchmark or all sectors failed).[/red]")
         raise typer.Exit(code=1)
 
     table = Table(show_header=True, header_style="bold")
@@ -1588,9 +1586,7 @@ def weekly_train_cmd(
 @app.command("sip")
 def sip_cmd(
     date_str: Annotated[str, typer.Option("--date", help="Plan date (YYYY-MM-DD).")],
-    budget: Annotated[
-        float, typer.Option("--budget", help="Monthly SIP budget in ₹.")
-    ] = 100_000.0,
+    budget: Annotated[float, typer.Option("--budget", help="Monthly SIP budget in ₹.")] = 100_000.0,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Print only — no file write, no Slack.")
     ] = False,
@@ -1603,9 +1599,7 @@ def sip_cmd(
 
     configure_logging("monthly_sip")
     try:
-        result = run_monthly_sip(
-            _date.fromisoformat(date_str), budget=budget, dry_run=dry_run
-        )
+        result = run_monthly_sip(_date.fromisoformat(date_str), budget=budget, dry_run=dry_run)
     except MonthlySipAborted as e:
         console.print(f"[red]sip aborted:[/red] {e}")
         console.print("Run /kite-snapshot in Claude Code first, then retry.")
