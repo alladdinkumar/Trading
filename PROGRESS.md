@@ -42,8 +42,8 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[x]` |
 | 18 | Live paper-trading (ongoing) | `[~]` |
 
-**Currently working on:** _Phase 18 — live paper-trade run started 2026-06-11 (day 1: pre-open + IEP + brief done; 3 candidates, 0 all-pass, 0 trades opened — RISK_OFF day)_
-**Next up:** _Daily run cadence per docs/daily-workflow.md; weekly_train + monthly_sip tooling (deferred from Phase 17) needed for 18.3/18.4_
+**Currently working on:** _Phase 18 — live run day 1 done; weekly_train + monthly_sip support tooling shipped (spec + plan 2026-06-11)_
+**Next up:** _Import the 2 new Task Scheduler XMLs; weekly cadence per 18.2-18.4_
 
 ---
 
@@ -602,11 +602,17 @@ Granular task tracker for the trading system build. Update as work completes.
        no signals/paper-trades opened. Daily cadence per
        [docs/daily-workflow.md](docs/daily-workflow.md).
 - [ ] 18.2 Weekly performance review: hit rate, profit factor, calibration plot
-- [ ] 18.3 Quarterly LightGBM retrain (auto via `weekly_train.py` on Sundays)
-       — `[!]` blocked on weekly_train tooling deferred in Phase 17.2;
-       needs its own brainstorm → spec → plan mini-phase.
-- [ ] 18.4 Monthly SIP allocator dry-run vs actual investment decisions
-       — monthly_sip reminder slot also deferred in Phase 17.2.
+       — **tooling shipped 2026-06-11**: the Sunday `trading weekly-train`
+       run writes `data/research/weekly/<date>_review.md` + Slack summary.
+- [ ] 18.3 Weekly LightGBM retrain — **tooling shipped** (`trading
+       weekly-train`, Sunday Task Scheduler XML, registry guard +
+       soft-promotion gate; spec 2026-06-11 — weekly cadence supersedes
+       the earlier "quarterly" wording, the 0.05-Sharpe deadband makes
+       promotion quarterly-ish in practice). Ongoing: import
+       `docs/scheduler/trading_weekly_train.xml`, observe Sunday runs.
+- [ ] 18.4 Monthly SIP allocator dry-run — **tooling shipped** (`trading
+       sip`, monthly_sip reminder slot with gate_holidays=False; spec
+       2026-06-11). Ongoing: run on the 1st, compare vs actual decisions.
 - [ ] 18.5 Decision gate: 3+ months of out-of-sample Sharpe > 1.0 → consider Phase 19 (real-money mode, separate spec)
 
 ---
