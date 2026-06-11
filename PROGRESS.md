@@ -40,10 +40,10 @@ Granular task tracker for the trading system build. Update as work completes.
 | 15 | Streamlit dashboard | `[x]` |
 | 16 | LightGBM ranker (Layer B) | `[x]` |
 | 17 | Task Scheduler + logging | `[x]` |
-| 18 | Live paper-trading (ongoing) | `[ ]` |
+| 18 | Live paper-trading (ongoing) | `[~]` |
 
-**Currently working on:** _Phase 12.6 complete (sector daily + RS, smoke 2026-06-11 ✓ — 11 sectors fetched, wired into pre_open/pre_open_iep/assemble_context)_
-**Next up:** _Phase 18 — Live paper-trading (3-6 month run)_
+**Currently working on:** _Phase 18 — live paper-trade run started 2026-06-11 (day 1: pre-open + IEP + brief done; 3 candidates, 0 all-pass, 0 trades opened — RISK_OFF day)_
+**Next up:** _Daily run cadence per docs/daily-workflow.md; weekly_train + monthly_sip tooling (deferred from Phase 17) needed for 18.3/18.4_
 
 ---
 
@@ -594,10 +594,19 @@ Granular task tracker for the trading system build. Update as work completes.
 
 ## Phase 18 — Live paper-trading + iteration (ongoing)
 
-- [ ] 18.1 3-6 month live paper-trade run
+- [~] 18.1 3-6 month live paper-trade run — **started 2026-06-11.**
+       Day 1: full morning pipeline ran clean (kite-snapshot 08:41 →
+       pre-open → /analyst → brief compile 09:01 → IEP 09:00). Regime
+       RISK_OFF (FII −₹2,125 cr); 3 candidates briefed (COALINDIA HIGH
+       8/10, MAZDOCK MEDIUM 8/10, JIOFIN LOW 9/10) — none all-pass, so
+       no signals/paper-trades opened. Daily cadence per
+       [docs/daily-workflow.md](docs/daily-workflow.md).
 - [ ] 18.2 Weekly performance review: hit rate, profit factor, calibration plot
 - [ ] 18.3 Quarterly LightGBM retrain (auto via `weekly_train.py` on Sundays)
+       — `[!]` blocked on weekly_train tooling deferred in Phase 17.2;
+       needs its own brainstorm → spec → plan mini-phase.
 - [ ] 18.4 Monthly SIP allocator dry-run vs actual investment decisions
+       — monthly_sip reminder slot also deferred in Phase 17.2.
 - [ ] 18.5 Decision gate: 3+ months of out-of-sample Sharpe > 1.0 → consider Phase 19 (real-money mode, separate spec)
 
 ---
