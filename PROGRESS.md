@@ -30,7 +30,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 11 | Paper-trade ledger | `[x]` |
 | 12 | LLM analyst | `[x]` |
 | 12.5 | Data quality cleanup | `[x]` |
-| 12.6 | Sector data | `[ ]` |
+| 12.6 | Sector data | `[x]` |
 | 13 | pre_open job (MVP ⭐) | `[x]` |
 | 13.5 | Kite MCP pivot | `[x]` |
 | 14 | mid_day + post_close jobs | `[x]` |
@@ -42,7 +42,7 @@ Granular task tracker for the trading system build. Update as work completes.
 | 17 | Task Scheduler + logging | `[x]` |
 | 18 | Live paper-trading (ongoing) | `[ ]` |
 
-**Currently working on:** _Phase 16 complete (manual smoke 2026-05-26 ✓ — model trained, registered, cold-start path verified)_
+**Currently working on:** _Phase 12.6 complete (sector daily + RS, smoke 2026-06-11 ✓ — 11 sectors fetched, wired into pre_open/pre_open_iep/assemble_context)_
 **Next up:** _Phase 18 — Live paper-trading (3-6 month run)_
 
 ---
@@ -225,14 +225,55 @@ Granular task tracker for the trading system build. Update as work completes.
        Suite **449 passed**, 1 skipped (live), ruff + mypy clean.
        Commit `feat(data): Phase 12.5 quality fixes` pushed to origin/main.
 
-## Phase 12.6 — Sector data (deferred)
+## Phase 12.6 — Sector data
 
-- [ ] 12.6.1 Spec the `data/sector.py` module (NSE sectoral indices via
-       nsepython/yfinance, 5d/20d/60d relative strength vs Nifty 200).
-- [ ] 12.6.2 Implement + persist into `sector_daily` table.
-- [ ] 12.6.3 Wire into `assemble_context` (replace placeholder).
-- [ ] 12.6.4 CLI: `trading sector --date YYYY-MM-DD`.
-- [ ] 12.6.5 Tests + smoke + commit.
+> Spec at [`docs/superpowers/specs/2026-05-26-phase-12-6-sector-data-design.md`](docs/superpowers/specs/2026-05-26-phase-12-6-sector-data-design.md).
+> Plan at [`docs/superpowers/plans/2026-05-26-phase-12-6-sector-data.md`](docs/superpowers/plans/2026-05-26-phase-12-6-sector-data.md).
+> 11 NSE sectoral indices via yfinance, RS vs Nifty 50, wired into pre_open + pre_open_iep + assemble_context.
+
+- [x] 12.6.1 `src/trading/data/sector.py`: 11-sector ticker dict +
+       `^NSEI` benchmark + simple-difference `compute_rs` + 5d/20d/60d
+       windows + LEADING/NEUTRAL/LAGGING regime thresholds on rs_20d
+       (±2%). Defensive yfinance wrapper (`fetch_sector_history`) +
+       `fetch_all_sectors(as_of)` orchestrator that skips failed
+       tickers + `load_sector_map(paths)` CSV reader. 12 tests in
+       `test_data_sector.py`.
+- [x] 12.6.2 `src/trading/store/sector_store.py`: `upsert_sector_daily`
+       (INSERT ON CONFLICT(date,sector) DO UPDATE, executemany) +
+       `get_sector_daily(conn, as_of)` reader. 3 tests in
+       `test_store_sector.py`.
+- [x] 12.6.3 `data/static/sector_map.csv`: symbol→sector map for 57
+       universe symbols (Nifty 50 + holdings). Comment lines tolerated;
+       symbols not listed treated as no-sector by pre_open_iep.
+- [x] 12.6.4 `src/trading/jobs/pre_open.py`: `_step_sector` inserted
+       between `_step_macro` and `_step_news`; graceful degradation
+       (warning, returns False) on fetch failure. `PreOpenResult.sector_written`
+       added; CLI table renders it. 3 tests in `test_jobs_pre_open.py`.
+- [x] 12.6.5 `src/trading/jobs/pre_open_iep.py`: when `sector_map=None
+       and sector_momentum=None`, auto-load via `load_sector_map` +
+       `get_sector_daily(as_of)` with D-1 fallback. Passing `{}`
+       explicitly suppresses auto-load. 4 tests in
+       `test_jobs_pre_open_iep.py`.
+- [x] 12.6.6 `src/trading/llm/context.py`: `_render_sector_snapshot`
+       section between macro and candidates; per-candidate `sector: CODE
+       — 20d RS …` bullet rendered when symbol is in sector_map AND
+       sector_daily. 4 new tests + snapshot re-record.
+- [x] 12.6.7 `briefing.py` SECTOR_COMMENTARY_PLACEHOLDER reworded to
+       "analyst did not write a sector commentary for this run".
+       `.claude/skills/analyst/SKILL.md` updated: section is optional;
+       write when bundle's `## Sector momentum` is non-empty.
+- [x] 12.6.8 `trading sector --date YYYY-MM-DD [--dry-run]` CLI: live
+       fetch + Rich table + upsert. Exit 1 if zero rows fetched.
+       `trading pre-open` table extended with `sector_written` row.
+       3 tests in `test_cli.py`.
+- [x] 12.6.9 Real-data smoke (2026-06-11): `trading sector` pulled
+       11 sectors (FINSERV RS gracefully None); `trading pre-open`
+       showed `sector_written: yes` and a populated `## Sector momentum`
+       section + per-candidate sector bullets; `trading pre-open-iep`
+       ran RISK_OFF filter with sector axis active (no "Sector data
+       unavailable" warning). Full suite green, ruff + mypy clean.
+       Commit `feat(data): sector daily + RS (Phase 12.6)` pushed to
+       origin/main.
 
 ## Phase 13 — pre_open job (E2E) ⭐ MVP milestone
 

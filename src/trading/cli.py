@@ -78,9 +78,9 @@ from trading.store.db import get_conn
 from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import get_sentiment_daily, insert_news_items
-from trading.store.sector_store import upsert_sector_daily
 from trading.store.ohlcv import list_symbols, parquet_path, read_ohlcv, write_ohlcv
 from trading.store.repo import Signal, get_signal
+from trading.store.sector_store import upsert_sector_daily
 from trading.strategy.rules import ScanContext, passing, scan
 
 app = typer.Typer(help="Trading — research and paper-trading CLI.", add_completion=False)

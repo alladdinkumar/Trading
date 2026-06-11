@@ -168,7 +168,7 @@ def fetch_sector_history(ticker: str, *, lookback_days: int = 90) -> pd.DataFram
         raw.columns = raw.columns.get_level_values(0)
     if "Close" not in raw.columns or len(raw) == 0:
         return None
-    df = raw[["Close"]].rename(columns={"Close": "close"}).dropna()
+    df: pd.DataFrame = raw[["Close"]].rename(columns={"Close": "close"}).dropna()
     if df.empty:
         return None
     return df

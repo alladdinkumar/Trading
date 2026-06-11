@@ -41,9 +41,9 @@ from trading.store.db import get_conn
 from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import insert_news_items
-from trading.store.sector_store import upsert_sector_daily
 from trading.store.ohlcv import read_ohlcv
 from trading.store.repo import Signal, insert_signal
+from trading.store.sector_store import upsert_sector_daily
 from trading.strategy.ranker import ScoredCandidate, score_and_filter
 from trading.strategy.rules import Candidate, ScanContext, passing, scan
 from trading.strategy.sizing import SizingInput, position_size
