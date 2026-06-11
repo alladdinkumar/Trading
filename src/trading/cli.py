@@ -1438,14 +1438,13 @@ def train_ranker(
     """Train the Phase 16 LightGBM ranker over a walk-forward window."""
     from datetime import datetime
 
-    from trading.features.technicals import add_indicators
     from trading.store.model_registry import (
         RegistryRow,
         register,
         save_model,
     )
-    from trading.store.news_store import SentimentDailyRow
     from trading.strategy.ranker_features import FEATURE_NAMES
+    from trading.strategy.ranker_io import load_training_inputs
     from trading.strategy.ranker_train import (
         InsufficientDataError,
         train_walkforward,
@@ -1460,53 +1459,19 @@ def train_ranker(
         console.print("[red]no parquet symbols found — run ingest-history first[/red]")
         raise typer.Exit(code=2)
 
-    enriched: dict[str, pd.DataFrame] = {}
-    for s in syms:
-        try:
-            df = read_ohlcv(s, paths)
-        except FileNotFoundError:
-            continue
-        if len(df) < 200:
-            continue
-        enriched[s] = add_indicators(df)
-    if not enriched:
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        inputs = load_training_inputs(paths, conn)
+
+    if not inputs.enriched:
         console.print("[red]no symbols with sufficient history (200+ bars)[/red]")
         raise typer.Exit(code=2)
 
-    # Pull macro_history + sentiment_lookup from DB.
-    with get_conn(paths.db_path) as conn:
-        run_migrations(conn)
-        macro_rows = conn.execute(
-            "SELECT date, vix, usdinr, fii_flow_cr FROM macro_snapshot ORDER BY date"
-        ).fetchall()
-        macro_history = pd.DataFrame(
-            {
-                "vix": [r["vix"] for r in macro_rows],
-                "usdinr": [r["usdinr"] for r in macro_rows],
-                "fii_flow_cr": [r["fii_flow_cr"] for r in macro_rows],
-            },
-            index=[r["date"] for r in macro_rows],
-        )
-        sentiment_lookup: dict[tuple[str, str], SentimentDailyRow] = {}
-        for s in enriched:
-            for r in conn.execute(
-                "SELECT * FROM sentiment_daily WHERE symbol = ?", (s,)
-            ).fetchall():
-                sentiment_lookup[(r["date"], s)] = SentimentDailyRow(
-                    date=r["date"],
-                    symbol=s,
-                    score_7d=r["score_7d"],
-                    score_30d=r["score_30d"],
-                    news_count=r["news_count"],
-                    negative_news_count=r["negative_news_count"],
-                    has_critical=bool(r["has_critical"]),
-                )
-
     try:
         result = train_walkforward(
-            enriched=enriched,
-            macro_history=macro_history,
-            sentiment_lookup=sentiment_lookup,
+            enriched=inputs.enriched,
+            macro_history=inputs.macro_history,
+            sentiment_lookup=inputs.sentiment_lookup,
             negative_news_lookup={},
             start=start_ts,
             end=end_ts,
