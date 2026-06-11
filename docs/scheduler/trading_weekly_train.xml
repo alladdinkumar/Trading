@@ -32,7 +32,7 @@
   <Actions Context="Author">
     <Exec>
       <Command>cmd.exe</Command>
-      <Arguments>/c cd /d "D:\Projects\Trading" &amp;&amp; uv run trading weekly-train</Arguments>
+      <Arguments>/c cd /d "D:\Projects\Trading" &amp;&amp; set PYTHONUTF8=1 &amp;&amp; uv run trading weekly-train</Arguments>
     </Exec>
   </Actions>
 </Task>
