@@ -1,0 +1,29 @@
+# serializer version: 1
+# name: test_happy_path_writes_plan_and_notifies
+  '''
+  # SIP plan — 2026-07-01
+  
+  _Budget ₹100,000 · deployed ₹17,300 · cash reserve ₹82,700_
+  
+  ## Allocations
+  
+  | Action | Symbol | Amount | Rationale |
+  |---|---|---|---|
+  | NEW | CANDSYM | ₹17,300 | new CANDSYM: priority 0.70, qty ~138 |
+  | CASH | — | ₹82,700 | hold 83% as reserve — deploy cap 60%, or quality signal shortfall |
+  
+  ## Skipped
+  
+  _(none)_
+  
+  ## Post-plan sector weights
+  
+  | Sector | Value | Weight | Flag |
+  |---|---|---|---|
+  | AUTO | ₹17,300 | 65% | ⚠️ over 30% |
+  | METAL | ₹9,200 | 35% | ⚠️ over 30% |
+  
+  _Inputs: 1 holdings; candidate window 2026-06-18 → 2026-07-01 (10 trading days)._
+  
+  '''
+# ---
