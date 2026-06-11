@@ -12,6 +12,7 @@ from trading.jobs.pre_open_iep import (
     PreOpenIepResult,
     run_pre_open_iep,
 )
+from trading.jobs.weekly_train import WeeklyTrainResult, run_weekly_train
 
 __all__ = [
     "MidDayAborted",
@@ -21,8 +22,10 @@ __all__ = [
     "PreOpenIepAborted",
     "PreOpenIepResult",
     "PreOpenResult",
+    "WeeklyTrainResult",
     "run_mid_day",
     "run_post_close",
     "run_pre_open",
     "run_pre_open_iep",
+    "run_weekly_train",
 ]

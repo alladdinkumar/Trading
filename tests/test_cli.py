@@ -657,3 +657,12 @@ def test_trading_sector_exits_nonzero_when_no_rows_fetched(
     runner = CliRunner()
     result = runner.invoke(app, ["sector", "--date", "2026-05-26"])
     assert result.exit_code == 1
+
+
+def test_cli_weekly_train_happy(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr("trading.jobs.weekly_train.notify", lambda *a, **kw: None)
+    result = runner.invoke(app, ["weekly-train", "--date", "2026-06-14", "--skip-train"])
+    assert result.exit_code == 0
+    assert "weekly_train" in result.output
+    assert "skip_train requested" in result.output

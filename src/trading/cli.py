@@ -1549,5 +1549,41 @@ def train_ranker(
         console.print(f"report written to {out_path}")
 
 
+@app.command("weekly-train")
+def weekly_train_cmd(
+    date_str: Annotated[
+        str, typer.Option("--date", help="Review date YYYY-MM-DD (default: today IST).")
+    ] = "",
+    skip_train: Annotated[
+        bool, typer.Option("--skip-train", help="Skip retraining; write the review only.")
+    ] = False,
+) -> None:
+    """Sunday weekly_train job (Phase 18): rolling retrain + weekly review."""
+    from datetime import date as _date
+
+    from trading.jobs.weekly_train import run_weekly_train
+    from trading.ops.logging_setup import configure_logging
+
+    configure_logging("weekly_train")
+    result = run_weekly_train(
+        _date.fromisoformat(date_str) if date_str else None,
+        skip_train=skip_train,
+    )
+
+    table = Table(title=f"weekly_train — {result.as_of.isoformat()}")
+    table.add_column("field")
+    table.add_column("value")
+    table.add_row("window", f"{result.window_start} → {result.window_end}")
+    table.add_row(
+        "retrain_ran",
+        "yes" if result.retrain_ran else f"no — {result.retrain_skip_reason}",
+    )
+    table.add_row("examples", str(result.examples) if result.examples is not None else "—")
+    table.add_row("promoted", "yes" if result.promoted else "no")
+    table.add_row("model", result.model_path or "—")
+    table.add_row("review", str(result.review_path))
+    console.print(table)
+
+
 if __name__ == "__main__":  # pragma: no cover — manual entry
     app()
