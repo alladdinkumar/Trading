@@ -36,6 +36,7 @@ class ReminderSlot:
     when: str  # "HH:MM" IST
     title: str
     body: str = ""
+    gate_holidays: bool = True
 
 
 SCHEDULE: Final[dict[str, ReminderSlot]] = {
@@ -54,6 +55,12 @@ SCHEDULE: Final[dict[str, ReminderSlot]] = {
     "iep_quotes": ReminderSlot("08:55", "\U0001f514 IEP step 1/2", "Run `/kite-quotes-snapshot`"),
     "iep_filter": ReminderSlot(
         "09:00", "\U0001f514 IEP step 2/2", "Then `trading pre-open-iep --date <date>`"
+    ),
+    "monthly_sip": ReminderSlot(
+        "09:30",
+        "\U0001f4b0 Monthly SIP",
+        "Run /kite-snapshot, then `trading sip --date <date>`",
+        gate_holidays=False,
     ),
     "mid_day_prepare": ReminderSlot(
         "12:25", "\U0001f514 Mid-day step 1/3", "Run `trading mid-day <date>`"
@@ -89,7 +96,7 @@ def fire_reminder(slot: str, today: date | None = None) -> None:
     """
     spec = SCHEDULE[slot]
     today = today or _today_ist()
-    if not is_trading_day(today):
+    if spec.gate_holidays and not is_trading_day(today):
         logger.info(f"reminder {slot} skipped: {today} is not a trading day")
         return
     body = spec.body.replace("<date>", today.isoformat())

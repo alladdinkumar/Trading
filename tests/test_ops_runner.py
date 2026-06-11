@@ -7,10 +7,10 @@ from datetime import date
 import pytest
 
 
-def test_schedule_has_12_slots():
+def test_schedule_has_13_slots():
     from trading.ops.runner import SCHEDULE
 
-    assert len(SCHEDULE) == 12
+    assert len(SCHEDULE) == 13
 
 
 def test_schedule_slot_names():
@@ -23,6 +23,7 @@ def test_schedule_slot_names():
         "pre_open_compile",
         "iep_quotes",
         "iep_filter",
+        "monthly_sip",
         "mid_day_prepare",
         "mid_day_quotes",
         "mid_day_apply",
@@ -106,3 +107,26 @@ def test_fire_reminder_uses_today_when_no_arg(monkeypatch):
 
     runner.fire_reminder("pre_open_scan")
     assert "2026-05-25" in captured["body"]
+
+
+def test_monthly_sip_slot_bypasses_holiday_gate(monkeypatch):
+    from trading.ops import runner
+
+    calls = []
+    monkeypatch.setattr(runner, "is_trading_day", lambda d: False)
+    monkeypatch.setattr(
+        runner,
+        "notify",
+        lambda level, title, body="": calls.append((level, title, body)),
+    )
+    runner.fire_reminder("monthly_sip", today=date(2026, 8, 1))  # a Saturday
+    assert len(calls) == 1
+    assert "2026-08-01" in calls[0][2]
+
+
+def test_gate_holidays_defaults_true():
+    from trading.ops.runner import SCHEDULE
+
+    gated = [name for name, slot in SCHEDULE.items() if slot.gate_holidays]
+    assert "monthly_sip" not in gated
+    assert len(gated) == 12  # every pre-existing slot stays gated
