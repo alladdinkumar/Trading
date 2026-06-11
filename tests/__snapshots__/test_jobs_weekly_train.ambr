@@ -1,0 +1,42 @@
+# serializer version: 1
+# name: test_render_review_seeded_snapshot
+  '''
+  # Weekly review — 2026-06-14
+  
+  _Window: 2026-06-07 → 2026-06-14_
+  
+  ## Week's closed trades
+  
+  | Symbol | Entry | Exit | P&L | P&L % | Reason | Days |
+  |---|---|---|---|---|---|---|
+  | RVNL | 100.00 | 106.00 | ₹60 | +6.0% | TARGET | 4 |
+  
+  ## Stats — week vs cumulative
+  
+  | Scope | Trades | Hit rate | Profit factor | Expectancy | Avg R |
+  |---|---|---|---|---|---|
+  | Week | 1 | 100% | ∞ | ₹60 | 1.20 |
+  | All time | 1 | 100% | ∞ | ₹60 | 1.20 |
+  
+  ## Open positions
+  
+  | Symbol | Entered | Entry | Qty | Current stop |
+  |---|---|---|---|---|
+  | NTPC | 2026-06-10 | 300.00 | 5 | 292.0 |
+  
+  ## Prediction calibration
+  
+  | Predicted % | N | Mean actual % | Realized hit rate |
+  |---|---|---|---|
+  | +20.0 | 1 | +6.00 | 100% |
+  
+  _Scatter plot: dashboard → Paper Journal → calibration._
+  
+  ## Retrain outcome
+  
+  - Trained: yes — 42 examples, OOS Sharpe n/a
+  - Promoted: no (deadband held)
+  - Model: `models/ranker_2026-06-14.pkl`
+  
+  '''
+# ---
