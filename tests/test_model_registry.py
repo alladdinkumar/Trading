@@ -147,3 +147,36 @@ def test_nan_oos_sharpe_blocks_promotion(tmp_path: Path) -> None:
     promoted = register(paths, row=_row("a", sharpe=math.nan), promote=True)
     assert promoted is False
     assert active(paths) is None
+
+
+def test_has_row_for_train_end(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    from trading.config import get_paths
+    from trading.store.model_registry import (
+        RegistryRow,
+        has_row_for_train_end,
+        register,
+    )
+
+    p = get_paths()
+    assert has_row_for_train_end(p, "2026-06-14") is False
+
+    register(
+        p,
+        row=RegistryRow(
+            version="2026-06-14",
+            trained_at="2026-06-14T05:00:00+00:00",
+            train_start="2023-06-14",
+            train_end="2026-06-14",
+            oos_sharpe=float("nan"),
+            oos_hit_rate=float("nan"),
+            n_train_examples=40,
+            n_features=20,
+            path="models/ranker_2026-06-14.pkl",
+            active=False,
+            notes="",
+        ),
+        promote=False,
+    )
+    assert has_row_for_train_end(p, "2026-06-14") is True
+    assert has_row_for_train_end(p, "2026-06-21") is False

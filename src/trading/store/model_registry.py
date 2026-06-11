@@ -114,6 +114,15 @@ def all_rows(paths: Paths) -> list[RegistryRow]:
         return [_csv_to_row(r) for r in reader]
 
 
+def has_row_for_train_end(paths: Paths, train_end: str) -> bool:
+    """True iff any registry row was trained on a window ending `train_end`.
+
+    Weekly idempotency guard: a Sunday re-run of weekly_train must not
+    append a duplicate training row for the same window.
+    """
+    return any(r.train_end == train_end for r in all_rows(paths))
+
+
 def _write_all_rows(paths: Paths, rows: list[RegistryRow]) -> None:
     paths.models_dir.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
