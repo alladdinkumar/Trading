@@ -153,12 +153,14 @@ runs `evaluate_exit` against the supplied bar, and either closes or ratchets.
 The bar source is the caller's choice — Kite quotes at mid-day, official close at
 post-close, parquet on replay. Missing bar → SKIP (surfaced, not mis-marked).
 
-> **🔴 `days_held` double-count (F-024):** line 104 does `days_held = (trade.days_held
-> or 0) + 1` — it bumps **per MTM call**. Both `mid-day --apply` and
-> `post-close --apply` call `mtm_open_trades` on the same calendar day, so a held
-> trade gains **2 days per calendar day**. The 25-day time stop therefore fires
-> after ~12 calendar days, and the trailing-day accounting is off. Latent today
-> (no open trades yet) but a real exit-timing bug once trades open. → F-024.
+> **✅ `days_held` no longer double-counts (F-024, fixed 2026-06-16):** MTM
+> used to do `days_held = (trade.days_held or 0) + 1` — a bump **per MTM call**,
+> so a held trade gained 2 days per calendar day (mid-day + post-close) and the
+> 25-day time stop fired at ~12 calendar days. Now `_days_held(ts_entry, as_of)`
+> returns `np.busday_count(entry_date, as_of.date())` — a pure function of
+> (entry, as_of), so the two same-day passes yield the same value. Business days
+> mirror the backtest's per-trading-day count (NSE holidays ignored to keep the
+> MTM hot path off the network holiday calendar).
 
 ### 4.3 Reconcile (`reconcile.py`)
 At post-close: (1) `evaluate_matured_predictions` fills
@@ -185,9 +187,9 @@ equity row (cash + open-position MTM, peak-relative drawdown).
   close) and equity = derived cash + open MTM, mirroring the backtest engine. The
   headline performance artifact is now a true track record. Costs/slippage still
   pending under F-025 (same debit/credit seam).
-- **`days_held` double-counts across mid-day + post-close (F-024).** Bump
-  days_held once per *calendar day* (or derive it from `ts_entry`), not per MTM
-  call.
+- **✅ `days_held` double-count fixed (F-024, 2026-06-16).** Derived from
+  `ts_entry`→`as_of` via `np.busday_count` instead of incremented per MTM call,
+  so the twice-daily passes no longer double-count.
 - **Backtest `total_costs` understates friction (F-021).** Add buy-side charges
   to the accumulator; consider also reporting slippage drag separately.
 - **Health is structurally TRIM-biased (F-022)** because fundamentals are never

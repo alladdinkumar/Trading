@@ -29,16 +29,25 @@ def conn() -> sqlite3.Connection:
     return c
 
 
-def _signal(symbol: str = "X", entry: float = 100.0, stop: float = 90.0, target: float = 120.0) -> Signal:
+def _signal(
+    symbol: str = "X", entry: float = 100.0, stop: float = 90.0, target: float = 120.0
+) -> Signal:
     return Signal(
-        id=None, ts="2026-05-15T09:15:00", symbol=symbol, side="LONG",
-        entry=entry, stop=stop, target=target, horizon_days=20,
+        id=None,
+        ts="2026-05-15T09:15:00",
+        symbol=symbol,
+        side="LONG",
+        entry=entry,
+        stop=stop,
+        target=target,
+        horizon_days=20,
         created_by="auto",
     )
 
 
-def _open(conn: sqlite3.Connection, *, symbol="X", entry=100.0, stop=90.0,
-          target=120.0, qty=10, atr=2.0) -> int:
+def _open(
+    conn: sqlite3.Connection, *, symbol="X", entry=100.0, stop=90.0, target=120.0, qty=10, atr=2.0
+) -> int:
     """Helper: create one open paper trade."""
     res = log_signal_and_open_trade(
         conn,
@@ -90,12 +99,13 @@ def test_mtm_target_hit_closes_trade(conn: sqlite3.Connection) -> None:
 
 
 def test_mtm_time_stop_closes_at_close(conn: sqlite3.Connection) -> None:
-    """days_held=25 + close ≤ entry → EXIT_TIME at the close."""
+    """days_held=25 + close ≤ entry → EXIT_TIME at the close.
+
+    days_held is now derived from (ts_entry, as_of): entry 2026-05-15 (Fri),
+    as_of 2026-06-19 (Fri) → busday_count = 25 weekdays."""
     trade_id = _open(conn, entry=100, stop=90, qty=10, atr=2.0)
-    # Bump days_held to 24 so this MTM call lands at exactly 25
-    conn.execute("UPDATE paper_trades SET days_held = 24 WHERE id = ?", (trade_id,))
     bars = {"X": Bar(open=99, high=102, low=98, close=99)}
-    results = mtm_open_trades(conn, bars, as_of=datetime(2026, 6, 10, 15, 30))
+    results = mtm_open_trades(conn, bars, as_of=datetime(2026, 6, 19, 15, 30))
 
     assert results[0].action == "EXIT_TIME"
     trade = get_paper_trade(conn, trade_id)
@@ -116,7 +126,7 @@ def test_mtm_hold_persists_ratcheted_stop_and_days(conn: sqlite3.Connection) -> 
     trade = get_paper_trade(conn, trade_id)
     assert trade is not None
     assert trade.current_stop == pytest.approx(100.0)
-    assert trade.days_held == 1
+    assert trade.days_held == 3  # busday_count(2026-05-15, 2026-05-20)
     assert trade.ts_exit is None  # still open
 
 
@@ -125,19 +135,43 @@ def test_mtm_trail_ratchets_across_runs(conn: sqlite3.Connection) -> None:
     trade_id = _open(conn, entry=100, stop=90, qty=10, atr=2.0)
     # Run 1: +10% → stop to entry (100)
     mtm_open_trades(
-        conn, {"X": Bar(98, 112, 97, 110)}, as_of=datetime(2026, 5, 20, 15, 30),
+        conn,
+        {"X": Bar(98, 112, 97, 110)},
+        as_of=datetime(2026, 5, 20, 15, 30),
     )
     trade_after_1 = get_paper_trade(conn, trade_id)
     assert trade_after_1 is not None
     assert trade_after_1.current_stop == pytest.approx(100.0)
     # Run 2: +15% → stop to close - ATR = 115 - 2 = 113
     mtm_open_trades(
-        conn, {"X": Bar(110, 118, 108, 115)}, as_of=datetime(2026, 5, 21, 15, 30),
+        conn,
+        {"X": Bar(110, 118, 108, 115)},
+        as_of=datetime(2026, 5, 21, 15, 30),
     )
     trade_after_2 = get_paper_trade(conn, trade_id)
     assert trade_after_2 is not None
     assert trade_after_2.current_stop == pytest.approx(113.0)
-    assert trade_after_2.days_held == 2
+    assert trade_after_2.days_held == 4  # busday_count(2026-05-15, 2026-05-21)
+
+
+def test_mtm_days_held_does_not_double_count_same_day(conn: sqlite3.Connection) -> None:
+    """F-024: days_held is derived from (ts_entry, as_of), so the twice-daily
+    mid-day + post-close passes on one calendar day don't double-count it.
+
+    Entry 2026-05-15 (Fri); both passes use as_of 2026-05-20 (Wed) →
+    busday_count = 3 (Fri 15, Mon 18, Tue 19). Two passes must both yield 3,
+    not 3 then 6."""
+    trade_id = _open(conn, entry=100, stop=90, qty=10, atr=2.0)
+    bar = {"X": Bar(open=101, high=103, low=99, close=101)}
+    mtm_open_trades(conn, bar, as_of=datetime(2026, 5, 20, 12, 30))  # mid-day
+    after_mid = get_paper_trade(conn, trade_id)
+    assert after_mid is not None
+    assert after_mid.days_held == 3
+
+    mtm_open_trades(conn, bar, as_of=datetime(2026, 5, 20, 15, 30))  # post-close
+    after_close = get_paper_trade(conn, trade_id)
+    assert after_close is not None
+    assert after_close.days_held == 3  # NOT 6 — same calendar day
 
 
 def test_mtm_skips_when_bar_missing(conn: sqlite3.Connection) -> None:
@@ -194,7 +228,9 @@ def test_build_bars_picks_row_at_or_before_as_of() -> None:
     target_date = datetime(2026, 4, 22, 15, 30)  # within range
     bars = build_bars_from_history({"X": df}, target_date)
     assert "X" in bars
-    assert bars["X"].close == pytest.approx(float(df.loc[df.index <= pd.Timestamp("2026-04-22")].iloc[-1]["close"]))
+    assert bars["X"].close == pytest.approx(
+        float(df.loc[df.index <= pd.Timestamp("2026-04-22")].iloc[-1]["close"])
+    )
 
 
 def test_build_bars_skips_symbols_with_no_history_before_target() -> None:
@@ -219,7 +255,11 @@ def test_build_bars_drops_nan_rows() -> None:
 def test_mtm_result_dataclass_field_defaults() -> None:
     """MtmResult.note defaults to None when not provided."""
     r = MtmResult(
-        paper_trade_id=1, symbol="X", action="HOLD",
-        new_stop=None, exit_price=None, reason="held",
+        paper_trade_id=1,
+        symbol="X",
+        action="HOLD",
+        new_stop=None,
+        exit_price=None,
+        reason="held",
     )
     assert r.note is None

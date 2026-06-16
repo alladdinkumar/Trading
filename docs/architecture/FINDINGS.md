@@ -38,16 +38,16 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 2 | F-002, F-005† |
-| Med | 15 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-022, F-024, F-025, F-026, F-032 |
+| Med | 14 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-022, F-025, F-026, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 6 | F-012, F-014, F-018, F-019, F-023, F-029 |
+| ✅ Fixed | 7 | F-012, F-014, F-018, F-019, F-023, F-024, F-029 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
 
 | Category | Count |
 |---|---:|
-| VULN (correctness/data-integrity) | 5 (F-019 ✅, F-023 ✅, F-029 ✅, F-022, F-024) |
+| VULN (correctness/data-integrity) | 5 (F-019 ✅, F-023 ✅, F-024 ✅, F-029 ✅, F-022) |
 | GAP (missing functionality/guardrail) | 11 |
 | INACC (code ≠ spec/docstring) | 7 |
 | DEBT (cleanup) | 8 |
@@ -71,7 +71,7 @@ The highest-leverage cluster; everything else is noise until these land.
 ### Wave 2 — Correctness & accounting hygiene
 | ID | Sev | Fix |
 |---|---|---|
-| F-024 | Med | Compute `days_held` from `ts_entry` (not per-MTM-call) |
+| ~~F-024~~ ✅ | Med | **Done (2026-06-16).** `mtm._days_held` derives `days_held = np.busday_count(ts_entry, as_of)` instead of `+1` per MTM call, so the twice-daily mid-day + post-close passes no longer double-count; mirrors the backtest's per-trading-day count (weekends excluded; holidays ignored to avoid a network call) |
 | F-025 | Med | Apply slippage + charges in paper MTM (with the F-023 ledger) |
 | F-022 | Med | Wire fundamentals + sentiment into health; implement vote-count threshold scaling |
 | F-015 | Med | Alias map for all 50 names |
@@ -97,7 +97,8 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > **Suggested first PR:** ~~F-014 + F-012 (Nifty-50 ingest).~~ ✅ **Shipped
 > 2026-06-16.** F-018 (OHLCV freshness guard), F-019 (ScanContext wiring),
 > F-023 (paper-cash ledger) and F-029 (real predictions) also shipped
-> 2026-06-16 — **Wave 1 complete.** Next up: Wave 2 (F-024, F-025, F-022, …).
+> 2026-06-16 — **Wave 1 complete.** Wave 2 started: F-024 (days_held) done
+> 2026-06-16. Next up: F-025 (paper costs), F-022, …
 
 ## How to use this file
 
@@ -155,7 +156,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-021 | INACC | Med | 5 | `BacktestResult.total_costs` omits buy-side charges (only sell-side accumulated); aggregate cost-drag understated (per-trade `costs_paid` is correct) | Open |
 | F-022 | VULN | Med | 5 | Health scorer structurally TRIM-biased: fundamentals AND sentiment never wired (pre_open/monthly_sip pass empty snapshots) → technicals-only + critical-news EXIT veto dead; docstring claims vote-count scaling not implemented (fixed ±3) | Open |
 | ~~F-023~~ | VULN | High | 5 | ~~Paper equity curve never compounds realised P&L — cash is a constant; closing a winner drops its gain from `portfolio_snapshots.equity`. Equity/drawdown are not a true track record~~ | ✅ Fixed 2026-06-16 — `compute_paper_cash` derives cash from the ledger; equity = derived cash + open MTM, so realised P&L compounds |
-| F-024 | VULN | Med | 5 | `days_held` bumped per MTM call, so mid-day + post-close double-count → 25-day time stop fires at ~12 calendar days | Open |
+| ~~F-024~~ | VULN | Med | 5 | ~~`days_held` bumped per MTM call, so mid-day + post-close double-count → 25-day time stop fires at ~12 calendar days~~ | ✅ Fixed 2026-06-16 — `days_held = np.busday_count(ts_entry, as_of)`, derived not incremented, so same-day passes don't double-count |
 | F-025 | INACC | Med | 5 | Cost asymmetry: backtest applies full Zerodha costs but live paper MTM applies none (raw-price fills) → paper results flatter than backtest | Open |
 | F-026 | GAP | Med | 6 | Analyst narrative is unvalidated against the bundle — "evidence-first" is an LLM instruction, not a code check; wrong/invented numbers in brief.md pass through. Refuse-stale (12h) is also advisory-only | Open |
 | F-027 | DEBT | Low | 6 | Brittle 3-way coupling on the `### SYM — passes N/M rules` heading (context renderer / pre_open_iep rewrite / briefing regex), no spanning test | Open |
@@ -431,10 +432,18 @@ table stats are still fine).~~
 - **Still open (F-025):** buy/sell costs are not yet applied — they plug into the
   same debit/credit seam (`qty×entry + buy_costs` / `qty×exit − sell_costs`).
 
-### F-024 — `days_held` double-counts (`VULN`, Med, Phase 5)
-`mtm.mtm_open_trades` bumps `days_held` per call; mid-day + post-close = 2/day.
-- **Fix idea:** Derive `days_held` from `ts_entry` to `as_of` (calendar/trading
-  days), or only bump on the post-close pass.
+### F-024 — `days_held` double-counts (`VULN`, Med, Phase 5) — ✅ Fixed 2026-06-16
+`mtm.mtm_open_trades` bumped `days_held` per call; mid-day + post-close = 2/day,
+so the 25-day time stop fired at ~12 calendar days.
+- **Fixed:** new `mtm._days_held(ts_entry, as_of)` returns
+  `np.busday_count(entry_date, as_of.date())` — `days_held` is now a pure
+  function of (entry, as_of), so the two same-day MTM passes yield the same
+  value instead of accumulating. Business days (weekends excluded) mirror the
+  backtest engine's per-trading-day count (entry day = 0, +1 per subsequent
+  trading day); NSE holidays are deliberately ignored to keep the MTM hot path
+  off the network holiday calendar (`is_trading_day` costs a ~10s nsepython
+  fetch). Tests: same-day double-count regression + updated time-stop fixture
+  (entry 2026-04-13 → 25 business days at 2026-05-16).
 
 ### F-025 — Backtest/paper cost asymmetry (`INACC`, Med, Phase 5)
 Backtest applies full Zerodha costs + slippage; live paper MTM applies none.
@@ -508,5 +517,5 @@ trades unmanaged that day), and a gap in `portfolio_snapshots` — undermining t
 
 ---
 
-_Counts: 25 open · 1 superseded · 6 fixed (F-012, F-014, F-018, F-019, F-023,
-F-029). Updated 2026-06-16 (Wave 1 complete)._
+_Counts: 24 open · 1 superseded · 7 fixed (F-012, F-014, F-018, F-019, F-023,
+F-024, F-029). Updated 2026-06-16 (Wave 1 complete; Wave 2: F-024 done)._

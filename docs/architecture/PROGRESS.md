@@ -36,7 +36,7 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | 8 | `08-ops-cli-ui.md` | `[x]` |
 
 **Currently working on:** _Fix pass — Wave 1. Shipped 2026-06-16: **F-014 + F-012** (Nifty-50 ingest; `candidates_total` 12→50), **F-018** (OHLCV freshness — `refresh_ohlcv` + scan staleness guard + Kite close cross-check + `trading refresh-ohlcv` CLI + `Candidate.bar_date`), **F-019** (`build_scan_context` wires the regime/VIX gate + critical-news veto from live macro/sentiment data; 8 of 10 Layer-A rules now filter), **F-023** (paper-cash ledger — `compute_paper_cash` derives cash from the trade history; equity now compounds realised P&L; CLI `--cash`→`--capital`), and **F-029** (predictions — `signal.target` now uses the exit engine's `min(+20%, 2.5R)` via the new public `target_price`; `predicted_return_pct` derives from that target, so calibration buckets vary per signal)._
-**Next up:** _Wave 1 complete (F-014/F-012, F-018, F-019, F-023, F-029 all shipped 2026-06-16). Wave 2 — F-024 (days_held from ts_entry), then F-025 (paper costs, plugs into the F-023 cash seam)._
+**Next up:** _Wave 1 complete (F-014/F-012, F-018, F-019, F-023, F-029). Wave 2 started: **F-024** done 2026-06-16 (`days_held = np.busday_count(ts_entry, as_of)`, no longer per-call → no double-count). Next: F-025 (paper costs, plugs into the F-023 cash seam), then F-022._
 
 ---
 

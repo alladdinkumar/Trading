@@ -64,9 +64,10 @@ flowchart LR
 > human-run, any day the operator is unavailable leaves a hole — no Kite snapshot,
 > no bundle, **no MTM and no exit management for open trades**, no portfolio
 > snapshot. For a 3–6 month live paper-run whose output must be a continuous track
-> record, missed days both break continuity and leave positions unmanaged
-> (compounding F-024's timing issues). → F-032. Ties to F-003 (no half-run
-> detection).
+> record, missed days both break continuity and leave positions unmanaged.
+> → F-032. Ties to F-003 (no half-run detection). (`days_held` is now
+> calendar-derived, so a missed day no longer corrupts the exit-timing count —
+> F-024 ✅.)
 
 ## 3. `cli.py` — the operator surface
 

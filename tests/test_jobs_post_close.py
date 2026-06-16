@@ -63,18 +63,22 @@ _QUOTE_ROW_RVNL_TIME = {
 }
 
 
-def _seed_open_trade_at_day_24(conn: sqlite3.Connection) -> None:
-    """Trade with days_held=24 so the +1 in mtm_open_trades pushes it to 25 (TIME exit)."""
+def _seed_open_trade_at_time_stop(conn: sqlite3.Connection) -> None:
+    """Trade entered so that at as_of 2026-05-16 it has been held 25 business days.
+
+    days_held is derived from (ts_entry, as_of) (F-024), so entry 2026-04-13 (Mon)
+    → busday_count(2026-04-13, 2026-05-16) = 25 → the time stop fires.
+    """
     cur = conn.execute(
         "INSERT INTO signals (ts, symbol, side, entry, stop, target, "
         "horizon_days) VALUES (?, ?, 'LONG', ?, ?, ?, 25)",
-        ("2026-04-21T08:30:00", "RVNL", 305.0, 289.0, 366.0),
+        ("2026-04-13T08:30:00", "RVNL", 305.0, 289.0, 366.0),
     )
     sig_id = cur.lastrowid
     conn.execute(
         "INSERT INTO paper_trades (signal_id, ts_entry, entry_price, qty, "
         "current_stop, atr_at_entry, days_held) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (sig_id, "2026-04-21T08:30:00", 305.0, 32, 289.0, 8.4, 24),
+        (sig_id, "2026-04-13T08:30:00", 305.0, 32, 289.0, 8.4, 0),
     )
     conn.commit()
 
@@ -91,7 +95,7 @@ def test_run_post_close_prepare_writes_symbol_file(paths) -> None:
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(paths.db_path) as file_conn:
         run_migrations(file_conn)
-        _seed_open_trade_at_day_24(file_conn)
+        _seed_open_trade_at_time_stop(file_conn)
     seed_kite_snapshot(paths, date(2026, 5, 16), holdings=[_HOLDING_ROW])
     result = run_post_close(date(2026, 5, 16), paths=paths, apply=False)
     assert isinstance(result, PostCloseResult)
@@ -108,14 +112,14 @@ def test_run_post_close_apply_closes_time_stop_and_writes_summary(paths) -> None
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(paths.db_path) as file_conn:
         run_migrations(file_conn)
-        _seed_open_trade_at_day_24(file_conn)
+        _seed_open_trade_at_time_stop(file_conn)
     _write_quotes(paths, date(2026, 5, 16), "1601", [_QUOTE_ROW_RVNL_TIME])
     result = run_post_close(date(2026, 5, 16), paths=paths, apply=True, initial_capital=100_000.0)
     assert isinstance(result, PostCloseResult)
     assert result.quotes_capture_ts == _dt(2026, 5, 16, 16, 1)
     assert result.bars_built == 1
     assert result.trades_evaluated == 1
-    assert result.trades_closed == 1  # day 24+1=25 → TIME exit
+    assert result.trades_closed == 1  # 25 business days held → TIME exit
     # paper_trade is now closed
     with get_conn(paths.db_path) as file_conn:
         closed = file_conn.execute(
@@ -149,7 +153,7 @@ def test_run_post_close_apply_aborts_when_quotes_missing(paths) -> None:
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(paths.db_path) as file_conn:
         run_migrations(file_conn)
-        _seed_open_trade_at_day_24(file_conn)
+        _seed_open_trade_at_time_stop(file_conn)
     with pytest.raises(PostCloseAborted) as exc:
         run_post_close(date(2026, 5, 16), paths=paths, apply=True)
     assert "/kite-quotes-snapshot" in str(exc.value)
@@ -160,7 +164,7 @@ def test_run_post_close_apply_idempotent_on_rerun(paths) -> None:
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(paths.db_path) as file_conn:
         run_migrations(file_conn)
-        _seed_open_trade_at_day_24(file_conn)
+        _seed_open_trade_at_time_stop(file_conn)
     _write_quotes(paths, date(2026, 5, 16), "1601", [_QUOTE_ROW_RVNL_TIME])
     r1 = run_post_close(date(2026, 5, 16), paths=paths, apply=True)
     assert r1.trades_closed == 1

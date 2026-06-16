@@ -144,9 +144,10 @@ yesterday-close), and runs `mtm_open_trades`.
   portfolio snapshot) and writes `post_close_summary.md`.
 
 > Two confirmed findings surface here:
-> - **F-024:** both jobs call `mtm_open_trades`, which bumps `days_held` per call
->   → a held trade gains 2 days per calendar day → the 25-day time stop fires at
->   ~12 days.
+> - **F-024 (✅ fixed 2026-06-16):** both jobs call `mtm_open_trades`, which
+>   ~~bumped `days_held` per call → 2 days per calendar day → 25-day time stop at
+>   ~12 days~~ now derives `days_held = np.busday_count(ts_entry, as_of)`, so the
+>   two same-day passes yield the same value and the time stop fires on schedule.
 > - **F-023 (✅ fixed 2026-06-16):** `run_post_close` now passes `initial_capital`
 >   (the t=0 seed) into `reconcile_day`, which derives live cash from the trade
 >   ledger via `compute_paper_cash` (debit on open, credit on close). So
@@ -193,7 +194,7 @@ the 1st even if a holiday.
 |---|---|---|
 | pre_open | Kite snapshot | UPSERTs + `_already_opened_today` (but F-030 dups visibility signals) |
 | pre_open_iep | `_context.md` present | rewrites in place (idempotent-ish) |
-| mid_day | fresh quotes | MTM persists; re-run re-evaluates (F-024 day bump) |
+| mid_day | fresh quotes | MTM persists; re-run re-evaluates (days_held derived, no double-count — F-024 ✅) |
 | post_close | fresh quotes | snapshot UPSERT by date; MTM persists |
 | weekly_train | none (review always written) | `has_row_for_train_end` guard |
 | monthly_sip | Kite snapshot | plan file overwrite by date |

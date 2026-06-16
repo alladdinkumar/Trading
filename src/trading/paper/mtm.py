@@ -21,6 +21,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
+import numpy as np
+
 from trading.paper.ledger import close_with_exit, open_trades
 from trading.store.repo import (
     ExitReason,
@@ -53,6 +55,22 @@ def _signal_symbol(conn: sqlite3.Connection, signal_id: int) -> tuple[str, Signa
     """Look up the symbol + Signal row for a given paper_trade.signal_id."""
     sig = get_signal(conn, signal_id)
     return (sig.symbol if sig else ""), sig
+
+
+def _days_held(ts_entry: str, as_of: datetime) -> int:
+    """Trading days a position has been held — business days from entry to `as_of`.
+
+    Derived from `(ts_entry, as_of)` rather than incremented once per MTM call,
+    so the twice-daily mid-day + post-close passes no longer double-count
+    `days_held` (which previously made the 25-day time stop fire at ~12 calendar
+    days — F-024). Uses numpy business days (weekends excluded): offline and
+    deterministic, and it matches the backtest engine's per-trading-day count
+    (entry day = 0, +1 per subsequent trading day) closely, ignoring only the
+    handful of NSE holidays — a deliberate trade-off to avoid a network call to
+    the holiday calendar in the MTM hot path.
+    """
+    entry_date = datetime.fromisoformat(ts_entry).date()
+    return max(0, int(np.busday_count(entry_date, as_of.date())))
 
 
 def mtm_open_trades(
@@ -101,7 +119,7 @@ def mtm_open_trades(
 
         current_stop = trade.current_stop if trade.current_stop is not None else sig.stop
         atr_at_entry = trade.atr_at_entry if trade.atr_at_entry is not None else 0.0
-        days_held = (trade.days_held or 0) + 1  # MTM bumps days_held per call
+        days_held = _days_held(trade.ts_entry, as_of)
 
         state = TradeState(
             entry=trade.entry_price,
