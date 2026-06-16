@@ -23,7 +23,7 @@ from trading.data.quotes_snapshot import (
 from trading.jobs.mid_day import _quotes_to_bars, gather_quote_symbols
 from trading.ops.logging_setup import configure_logging
 from trading.paper.mtm import MtmResult, mtm_open_trades
-from trading.paper.reconcile import ReconcileResult, reconcile_day
+from trading.paper.reconcile import INITIAL_CAPITAL, ReconcileResult, reconcile_day
 from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
 
@@ -54,10 +54,13 @@ def run_post_close(
     *,
     paths: Paths | None = None,
     apply: bool = False,
-    cash: float = 100_000.0,
+    initial_capital: float = INITIAL_CAPITAL,
 ) -> PostCloseResult:
     """Orchestrate post_close. apply=False → prepare mode. apply=True → MTM
-    + reconcile + write summary."""
+    + reconcile + write summary.
+
+    `initial_capital` only seeds the paper-cash ledger; the snapshot's cash
+    and equity are derived from the trade history (F-023)."""
     p = paths if paths is not None else get_paths()
     warnings: list[str] = []
 
@@ -99,7 +102,9 @@ def run_post_close(
         held = sum(1 for r in mtm_results if r.action == "HOLD")
         skipped = sum(1 for r in mtm_results if r.action == "SKIP")
 
-        reconcile_result = reconcile_day(conn, as_of=as_of, cash=cash, bars=bars)
+        reconcile_result = reconcile_day(
+            conn, as_of=as_of, bars=bars, initial_capital=initial_capital
+        )
 
         summary_dir = p.research_dir / as_of.isoformat()
         summary_dir.mkdir(parents=True, exist_ok=True)
@@ -195,14 +200,14 @@ def _render_post_close_summary(
 def _main(
     date_str: str,
     apply: bool = False,
-    cash: float = 100_000.0,
+    capital: float = INITIAL_CAPITAL,
 ) -> None:
-    """`python -m trading.jobs.post_close <YYYY-MM-DD> [--apply] [--cash N]` entry."""
+    """`python -m trading.jobs.post_close <YYYY-MM-DD> [--apply] [--capital N]` entry."""
     configure_logging("post_close")
     from loguru import logger
 
     try:
-        result = run_post_close(date.fromisoformat(date_str), apply=apply, cash=cash)
+        result = run_post_close(date.fromisoformat(date_str), apply=apply, initial_capital=capital)
     except PostCloseAborted as e:
         print(f"Post-close aborted: {e}")
         raise SystemExit(2) from e

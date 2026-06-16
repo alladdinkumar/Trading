@@ -105,11 +105,11 @@ snapshots/equity, signals/trades/predictions, Kite holdings/GTTs/quotes (reusing
 rules — stale quotes are *shown* with an amber tag rather than hidden), parquet
 OHLCV, and brief markdown.
 
-> **User-facing impact of F-023:** the Overview page's headline equity-curve and
-> drawdown KPIs read `portfolio_snapshots` directly — i.e. the curve that never
-> compounds realised P&L. The dashboard faithfully renders a misleading track
-> record. The Paper-Journal page's closed-trade stats (from the `pnl` column) are
-> correct, so the two views can disagree. Fixing F-023 fixes the dashboard too.
+> **User-facing impact of F-023 (✅ fixed 2026-06-16):** the Overview page's
+> headline equity-curve and drawdown KPIs read `portfolio_snapshots` directly.
+> Now that cash is derived from the trade ledger and compounds realised P&L
+> (`reconcile.compute_paper_cash`), that curve is a true track record, so the
+> Overview KPIs and the Paper-Journal closed-trade stats (`pnl` column) agree.
 
 ## 5. Where the layers leave the system today
 
@@ -128,8 +128,9 @@ OHLCV, and brief markdown.
   refresh) to *run* unattended like `weekly_train` — only the Kite-dependent steps
   truly need the interactive session. That would keep the macro/scan/track-record
   spine continuous even on missed days.
-- **The dashboard surfaces the broken equity curve (F-023)** as its headline
-  metric — high-visibility reason to prioritise that fix.
+- **✅ (Fixed 2026-06-16) The dashboard's headline equity curve (F-023)** now
+  reflects compounded realised P&L (`compute_paper_cash`), so the Overview KPI is
+  a sound track record.
 - **Local-clock assumptions** in `logging_setup` (`date.today()`) and the quote
   staleness check assume host == IST (F-004 family) — fine on the one machine,
   worth centralising.

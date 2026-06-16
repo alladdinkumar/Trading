@@ -146,9 +146,11 @@ yesterday-close), and runs `mtm_open_trades`.
 > - **F-024:** both jobs call `mtm_open_trades`, which bumps `days_held` per call
 >   → a held trade gains 2 days per calendar day → the 25-day time stop fires at
 >   ~12 days.
-> - **F-023:** `run_post_close` passes a **constant** `cash=100_000` into
->   `reconcile_day`; opens/closes never adjust it, so `portfolio_snapshots.equity`
->   is cash + open-MTM only — realised P&L never enters the equity curve.
+> - **F-023 (✅ fixed 2026-06-16):** `run_post_close` now passes `initial_capital`
+>   (the t=0 seed) into `reconcile_day`, which derives live cash from the trade
+>   ledger via `compute_paper_cash` (debit on open, credit on close). So
+>   `portfolio_snapshots.equity` = derived cash + open-MTM and realised P&L
+>   compounds into the equity curve.
 
 ## 6. `weekly_train` — Sunday retrain + review
 
@@ -161,8 +163,9 @@ pickle, appends a registry row, and applies the soft-promotion gate; then
 
 > Two knock-on effects of earlier findings:
 > - The review's **"Cumulative Sharpe (portfolio snapshots)"** is computed from
->   the equity curve broken by F-023 — and that Sharpe is *exactly the metric the
->   Phase 18.5 go/no-go gate uses*. The decision metric is currently unreliable.
+>   the equity curve — now that F-023 is fixed (cash compounds realised P&L), this
+>   Sharpe is trustworthy, which matters because it is *exactly the metric the
+>   Phase 18.5 go/no-go gate uses*.
 > - The **calibration** section groups by `predicted_return_pct`, which is always
 >   +20% (F-029) → a single, meaningless bucket.
 > - `_step_retrain` passes `negative_news_lookup={}` — the `negative_news_count_7d`
@@ -205,9 +208,10 @@ the 1st even if a holiday.
   apparatus (reconcile → weekly review → dashboard scatter) measures error against
   a fixed number. Derive the prediction from the signal's actual target or the
   ranker score.
-- **The Phase 18.5 decision metric is computed off a broken equity curve
-  (F-023).** Until paper cash compounds realised P&L, "OOS Sharpe > 1.0" can't be
-  trusted. Highest-priority fix for the live-run's stated purpose.
+- **✅ (Fixed 2026-06-16) The Phase 18.5 decision metric is now off a sound equity
+  curve (F-023).** Paper cash is derived from the trade ledger and compounds
+  realised P&L (`compute_paper_cash`), so "OOS Sharpe > 1.0" can be trusted. Costs
+  still pending under F-025 (same debit/credit seam).
 - **Health veto + sentiment unwired (F-022 extended).** Both `pre_open` and
   `monthly_sip` pass empty sentiment into health, disabling the critical-news EXIT
   veto on holdings.

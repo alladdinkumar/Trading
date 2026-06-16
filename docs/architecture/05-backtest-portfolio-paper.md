@@ -166,26 +166,25 @@ At post-close: (1) `evaluate_matured_predictions` fills
 whose paper-trade closed; (2) `compute_portfolio_snapshot` writes the daily
 equity row (cash + open-position MTM, peak-relative drawdown).
 
-> **🔴 Realised P&L isn't compounded (F-023):** paper trading "doesn't really
-> debit cash" — `cash` is a caller-supplied constant (the `post-close --cash`
-> option, default ₹100k). Opening a trade doesn't reduce cash; **closing a winner
-> doesn't add its gain back to cash.** So `portfolio_snapshots.equity` = constant
-> cash + *unrealised* MTM of currently-open positions only. After a trade closes,
-> its realised P&L vanishes from the equity curve. The Paper-Journal page's
-> closed-trade stats (hit rate, PF, expectancy) read the `pnl` column directly and
-> are fine — but the **equity curve and drawdown are not a true track record**.
-> For a system whose entire current purpose is measuring paper performance, this
-> is the most consequential accounting gap. → F-023.
+> **✅ Realised P&L now compounds (F-023, fixed 2026-06-16):** cash is no longer a
+> caller constant. `compute_paper_cash` derives the live balance from the trade
+> ledger — `initial_capital` minus Σ(`entry_price × qty`) over opened trades plus
+> Σ(`exit_price × qty`) over closed trades, date-filtered so an old `as_of`
+> reproduces that day's balance. `compute_portfolio_snapshot` calls it, so
+> `equity` = derived cash + open-position MTM and a closed winner's gain stays in
+> the curve. `reconcile_day`/`run_post_close` and the CLI now take
+> `initial_capital` (was the constant `cash`; `--cash` → `--capital`). Costs are
+> still excluded — that plugs into the same debit/credit seam under F-025.
 
 ---
 
 ## ⚠️ Robustness notes / open questions
 
-- **🔴 Equity curve doesn't reflect realised P&L (F-023).** The headline
-  performance artifact understates/loses closed-trade outcomes. Fix by threading a
-  real paper-cash ledger (debit on open, credit net P&L on close) through
-  reconcile — mirroring the backtest engine's cash handling, which *does* do this
-  correctly.
+- **✅ Equity curve reflects realised P&L (F-023, fixed 2026-06-16).** Cash is
+  derived from the trade ledger (`compute_paper_cash`: debit on open, credit on
+  close) and equity = derived cash + open MTM, mirroring the backtest engine. The
+  headline performance artifact is now a true track record. Costs/slippage still
+  pending under F-025 (same debit/credit seam).
 - **`days_held` double-counts across mid-day + post-close (F-024).** Bump
   days_held once per *calendar day* (or derive it from `ts_entry`), not per MTM
   call.

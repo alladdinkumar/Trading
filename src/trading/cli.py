@@ -67,7 +67,7 @@ from trading.ops.notify import notify as _notify
 from trading.ops.runner import SCHEDULE, fire_reminder
 from trading.paper.ledger import log_signal_and_open_trade, open_trades
 from trading.paper.mtm import build_bars_from_history, mtm_open_trades
-from trading.paper.reconcile import reconcile_day
+from trading.paper.reconcile import INITIAL_CAPITAL, reconcile_day
 from trading.portfolio.gtt import project_all_gtts
 from trading.portfolio.health import (
     HoldingContext,
@@ -1133,10 +1133,10 @@ def paper_reconcile_cmd(
         str | None,
         typer.Option("--date", help="Reconcile date (YYYY-MM-DD). Defaults to today."),
     ] = None,
-    cash: Annotated[
+    capital: Annotated[
         float,
-        typer.Option(help="Paper-cash balance to record on the snapshot."),
-    ] = 100_000.0,
+        typer.Option(help="Starting paper capital; live cash is derived from the trade ledger."),
+    ] = INITIAL_CAPITAL,
 ) -> None:
     """Evaluate matured predictions + write today's portfolio_snapshots row."""
     paths = get_paths()
@@ -1158,7 +1158,7 @@ def paper_reconcile_cmd(
             with contextlib.suppress(FileNotFoundError):
                 histories[sym] = read_ohlcv(sym, paths)
         bars = build_bars_from_history(histories, target_dt)
-        result = reconcile_day(conn, as_of=target_date, cash=cash, bars=bars)
+        result = reconcile_day(conn, as_of=target_date, bars=bars, initial_capital=capital)
 
     console.print(
         f"[green]Reconciled {target_date}[/green]: "
@@ -1323,15 +1323,15 @@ def post_close_cmd(
             help="Apply mode: read quotes + run MTM + reconcile. Without --apply runs prepare mode.",
         ),
     ] = False,
-    cash: Annotated[
+    capital: Annotated[
         float,
-        typer.Option(help="Paper-cash balance for portfolio snapshot."),
-    ] = 100_000.0,
+        typer.Option(help="Starting paper capital; live cash is derived from the trade ledger."),
+    ] = INITIAL_CAPITAL,
 ) -> None:
     """Phase 14.B — end-of-day MTM + reconcile + summary."""
     as_of = date.fromisoformat(date_str)
     try:
-        result = run_post_close(as_of, apply=apply, cash=cash)
+        result = run_post_close(as_of, apply=apply, initial_capital=capital)
     except PostCloseAborted as e:
         console.print(f"[red]Post-close aborted:[/red] {e}")
         raise typer.Exit(code=2) from e

@@ -110,7 +110,7 @@ def test_run_post_close_apply_closes_time_stop_and_writes_summary(paths) -> None
         run_migrations(file_conn)
         _seed_open_trade_at_day_24(file_conn)
     _write_quotes(paths, date(2026, 5, 16), "1601", [_QUOTE_ROW_RVNL_TIME])
-    result = run_post_close(date(2026, 5, 16), paths=paths, apply=True, cash=100_000.0)
+    result = run_post_close(date(2026, 5, 16), paths=paths, apply=True, initial_capital=100_000.0)
     assert isinstance(result, PostCloseResult)
     assert result.quotes_capture_ts == _dt(2026, 5, 16, 16, 1)
     assert result.bars_built == 1
@@ -129,7 +129,9 @@ def test_run_post_close_apply_closes_time_stop_and_writes_summary(paths) -> None
             ("2026-05-16",),
         ).fetchone()
     assert snap is not None
-    assert snap["cash"] == 100_000.0
+    # F-023: cash now reflects the closed trade — debit 305*32, credit 290*32
+    # → 100_000 - 9760 + 9280 = 99_520 (a -480 realised loss compounded in).
+    assert snap["cash"] == pytest.approx(99_520.0)
     assert result.equity == snap["equity"]
     # markdown written
     assert result.summary_path is not None
@@ -182,7 +184,7 @@ def test_run_post_close_apply_no_open_trades_still_writes_summary(paths) -> None
     with get_conn(paths.db_path) as file_conn:
         run_migrations(file_conn)
     _write_quotes(paths, date(2026, 5, 16), "1601", [_QUOTE_ROW_RVNL_TIME])
-    result = run_post_close(date(2026, 5, 16), paths=paths, apply=True, cash=100_000.0)
+    result = run_post_close(date(2026, 5, 16), paths=paths, apply=True, initial_capital=100_000.0)
     assert result.bars_built == 1
     assert result.trades_evaluated == 0
     assert result.trades_closed == 0

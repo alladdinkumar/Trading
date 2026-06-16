@@ -23,6 +23,11 @@ from datetime import date, datetime, timedelta
 from trading.paper.ledger import open_trades
 from trading.strategy.exits import Bar
 
+# Starting paper capital. The *live* cash balance is not this constant — it is
+# derived from the trade ledger (see `compute_paper_cash`); this is only the
+# t=0 seed before any trade is opened.
+INITIAL_CAPITAL = 100_000.0
+
 
 @dataclass(frozen=True)
 class PortfolioSnapshot:
@@ -96,7 +101,8 @@ def evaluate_matured_predictions(
         if trade_row and trade_row["exit_price"] is not None:
             actual_pct = (
                 (trade_row["exit_price"] - trade_row["entry_price"])
-                / trade_row["entry_price"] * 100.0
+                / trade_row["entry_price"]
+                * 100.0
                 if trade_row["entry_price"] > 0
                 else 0.0
             )
@@ -130,6 +136,48 @@ def evaluate_matured_predictions(
 
 
 # ---------------------------------------------------------------------------
+# Paper-cash ledger — cash derived from the trade history (F-023)
+# ---------------------------------------------------------------------------
+
+
+def compute_paper_cash(
+    conn: sqlite3.Connection,
+    *,
+    as_of: date,
+    initial_capital: float = INITIAL_CAPITAL,
+) -> float:
+    """Paper-cash balance derived from the trade ledger as of `as_of`.
+
+    Mirrors the backtest engine's cash handling: opening a trade debits
+    `entry_price × qty`, closing it credits `exit_price × qty`. Cash is a
+    pure function of `paper_trades`, so realised P&L compounds into the
+    equity curve instead of vanishing (the F-023 bug, where `cash` was a
+    caller-constant and closed-trade gains never reached the snapshot).
+
+    Trades are filtered by date so re-running an *old* `as_of` reproduces
+    the balance as it stood that day (future opens/closes are excluded).
+
+    Costs/slippage are intentionally not applied here yet — that is F-025,
+    which plugs the buy/sell charges into this same debit/credit seam.
+    """
+    as_of_iso = as_of.isoformat()
+    debit = conn.execute(
+        """SELECT COALESCE(SUM(entry_price * qty), 0.0) AS d
+           FROM paper_trades
+           WHERE date(ts_entry) <= ?""",
+        (as_of_iso,),
+    ).fetchone()["d"]
+    credit = conn.execute(
+        """SELECT COALESCE(SUM(exit_price * qty), 0.0) AS c
+           FROM paper_trades
+           WHERE ts_exit IS NOT NULL AND exit_price IS NOT NULL
+             AND date(ts_exit) <= ?""",
+        (as_of_iso,),
+    ).fetchone()["c"]
+    return initial_capital - float(debit) + float(credit)
+
+
+# ---------------------------------------------------------------------------
 # Portfolio snapshot — cash + open-position MTM value
 # ---------------------------------------------------------------------------
 
@@ -138,20 +186,22 @@ def compute_portfolio_snapshot(
     conn: sqlite3.Connection,
     *,
     as_of: date,
-    cash: float,
     bars: dict[str, Bar],
+    initial_capital: float = INITIAL_CAPITAL,
 ) -> PortfolioSnapshot:
     """Build today's `portfolio_snapshots` row.
 
-    `cash` is the paper-cash balance the caller tracks (paper trading
-    doesn't really debit cash since we never place real orders, but the
-    column is required by the schema). Equity = cash + sum(qty * close)
-    over open positions; symbols missing from `bars` use last_traded
-    entry_price as a fallback so equity is never NULL.
+    Cash is derived from the trade ledger via `compute_paper_cash`
+    (`initial_capital` minus net deployed capital, plus realised proceeds),
+    so closing a winner raises cash and the equity curve compounds (F-023).
+    Equity = cash + sum(qty * close) over open positions; symbols missing
+    from `bars` use last_traded entry_price as a fallback so equity is never
+    NULL.
 
     Drawdown computed by comparing today's equity to the peak in
     `portfolio_snapshots` so far. Returns None on the very first snapshot.
     """
+    cash = compute_paper_cash(conn, as_of=as_of, initial_capital=initial_capital)
     open_pts = open_trades(conn)
     by_symbol: dict[str, dict[str, float]] = {}
     for trade in open_pts:
@@ -161,9 +211,7 @@ def compute_portfolio_snapshot(
         if sym_row is None:
             continue
         symbol = sym_row["symbol"]
-        mark_price = (
-            bars[symbol].close if symbol in bars else trade.entry_price
-        )
+        mark_price = bars[symbol].close if symbol in bars else trade.entry_price
         value = mark_price * trade.qty
         h = by_symbol.setdefault(symbol, {"qty": 0.0, "value": 0.0})
         h["qty"] += trade.qty
@@ -171,9 +219,7 @@ def compute_portfolio_snapshot(
 
     equity = cash + sum(h["value"] for h in by_symbol.values())
 
-    prior_peak = conn.execute(
-        "SELECT MAX(equity) AS peak FROM portfolio_snapshots"
-    ).fetchone()
+    prior_peak = conn.execute("SELECT MAX(equity) AS peak FROM portfolio_snapshots").fetchone()
     peak = float(prior_peak["peak"]) if prior_peak and prior_peak["peak"] is not None else None
     if peak is None or equity > peak:
         drawdown_pct: float | None = 0.0 if peak is not None else None
@@ -222,11 +268,15 @@ def reconcile_day(
     conn: sqlite3.Connection,
     *,
     as_of: date,
-    cash: float,
     bars: dict[str, Bar],
+    initial_capital: float = INITIAL_CAPITAL,
 ) -> ReconcileResult:
-    """Run the matured-predictions update and write the portfolio snapshot."""
+    """Run the matured-predictions update and write the portfolio snapshot.
+
+    `initial_capital` seeds the paper-cash ledger; the snapshot's actual cash
+    and equity are derived from the trade history (F-023), not this constant.
+    """
     updates = evaluate_matured_predictions(conn, as_of=as_of, bars=bars)
-    snap = compute_portfolio_snapshot(conn, as_of=as_of, cash=cash, bars=bars)
+    snap = compute_portfolio_snapshot(conn, as_of=as_of, bars=bars, initial_capital=initial_capital)
     upsert_portfolio_snapshot(conn, snap)
     return ReconcileResult(snapshot=snap, prediction_updates=updates)

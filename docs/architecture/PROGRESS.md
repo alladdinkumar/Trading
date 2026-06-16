@@ -35,8 +35,8 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | 7 | `07-jobs-workflows.md` | `[x]` |
 | 8 | `08-ops-cli-ui.md` | `[x]` |
 
-**Currently working on:** _Fix pass — Wave 1. Shipped 2026-06-16: **F-014 + F-012** (Nifty-50 ingest; `candidates_total` 12→50), **F-018** (OHLCV freshness — `refresh_ohlcv` + scan staleness guard + Kite close cross-check + `trading refresh-ohlcv` CLI + `Candidate.bar_date`), and **F-019** (`build_scan_context` wires the regime/VIX gate + critical-news veto from live macro/sentiment data; 8 of 10 Layer-A rules now filter)._
-**Next up:** _Rest of Wave 1 — F-023 (paper-cash ledger), F-029 (real predictions)._
+**Currently working on:** _Fix pass — Wave 1. Shipped 2026-06-16: **F-014 + F-012** (Nifty-50 ingest; `candidates_total` 12→50), **F-018** (OHLCV freshness — `refresh_ohlcv` + scan staleness guard + Kite close cross-check + `trading refresh-ohlcv` CLI + `Candidate.bar_date`), **F-019** (`build_scan_context` wires the regime/VIX gate + critical-news veto from live macro/sentiment data; 8 of 10 Layer-A rules now filter), and **F-023** (paper-cash ledger — `compute_paper_cash` derives cash from the trade history; equity now compounds realised P&L; CLI `--cash`→`--capital`)._
+**Next up:** _Rest of Wave 1 — F-029 (real predictions). Then F-025 (paper costs, plugs into the F-023 cash seam)._
 
 ---
 

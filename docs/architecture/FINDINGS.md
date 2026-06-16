@@ -22,10 +22,11 @@ in a live paper-trade run:
    so the sentiment signals remain partly starved.
 2. **Measurement integrity.** ~~Four of ten risk rules are silently disabled~~
    (✅ fixed — F-019: the regime/VIX + critical-news gates are now wired from
-   live macro/sentiment data), but every prediction is still a constant +20%
-   (F-029) and the paper **equity curve never compounds realised P&L** (F-023)
-   — which is exactly the metric the Phase 18.5 go/no-go gate ("OOS Sharpe >
-   1.0") depends on. The system still cannot fully measure whether it works.
+   live macro/sentiment data), and the paper ~~equity curve never compounds
+   realised P&L~~ (✅ fixed — F-023: cash is now derived from the trade ledger,
+   so closing a trade compounds its P&L into equity — the metric the Phase 18.5
+   go/no-go gate "OOS Sharpe > 1.0" depends on). Every prediction is still a
+   constant +20% (F-029), so calibration remains moot until that lands.
 
 **Bottom line:** the build is solid; the gaps are in *what data flows through it*
 and *how its results are measured*. Both are fixable with localized changes.
@@ -34,17 +35,17 @@ and *how its results are measured*. Both are fixable with localized changes.
 
 | Severity | Count | IDs |
 |---|---:|---|
-| **High** | 3 | F-002, F-005†, F-023 |
+| **High** | 2 | F-002, F-005† |
 | Med | 16 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-022, F-024, F-025, F-026, F-029, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 4 | F-012, F-014, F-018, F-019 |
+| ✅ Fixed | 5 | F-012, F-014, F-018, F-019, F-023 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
 
 | Category | Count |
 |---|---:|
-| VULN (correctness/data-integrity) | 5 (F-019 ✅, F-022, F-023, F-024, F-029) |
+| VULN (correctness/data-integrity) | 5 (F-019 ✅, F-023 ✅, F-022, F-024, F-029) |
 | GAP (missing functionality/guardrail) | 11 |
 | INACC (code ≠ spec/docstring) | 7 |
 | DEBT (cleanup) | 8 |
@@ -62,7 +63,7 @@ The highest-leverage cluster; everything else is noise until these land.
 | ~~**F-014 + F-012**~~ ✅ | High/Med | **Done (2026-06-16).** Ingested OHLCV for all 50 Nifty constituents + 8 holdings; pinned `nifty50.txt` (candidate set) and rebuilt `universe.txt` (ingest set); added `load_candidate_universe()`; `_step_scan` now scans the 50; aligned `sector_map.csv`. Verified: `pre-open` `candidates_total` 12→50. *(`nifty200/` subdir rename deferred — cosmetic.)* | Unblocks the real universe **and** gives the ranker enough labels to ever promote |
 | ~~**F-018**~~ ✅ | High | **Done (2026-06-16).** New `data/ohlcv_refresh.py` (`refresh_ohlcv` + `cross_check_closes`); `pre_open._step_ohlcv` runs before the scan; `scan()` skips symbols whose last bar is >5 days stale (warns); `Candidate.bar_date` rendered in the brief; new `trading refresh-ohlcv` CLI | Prevents the scan running on stale prices |
 | ~~**F-019**~~ ✅ | High | **Done (2026-06-16).** `build_scan_context` populates `india_vix` (from `macro_snapshot`) + `critical_event_symbols` (from `sentiment_daily.has_critical`); `_step_scan`/CLI `scan` use it. Re-enables the regime/VIX gate + critical-news veto. `fno_ban`/`t2t` still need NSE feeds (F-010) | Re-enables 3 risk vetoes + the regime gate |
-| **F-023** | High | Paper-cash ledger: debit on open, credit net P&L on close; equity = cash + open MTM | Makes the Phase-18.5 Sharpe metric trustworthy |
+| ~~**F-023**~~ ✅ | High | **Done (2026-06-16).** New `reconcile.compute_paper_cash` derives cash from the trade ledger (debit `entry×qty` on open, credit `exit×qty` on close); `compute_portfolio_snapshot`/`reconcile_day`/`run_post_close` now take `initial_capital` (not a constant `cash`); CLI `--cash` → `--capital`. Equity = derived cash + open MTM, so realised P&L compounds. Costs still excluded (F-025) | Makes the Phase-18.5 Sharpe metric trustworthy |
 | **F-029** | Med | Derive `predicted_return_pct` + `signal.target` from the real target/ranker, not a constant +20% | Makes calibration meaningful |
 
 ### Wave 2 — Correctness & accounting hygiene
@@ -151,7 +152,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-020 | INACC | Med | 4 | Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate) — different thresholds/inputs (the rule is now live as of F-019, sharpening the naming-collision risk) | Open |
 | F-021 | INACC | Med | 5 | `BacktestResult.total_costs` omits buy-side charges (only sell-side accumulated); aggregate cost-drag understated (per-trade `costs_paid` is correct) | Open |
 | F-022 | VULN | Med | 5 | Health scorer structurally TRIM-biased: fundamentals AND sentiment never wired (pre_open/monthly_sip pass empty snapshots) → technicals-only + critical-news EXIT veto dead; docstring claims vote-count scaling not implemented (fixed ±3) | Open |
-| F-023 | VULN | High | 5 | Paper equity curve never compounds realised P&L — cash is a constant; closing a winner drops its gain from `portfolio_snapshots.equity`. Equity/drawdown are not a true track record | Open |
+| ~~F-023~~ | VULN | High | 5 | ~~Paper equity curve never compounds realised P&L — cash is a constant; closing a winner drops its gain from `portfolio_snapshots.equity`. Equity/drawdown are not a true track record~~ | ✅ Fixed 2026-06-16 — `compute_paper_cash` derives cash from the ledger; equity = derived cash + open MTM, so realised P&L compounds |
 | F-024 | VULN | Med | 5 | `days_held` bumped per MTM call, so mid-day + post-close double-count → 25-day time stop fires at ~12 calendar days | Open |
 | F-025 | INACC | Med | 5 | Cost asymmetry: backtest applies full Zerodha costs but live paper MTM applies none (raw-price fills) → paper results flatter than backtest | Open |
 | F-026 | GAP | Med | 6 | Analyst narrative is unvalidated against the bundle — "evidence-first" is an LLM instruction, not a code check; wrong/invented numbers in brief.md pass through. Refuse-stale (12h) is also advisory-only | Open |
@@ -410,15 +411,23 @@ TRIM / "insufficient evidence". Also starves the SIP TOPUP bucket (needs HOLD).
   CSV), and/or implement the documented votes_cast scaling. Add tests for a clear
   HOLD and a clear EXIT with technicals-only evidence.
 
-### F-023 — Paper equity never compounds realised P&L (`VULN`, High, Phase 5)
-`reconcile.compute_portfolio_snapshot` uses a caller-constant `cash`; opens don't
+### F-023 — Paper equity never compounds realised P&L (`VULN`, High, Phase 5) — ✅ Fixed 2026-06-16
+~~`reconcile.compute_portfolio_snapshot` uses a caller-constant `cash`; opens don't
 debit, closes don't credit. `portfolio_snapshots.equity` = constant cash +
 unrealised MTM of open positions only. Realised gains/losses disappear from the
 equity curve and drawdown — the headline track record is wrong (closed-trade
-table stats are still fine).
-- **Fix idea:** Maintain a paper-cash ledger: debit `qty×entry + buy_costs` on
-  open, credit `qty×exit − sell_costs` on close (mirror the backtest engine's cash
-  handling). Snapshot equity = cash + open MTM.
+table stats are still fine).~~
+- **Fixed:** New `reconcile.compute_paper_cash(conn, *, as_of, initial_capital)`
+  derives cash purely from `paper_trades` — debit `entry_price×qty` on open,
+  credit `exit_price×qty` on close (mirrors the backtest engine), filtered by
+  `date(ts_entry|ts_exit) ≤ as_of` so re-running an old date is reproducible.
+  `compute_portfolio_snapshot`/`reconcile_day`/`run_post_close` now take
+  `initial_capital` (the t=0 seed) instead of a constant `cash`; equity = derived
+  cash + open MTM, so closing a winner raises the curve and a loser lowers it.
+  CLI option `--cash` renamed to `--capital`. Tests assert a closed winner lifts
+  equity above seed and a loser drops it below.
+- **Still open (F-025):** buy/sell costs are not yet applied — they plug into the
+  same debit/credit seam (`qty×entry + buy_costs` / `qty×exit − sell_costs`).
 
 ### F-024 — `days_held` double-counts (`VULN`, Med, Phase 5)
 `mtm.mtm_open_trades` bumps `days_held` per call; mid-day + post-close = 2/day.
