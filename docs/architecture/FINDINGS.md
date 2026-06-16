@@ -6,6 +6,89 @@
 > *should change* lands here instead, so it can be triaged and fixed in a
 > dedicated pass — after which we revisit and update the docs.
 
+## Executive summary
+
+The architecture review (docs 00–08) produced **31 active findings** (1 earlier
+finding superseded). The system is **well-engineered at the seams** — graceful
+degradation, idempotency, pure-function cores, clean job/CLI/UI layers — but two
+themes undermine its current goal of proving itself in a live paper-trade run:
+
+1. **Data coverage.** It trades **12 stocks, not the intended Nifty 50**, never
+   refreshes prices, and attributes news for only 12 symbols. So the candidate
+   set, the ranker's training data, and the sentiment signals are all starved.
+2. **Measurement integrity.** Four of ten risk rules are silently disabled, every
+   prediction is a constant +20%, and the paper **equity curve never compounds
+   realised P&L** — which is exactly the metric the Phase 18.5 go/no-go gate
+   ("OOS Sharpe > 1.0") depends on. The system cannot currently measure whether
+   it works.
+
+**Bottom line:** the build is solid; the gaps are in *what data flows through it*
+and *how its results are measured*. Both are fixable with localized changes.
+
+### Breakdown
+
+| Severity | Count | IDs |
+|---|---:|---|
+| **High** | 6 | F-002, F-005†, F-014, F-018, F-019, F-023 |
+| Med | 17 | F-001, F-003, F-006, F-007, F-008, F-010, F-012, F-015, F-016, F-020, F-021, F-022, F-024, F-025, F-026, F-029, F-032 |
+| Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
+
+† F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
+future Phase 19 — out of scope for hardening the paper run.
+
+| Category | Count |
+|---|---:|
+| VULN (correctness/data-integrity) | 5 (F-019, F-022, F-023, F-024, F-029) |
+| GAP (missing functionality/guardrail) | 11 |
+| INACC (code ≠ spec/docstring) | 7 |
+| DEBT (cleanup) | 8 |
+
+## Remediation roadmap
+
+Recommended order. Each wave is independently shippable; Wave 1 is the minimum to
+make the Nifty-50 paper run both *real* and *measurable*.
+
+### Wave 1 — Make the live run real & measurable (do first)
+The highest-leverage cluster; everything else is noise until these land.
+
+| ID | Sev | Fix | Why first |
+|---|---|---|---|
+| **F-014 + F-012** | High/Med | Ingest OHLCV for the 50 Nifty-50 constituents; set `universe.txt` to 50; rename `nifty200/` subdir; align `sector_map.csv` | Unblocks the real universe **and** gives the ranker enough labels to ever promote |
+| **F-018** | High | Add an OHLCV refresh + read-time freshness guard to `pre_open` | Prevents the scan running on stale prices |
+| **F-019** | High | Populate `ScanContext` in `_step_scan` from data already fetched (regime, `has_critical`; ban-list/T2T as available) | Re-enables 3 risk vetoes + the regime gate |
+| **F-023** | High | Paper-cash ledger: debit on open, credit net P&L on close; equity = cash + open MTM | Makes the Phase-18.5 Sharpe metric trustworthy |
+| **F-029** | Med | Derive `predicted_return_pct` + `signal.target` from the real target/ranker, not a constant +20% | Makes calibration meaningful |
+
+### Wave 2 — Correctness & accounting hygiene
+| ID | Sev | Fix |
+|---|---|---|
+| F-024 | Med | Compute `days_held` from `ts_entry` (not per-MTM-call) |
+| F-025 | Med | Apply slippage + charges in paper MTM (with the F-023 ledger) |
+| F-022 | Med | Wire fundamentals + sentiment into health; implement vote-count threshold scaling |
+| F-015 | Med | Alias map for all 50 names |
+| F-016 | Med | DB-level news dedup (unique index / insert-or-ignore) |
+| F-002 | High | Validate broker/quote JSON at the read boundary |
+| F-021 | Med | Add buy-side charges to backtest `total_costs` |
+
+### Wave 3 — Robustness & ops
+F-003 (half-run/run-state detection), F-032 (run broker-free steps unattended),
+F-013 (retention policy), F-031 (train/serve skew), F-026 (narrative validation),
+F-010 (decide each dormant table: implement or mark reserved).
+
+### Wave 4 — Structural & cleanup (low-risk, alongside)
+F-001 (prune unused deps), F-004 (canonical IST clock), F-006/F-007/F-008/F-009
+(layering: domain module, fetch/classify split, break cycle, import-linter),
+F-017 (macro column labels), F-020 (regime name collision), F-027 (heading
+constant + spanning test), F-028 (docstring), F-030 (guard visibility signals).
+
+### Separate track — needs a decision
+F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
+18.5 outcome; needs its own spec before any code.
+
+> **Suggested first PR:** F-014 + F-012 (Nifty-50 ingest). It's low-risk (data
+> only), unblocks the ranker, and makes every other finding testable against a
+> realistic universe.
+
 ## How to use this file
 
 - Each finding gets a stable ID (`F-NNN`) so docs and commits can reference it.

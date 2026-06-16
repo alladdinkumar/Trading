@@ -35,8 +35,8 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | 7 | `07-jobs-workflows.md` | `[x]` |
 | 8 | `08-ops-cli-ui.md` | `[x]` |
 
-**Currently working on:** _All 9 phases (0–8) complete — full architecture doc set + 31 findings shipped._
-**Next up:** _Optional: findings triage/summary pass, then the dedicated fix pass (apply fixes → revisit docs)._
+**Currently working on:** _Doc set complete (0–8) + findings triaged. See the [executive summary + remediation roadmap](./FINDINGS.md#executive-summary)._
+**Next up:** _The dedicated fix pass — start with Wave 1 (F-014/F-012 Nifty-50 ingest), then revisit docs the fixes invalidate._
 
 ---
 
