@@ -48,6 +48,10 @@
 | F-007 | DEBT | Med | 1 | `data.macro.snapshot_and_classify` puts a decision concern (regime classify) in the data layer (upward back-edge into `features`) | Open |
 | F-008 | DEBT | Med | 1 | `strategy ⇄ backtest` package-level import cycle, broken only by lazy/TYPE_CHECKING imports | Open |
 | F-009 | GAP | Low | 1 | No automated dependency-layering enforcement (e.g. import-linter); layering is convention-only | Open |
+| F-010 | GAP | Med | 2 | 8 of 16 SQLite domain tables are defined but have zero writers (dormant schema reservations) | Open |
+| F-011 | VULN | High | 2 | Rule gates `passes_not_fno_banned` / `passes_no_critical_event` depend on empty tables (`fno_ban_list`, `event_calendar`) — likely no-ops, so banned/event-risk stocks may pass | Open |
+| F-012 | INACC | Low | 2 | Parquet subdir hardcoded `nifty200` but active universe is ~57 symbols (Nifty 50 + holdings) | Open |
+| F-013 | GAP | Low | 2 | No retention/compaction policy for `news_items` (append-only) or `data/raw/<date>/` JSON — unbounded growth | Open |
 
 ---
 
@@ -123,4 +127,34 @@ The downward-dependency rule is convention, unenforced.
 
 ---
 
-_Counts: 9 open · 0 fixed. Updated through Phase 1._
+### F-010 — Dormant tables (`GAP`, Med, Phase 2)
+`oi_daily`, `fno_ban_list`, `bulk_block_deals`, `corp_actions`, `account_events`,
+`preopen_snapshot`, `live_quotes`, `event_calendar` are defined in schema v1 but
+have no writer anywhere in `src/trading`.
+- **Fix idea:** Either implement the fetchers/writers, or annotate them as
+  reserved in the migration and the schema doc. Decide per-table.
+- **Doc to revisit:** `02-data-schema.md` §4.2.
+
+### F-011 — Strategy gates read empty tables (`VULN`, High, Phase 2)
+`fno_ban_list` and `event_calendar` are empty (F-010) yet back the Layer-A gates
+`passes_not_fno_banned` and `passes_no_critical_event`. If those gates read the
+DB (or a context populated from it), an F&O-banned or event-risk stock is **not**
+filtered out — a real correctness risk for live selection.
+- **Verify in:** Phase 4 — confirm what the gates actually read (DB vs.
+  `ScanContext` passed by the job).
+- **Fix idea:** Populate the tables (ban list from NSE, events from the news/NSE
+  calendar already fetched) and wire them into `ScanContext`; until then, make
+  the gate's data-absence explicit (warn, not silently pass).
+
+### F-012 — `nifty200` subdir misnames the universe (`INACC`, Low, Phase 2)
+Parquet lives under `data/parquet/nifty200/` but the universe is ~57 symbols.
+- **Fix idea:** Rename to `ohlcv/` or `universe/`, or actually expand to Nifty 200.
+
+### F-013 — No data retention policy (`GAP`, Low, Phase 2)
+`news_items` and `data/raw/<date>/` grow without bound.
+- **Fix idea:** Add a prune/compaction command (e.g. keep N days of raw JSON,
+  archive/rollup old news).
+
+---
+
+_Counts: 13 open · 0 fixed. Updated through Phase 2._
