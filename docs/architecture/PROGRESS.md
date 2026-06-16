@@ -31,12 +31,12 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | 3 | `03-data-layer.md` | `[x]` |
 | 4 | `04-analysis-strategy.md` | `[x]` |
 | 5 | `05-backtest-portfolio-paper.md` | `[x]` |
-| 6 | `06-llm-and-skills.md` | `[ ]` |
+| 6 | `06-llm-and-skills.md` | `[x]` |
 | 7 | `07-jobs-workflows.md` | `[ ]` |
 | 8 | `08-ops-cli-ui.md` | `[ ]` |
 
-**Currently working on:** _Phase 5 complete — backtest/portfolio/paper shipped (F-021..F-025)._
-**Next up:** _Phase 6 — `06-llm-and-skills.md` (llm/ context+brief, Claude Code skills)._
+**Currently working on:** _Phase 6 complete — llm/ + skills shipped (F-026..F-028)._
+**Next up:** _Phase 7 — `07-jobs-workflows.md` (the 6 job orchestrators; verify F-018 OHLCV refresh)._
 
 ---
 
@@ -76,6 +76,9 @@ and update any docs the fixes invalidate.
   - [x] backtest: cost model, event-loop engine (+F-021 cost bug), walk-forward, metrics
   - [x] portfolio: health (+F-022 TRIM bias), GTT Monte-Carlo, SIP allocator
   - [x] paper: ledger, MTM (+F-024 days_held), reconcile (+F-023 equity not compounded), +F-025 cost asymmetry
-- [ ] **Phase 6 — LLM layer + Claude Code skills (`llm/`, `.claude/skills/`)**
+- [x] **Phase 6 — LLM layer + Claude Code skills (`llm/`, `.claude/skills/`)**
+  - [x] human/LLM-in-the-loop contract; context.py bundle; briefing.py compile
+  - [x] the 3 skills (kite-snapshot, kite-quotes-snapshot, analyst); trust-boundary table
+  - [x] Findings F-026 (narrative unverified), F-027 (heading coupling), F-028 (stale docstring)
 - [ ] **Phase 7 — Jobs + workflows (`jobs/`)**
 - [ ] **Phase 8 — Ops + CLI + UI (`ops/`, `cli.py`, `ui/`)**

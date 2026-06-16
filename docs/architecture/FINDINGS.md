@@ -64,6 +64,9 @@
 | F-023 | VULN | High | 5 | Paper equity curve never compounds realised P&L — cash is a constant; closing a winner drops its gain from `portfolio_snapshots.equity`. Equity/drawdown are not a true track record | Open |
 | F-024 | VULN | Med | 5 | `days_held` bumped per MTM call, so mid-day + post-close double-count → 25-day time stop fires at ~12 calendar days | Open |
 | F-025 | INACC | Med | 5 | Cost asymmetry: backtest applies full Zerodha costs but live paper MTM applies none (raw-price fills) → paper results flatter than backtest | Open |
+| F-026 | GAP | Med | 6 | Analyst narrative is unvalidated against the bundle — "evidence-first" is an LLM instruction, not a code check; wrong/invented numbers in brief.md pass through. Refuse-stale (12h) is also advisory-only | Open |
+| F-027 | DEBT | Low | 6 | Brittle 3-way coupling on the `### SYM — passes N/M rules` heading (context renderer / pre_open_iep rewrite / briefing regex), no spanning test | Open |
+| F-028 | INACC | Low | 6 | `assemble_context` docstring omits the sector + Layer-B ranker sections (added Phases 12.6/16) | Open |
 
 ---
 
@@ -286,4 +289,27 @@ Paper P&L is systematically rosier than the backtest that justifies the strategy
 
 ---
 
-_Counts: 24 open · 1 superseded · 0 fixed. Updated through Phase 5._
+### F-026 — Narrative unverified + advisory staleness (`GAP`, Med, Phase 6)
+`/analyst` is told to be evidence-first and to refuse a >12h-old bundle, but both
+are instructions, not code. A hallucinated number/event in `brief.md`, or a
+narrative written off a stale bundle, would pass through silently.
+- **Fix idea:** Post-compile validator: assert figures quoted in `macro_brief.md`
+  match the macro row; warn on symbols mentioned that aren't bundle candidates;
+  move the 12h freshness check into `compile_brief` (compare `_Assembled at_` vs
+  now) so it's deterministic.
+
+### F-027 — Candidate-heading 3-way coupling (`DEBT`, Low, Phase 6)
+`context._render_candidates` writes `### SYM — passes N/M rules`,
+`pre_open_iep` rewrites it, `briefing._CANDIDATE_HEADING` parses it. No single
+test spans all three; a format tweak breaks symbol parsing silently.
+- **Fix idea:** Centralise the heading format in one constant/util imported by
+  all three; add a round-trip test (render → IEP rewrite → parse).
+
+### F-028 — Stale `assemble_context` docstring (`INACC`, Low, Phase 6)
+Lists header/macro/candidates/health/open-trades/predictions; omits the sector
+and Layer-B ranker sections actually rendered.
+- **Fix idea:** Update the docstring.
+
+---
+
+_Counts: 27 open · 1 superseded · 0 fixed. Updated through Phase 6._
