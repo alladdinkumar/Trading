@@ -472,6 +472,33 @@ def test_step_auto_open_creates_signal_and_paper_trade(
     assert pt_count == 1
 
 
+def test_step_auto_open_target_and_prediction_track_exit_engine(
+    conn: sqlite3.Connection,
+) -> None:
+    """F-029: signal.target = exit engine's min(+20%, 2.5R) and the logged
+    prediction derives from that target (not a constant +20%).
+
+    close=100, atr=2 → stop=97, R=3. 2.5R target = 107.5 < +20% (=120), so
+    target = 107.5 and predicted_return_pct = (107.5-100)/100 = 7.5%."""
+    warnings: list[str] = []
+    cand = _candidate("RVNL", 10)
+    _step_auto_open(
+        conn,
+        date(2026, 5, 15),
+        [_sc(cand)],
+        "NEUTRAL",
+        capital=100_000.0,
+        risk_pct=0.02,
+        warnings=warnings,
+    )
+    target = conn.execute("SELECT target FROM signals").fetchone()["target"]
+    predicted = conn.execute("SELECT predicted_return_pct FROM predictions").fetchone()[
+        "predicted_return_pct"
+    ]
+    assert target == pytest.approx(107.5)
+    assert predicted == pytest.approx(7.5)
+
+
 def test_step_auto_open_idempotent_on_rerun(
     conn: sqlite3.Connection,
 ) -> None:

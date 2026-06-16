@@ -55,8 +55,13 @@ class ExitDecision:
     reason: str
 
 
-def _target_price(entry: float, initial_stop: float) -> float:
-    """min(+20%, 2.5 × R/R) — whichever comes first."""
+def target_price(entry: float, initial_stop: float) -> float:
+    """min(+20%, 2.5 × R/R) — whichever comes first.
+
+    Public so signal-emitting code (e.g. `pre_open._step_auto_open`) can set
+    `signal.target` to the exact price the exit engine aims for, instead of a
+    bare +20% that disagrees with the engine (F-029).
+    """
     pct_target = entry * (1 + TARGET_PCT)
     rr_target = entry + TARGET_RR * (entry - initial_stop)
     return min(pct_target, rr_target)
@@ -83,7 +88,7 @@ def evaluate_exit(trade: TradeState, bar: Bar) -> ExitDecision:
         )
 
     # 2. Intra-bar target.
-    target = _target_price(trade.entry, trade.initial_stop)
+    target = target_price(trade.entry, trade.initial_stop)
     if bar.high >= target:
         return ExitDecision(
             action="EXIT_TARGET",

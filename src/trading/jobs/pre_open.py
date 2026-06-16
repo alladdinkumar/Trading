@@ -46,6 +46,7 @@ from trading.store.news_store import insert_news_items, list_critical_symbols
 from trading.store.ohlcv import read_ohlcv
 from trading.store.repo import Signal, insert_signal
 from trading.store.sector_store import upsert_sector_daily
+from trading.strategy.exits import target_price
 from trading.strategy.ranker import ScoredCandidate, score_and_filter
 from trading.strategy.rules import Candidate, ScanContext, passing, scan
 from trading.strategy.sizing import SizingInput, position_size
@@ -366,7 +367,9 @@ def _step_auto_open(
         if sc.selected and _already_opened_today(conn, cand.symbol, as_of):
             continue
         stop_price = cand.close - 1.5 * cand.atr_14
-        target_price = cand.close * 1.20
+        # Target = the exact price the exit engine aims for, min(+20%, 2.5R),
+        # so signal.target no longer disagrees with the exit logic (F-029).
+        signal_target = target_price(cand.close, stop_price)
         if cand.close <= stop_price:
             warnings.append(f"{cand.symbol}: ATR={cand.atr_14:.2f} ≥ close — skip")
             continue
@@ -389,7 +392,7 @@ def _step_auto_open(
             side="LONG",
             entry=cand.close,
             stop=stop_price,
-            target=target_price,
+            target=signal_target,
             horizon_days=25,
             rules_passed_json=json.dumps([r.name for r in cand.rules if r.passed]),
             ml_score=sc.ml_score,
@@ -407,7 +410,9 @@ def _step_auto_open(
             entry_price=cand.close,
             qty=sizing.qty,
             atr_at_entry=cand.atr_14,
-            predicted_return_pct=20.0,
+            # Let predicted_return_pct default to the signal's implied target %
+            # ((target - entry)/entry); since signal.target is now min(+20%,2.5R)
+            # the prediction varies per signal instead of a constant +20% (F-029).
         )
         opened += 1
     return opened

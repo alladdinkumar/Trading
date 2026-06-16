@@ -25,8 +25,10 @@ in a live paper-trade run:
    live macro/sentiment data), and the paper ~~equity curve never compounds
    realised P&L~~ (✅ fixed — F-023: cash is now derived from the trade ledger,
    so closing a trade compounds its P&L into equity — the metric the Phase 18.5
-   go/no-go gate "OOS Sharpe > 1.0" depends on). Every prediction is still a
-   constant +20% (F-029), so calibration remains moot until that lands.
+   go/no-go gate "OOS Sharpe > 1.0" depends on). Predictions ~~are a constant
+   +20%~~ (✅ fixed — F-029: `signal.target` now uses the exit engine's
+   `min(+20%, 2.5R)` and `predicted_return_pct` derives from that target, so
+   calibration buckets vary per signal).
 
 **Bottom line:** the build is solid; the gaps are in *what data flows through it*
 and *how its results are measured*. Both are fixable with localized changes.
@@ -36,16 +38,16 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 2 | F-002, F-005† |
-| Med | 16 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-022, F-024, F-025, F-026, F-029, F-032 |
+| Med | 15 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-022, F-024, F-025, F-026, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 5 | F-012, F-014, F-018, F-019, F-023 |
+| ✅ Fixed | 6 | F-012, F-014, F-018, F-019, F-023, F-029 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
 
 | Category | Count |
 |---|---:|
-| VULN (correctness/data-integrity) | 5 (F-019 ✅, F-023 ✅, F-022, F-024, F-029) |
+| VULN (correctness/data-integrity) | 5 (F-019 ✅, F-023 ✅, F-029 ✅, F-022, F-024) |
 | GAP (missing functionality/guardrail) | 11 |
 | INACC (code ≠ spec/docstring) | 7 |
 | DEBT (cleanup) | 8 |
@@ -64,7 +66,7 @@ The highest-leverage cluster; everything else is noise until these land.
 | ~~**F-018**~~ ✅ | High | **Done (2026-06-16).** New `data/ohlcv_refresh.py` (`refresh_ohlcv` + `cross_check_closes`); `pre_open._step_ohlcv` runs before the scan; `scan()` skips symbols whose last bar is >5 days stale (warns); `Candidate.bar_date` rendered in the brief; new `trading refresh-ohlcv` CLI | Prevents the scan running on stale prices |
 | ~~**F-019**~~ ✅ | High | **Done (2026-06-16).** `build_scan_context` populates `india_vix` (from `macro_snapshot`) + `critical_event_symbols` (from `sentiment_daily.has_critical`); `_step_scan`/CLI `scan` use it. Re-enables the regime/VIX gate + critical-news veto. `fno_ban`/`t2t` still need NSE feeds (F-010) | Re-enables 3 risk vetoes + the regime gate |
 | ~~**F-023**~~ ✅ | High | **Done (2026-06-16).** New `reconcile.compute_paper_cash` derives cash from the trade ledger (debit `entry×qty` on open, credit `exit×qty` on close); `compute_portfolio_snapshot`/`reconcile_day`/`run_post_close` now take `initial_capital` (not a constant `cash`); CLI `--cash` → `--capital`. Equity = derived cash + open MTM, so realised P&L compounds. Costs still excluded (F-025) | Makes the Phase-18.5 Sharpe metric trustworthy |
-| **F-029** | Med | Derive `predicted_return_pct` + `signal.target` from the real target/ranker, not a constant +20% | Makes calibration meaningful |
+| ~~**F-029**~~ ✅ | Med | **Done (2026-06-16).** `strategy.exits.target_price` made public; `pre_open._step_auto_open` sets `signal.target = target_price(close, stop)` (the exit engine's `min(+20%, 2.5R)`) and drops the hardcoded `predicted_return_pct=20.0`, so the prediction defaults to the signal's implied target % and varies per signal | Makes calibration meaningful |
 
 ### Wave 2 — Correctness & accounting hygiene
 | ID | Sev | Fix |
@@ -93,9 +95,9 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 18.5 outcome; needs its own spec before any code.
 
 > **Suggested first PR:** ~~F-014 + F-012 (Nifty-50 ingest).~~ ✅ **Shipped
-> 2026-06-16.** F-018 (OHLCV freshness guard) and F-019 (ScanContext wiring)
-> also shipped 2026-06-16. Next up in Wave 1: F-023 (paper-cash ledger), F-029
-> (real predictions).
+> 2026-06-16.** F-018 (OHLCV freshness guard), F-019 (ScanContext wiring),
+> F-023 (paper-cash ledger) and F-029 (real predictions) also shipped
+> 2026-06-16 — **Wave 1 complete.** Next up: Wave 2 (F-024, F-025, F-022, …).
 
 ## How to use this file
 
@@ -158,7 +160,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-026 | GAP | Med | 6 | Analyst narrative is unvalidated against the bundle — "evidence-first" is an LLM instruction, not a code check; wrong/invented numbers in brief.md pass through. Refuse-stale (12h) is also advisory-only | Open |
 | F-027 | DEBT | Low | 6 | Brittle 3-way coupling on the `### SYM — passes N/M rules` heading (context renderer / pre_open_iep rewrite / briefing regex), no spanning test | Open |
 | F-028 | INACC | Low | 6 | `assemble_context` docstring omits the sector + Layer-B ranker sections (added Phases 12.6/16) | Open |
-| F-029 | VULN | Med | 7 | `pre_open._step_auto_open` hardcodes `predicted_return_pct=20.0` + target=+20% for every signal → prediction calibration is a single meaningless bucket; signal.target disagrees with exit engine's min(+20%,2.5R) | Open |
+| ~~F-029~~ | VULN | Med | 7 | ~~`pre_open._step_auto_open` hardcodes `predicted_return_pct=20.0` + target=+20% for every signal → prediction calibration is a single meaningless bucket; signal.target disagrees with exit engine's min(+20%,2.5R)~~ | ✅ Fixed 2026-06-16 — `signal.target = target_price(close, stop)` (exit engine's `min(+20%, 2.5R)`); prediction defaults to that target's implied %, so buckets vary per signal |
 | F-030 | DEBT | Low | 7 | Visibility-only (non-selected) signals inserted unconditionally each pre_open run → duplicate `signals` rows on re-run | Open |
 | F-031 | INACC | Low | 7 | Train/serve skew: `negative_news_count_7d` empty during weekly retrain (`negative_news_lookup={}`) but populated at inference | Open |
 | F-032 | GAP | Med | 8 | Daily pipeline is human-run reminders only (sole unattended job is weekly_train); a missed day = no snapshot/bundle/MTM, open trades unmanaged, track-record holes | Open |
@@ -465,14 +467,20 @@ and Layer-B ranker sections actually rendered.
 
 ---
 
-### F-029 — Constant predictions break calibration (`VULN`, Med, Phase 7)
-`pre_open._step_auto_open` sets `predicted_return_pct=20.0` and `target =
-close×1.20` for every signal; `ml_score` is stored but unused as the prediction.
-Reconcile → weekly-review calibration buckets therefore collapse to one (+20%)
-bucket; `signal.target` also disagrees with the exit engine's `min(+20%, 2.5R)`.
-- **Fix idea:** Set `predicted_return_pct` from the actual target vs entry (or the
-  ranker probability mapped to an expected return), and set `signal.target` to the
-  same `min(+20%, 2.5R)` the exit logic uses.
+### F-029 — Constant predictions break calibration (`VULN`, Med, Phase 7) — ✅ Fixed 2026-06-16
+`pre_open._step_auto_open` set `predicted_return_pct=20.0` and `target =
+close×1.20` for every signal; reconcile → weekly-review calibration buckets
+collapsed to one (+20%) bucket and `signal.target` disagreed with the exit
+engine's `min(+20%, 2.5R)`.
+- **Fixed:** `strategy.exits._target_price` → public `target_price`;
+  `_step_auto_open` now sets `signal.target = target_price(cand.close, stop_price)`
+  (the exact price the exit engine aims for) and drops the hardcoded
+  `predicted_return_pct=20.0`, so `log_signal_and_open_trade` defaults the
+  prediction to the signal's implied target % `((target - entry)/entry)`. The
+  prediction now varies per signal with stop distance (R), so calibration buckets
+  are meaningful and `signal.target` agrees with the exit logic. Test:
+  `test_step_auto_open_target_and_prediction_track_exit_engine` (close=100, atr=2
+  → target 107.5, predicted 7.5%).
 
 ### F-030 — Visibility signals duplicate on re-run (`DEBT`, Low, Phase 7)
 Non-selected candidates' `insert_signal` has no idempotency guard; re-running
@@ -500,4 +508,5 @@ trades unmanaged that day), and a gap in `portfolio_snapshots` — undermining t
 
 ---
 
-_Counts: 31 open · 1 superseded · 0 fixed. Updated through Phase 8._
+_Counts: 25 open · 1 superseded · 6 fixed (F-012, F-014, F-018, F-019, F-023,
+F-029). Updated 2026-06-16 (Wave 1 complete)._

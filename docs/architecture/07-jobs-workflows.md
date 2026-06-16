@@ -105,12 +105,13 @@ This single job is where four findings from earlier phases concretely originate:
   health is technicals-only *and the `has_critical` EXIT veto can never fire*,
   despite `sentiment_daily.has_critical` being available in the DB. → F-022 now
   covers "sentiment not wired into health" too.
-- **F-029 (new):** `_step_auto_open` hardcodes `predicted_return_pct=20.0` and
-  `target = close × 1.20` for **every** signal (the `ml_score` is stored but not
-  used as the prediction). So every prediction is +20%, and the
-  prediction-calibration loop (and the weekly review's calibration buckets) only
-  ever has one bucket — calibration is moot. Also `signal.target` (+20% flat)
-  disagrees with the exit engine's `min(+20%, 2.5R)`.
+- **F-029 (✅ fixed 2026-06-16):** `_step_auto_open` ~~hardcoded
+  `predicted_return_pct=20.0` and `target = close × 1.20` for **every** signal~~
+  now sets `signal.target = target_price(cand.close, stop_price)` — the exit
+  engine's `min(+20%, 2.5R)` — and drops the hardcoded prediction, so
+  `predicted_return_pct` defaults to the signal's implied target % and varies per
+  signal. Calibration buckets are meaningful and `signal.target` agrees with the
+  exit engine.
 
 > **F-030 (new):** for non-selected (visibility-only) candidates, `_step_auto_open`
 > calls `insert_signal` **unconditionally** — no idempotency guard (the guard only
@@ -166,8 +167,9 @@ pickle, appends a registry row, and applies the soft-promotion gate; then
 >   the equity curve — now that F-023 is fixed (cash compounds realised P&L), this
 >   Sharpe is trustworthy, which matters because it is *exactly the metric the
 >   Phase 18.5 go/no-go gate uses*.
-> - The **calibration** section groups by `predicted_return_pct`, which is always
->   +20% (F-029) → a single, meaningless bucket.
+> - The **calibration** section groups by `predicted_return_pct`, which ~~is always
+>   +20%~~ now varies per signal (F-029 fixed 2026-06-16: prediction derives from
+>   `signal.target = min(+20%, 2.5R)`), so the buckets are meaningful.
 > - `_step_retrain` passes `negative_news_lookup={}` — the `negative_news_count_7d`
 >   feature is always empty in *training* (though populated at inference). → F-031.
 
@@ -204,10 +206,11 @@ the 1st even if a holiday.
   single biggest operational gap. `pre_open._step_ohlcv` now refreshes parquet
   before the scan, and `scan()` skips stale symbols (>`MAX_BAR_AGE_DAYS`) with a
   warning rather than scanning silently-old prices.
-- **Predictions are a constant +20% (F-029)** so the entire prediction-calibration
-  apparatus (reconcile → weekly review → dashboard scatter) measures error against
-  a fixed number. Derive the prediction from the signal's actual target or the
-  ranker score.
+- **✅ (Fixed 2026-06-16) Predictions ~~are a constant +20%~~ now vary per signal
+  (F-029).** `signal.target` uses the exit engine's `min(+20%, 2.5R)` (public
+  `target_price`) and `predicted_return_pct` derives from it, so the
+  prediction-calibration apparatus (reconcile → weekly review → dashboard scatter)
+  measures error against a real, per-signal target.
 - **✅ (Fixed 2026-06-16) The Phase 18.5 decision metric is now off a sound equity
   curve (F-023).** Paper cash is derived from the trade ledger and compounds
   realised P&L (`compute_paper_cash`), so "OOS Sharpe > 1.0" can be trusted. Costs
