@@ -40,9 +40,9 @@ from trading.portfolio.health import (
     technicals_from_history,
 )
 from trading.store.db import get_conn
-from trading.store.macro_store import upsert_macro_snapshot
+from trading.store.macro_store import get_macro_snapshot, upsert_macro_snapshot
 from trading.store.migrations import run_migrations
-from trading.store.news_store import insert_news_items
+from trading.store.news_store import insert_news_items, list_critical_symbols
 from trading.store.ohlcv import read_ohlcv
 from trading.store.repo import Signal, insert_signal
 from trading.store.sector_store import upsert_sector_daily
@@ -115,7 +115,7 @@ def run_pre_open(
 
         ohlcv_bars_added = _step_ohlcv(p, as_of, warnings)
 
-        candidates = _step_scan(p, as_of, warnings)
+        candidates = _step_scan(conn, p, as_of, warnings)
         passing_candidates = passing(candidates)
         scored = _step_rank(conn, p, as_of, passing_candidates, warnings)
 
@@ -247,15 +247,42 @@ def _step_ohlcv(paths: Paths, as_of: date, warnings: list[str]) -> int:
     return result.bars_added
 
 
-def _step_scan(paths: Paths, as_of: date, warnings: list[str]) -> list[Candidate]:
+def build_scan_context(conn: sqlite3.Connection, as_of: date) -> ScanContext:
+    """Assemble the Layer-A `ScanContext` from data already persisted this run.
+
+    Re-enables the risk gates that were dead while the context was empty
+    (F-019):
+    - `india_vix` ← today's `macro_snapshot.vix` (drives the regime/VIX gate);
+    - `critical_event_symbols` ← `sentiment_daily.has_critical` for `as_of`
+      (drives the hard critical-news veto).
+
+    `nifty200_drawdown_5d_pct` is left `None` (not yet computed/stored — the
+    regime rule degrades gracefully). `fno_ban_symbols` and `t2t_symbols` need
+    external NSE feeds (F-010) and stay empty until those land.
+    """
+    snap = get_macro_snapshot(conn, as_of.isoformat())
+    india_vix = snap.vix if snap is not None else None
+    critical = list_critical_symbols(conn, as_of.isoformat())
+    return ScanContext(
+        scan_date=as_of,
+        india_vix=india_vix,
+        critical_event_symbols=frozenset(critical),
+    )
+
+
+def _step_scan(
+    conn: sqlite3.Connection, paths: Paths, as_of: date, warnings: list[str]
+) -> list[Candidate]:
     """Run Layer A scanner over the Nifty-50 candidate universe.
 
     Candidates are restricted to the Nifty 50 (`data/static/nifty50.txt`) so
     the user's non-Nifty holdings are scored for health but never auto-traded.
-    Symbols without parquet (or <200 bars) are skipped inside `scan`; symbols
-    whose latest bar is stale are skipped with a warning.
+    The scan context is built from this run's macro + sentiment data so the
+    regime/VIX and critical-news gates are live (F-019). Symbols without parquet
+    (or <200 bars) are skipped inside `scan`; symbols whose latest bar is stale
+    are skipped with a warning.
     """
-    ctx = ScanContext(scan_date=as_of)
+    ctx = build_scan_context(conn, as_of)
     symbols = load_candidate_universe(paths)
     return scan(paths, as_of, symbols=symbols, ctx=ctx, warnings=warnings)
 

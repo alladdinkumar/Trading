@@ -148,6 +148,19 @@ def upsert_sentiment_daily(conn: sqlite3.Connection, row: SentimentDailyRow) -> 
     )
 
 
+def list_critical_symbols(conn: sqlite3.Connection, date_iso: str) -> set[str]:
+    """Symbols whose `sentiment_daily` rollup flags a critical event on `date_iso`.
+
+    Feeds Layer A's `no_critical_event` veto (the hard sentiment gate) via the
+    scan context — see `jobs/pre_open.build_scan_context`.
+    """
+    rows = conn.execute(
+        "SELECT symbol FROM sentiment_daily WHERE date = ? AND has_critical = 1",
+        (date_iso,),
+    ).fetchall()
+    return {r["symbol"] for r in rows}
+
+
 def get_sentiment_daily(
     conn: sqlite3.Connection, date_iso: str, symbol: str
 ) -> SentimentDailyRow | None:

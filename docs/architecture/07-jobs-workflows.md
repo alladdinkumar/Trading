@@ -3,8 +3,9 @@
 > Part of the [`docs/architecture/`](./PROGRESS.md) set. The orchestration layer:
 > six jobs that wire the lower layers into the daily/weekly/monthly cadence. This
 > phase originally **confirmed F-018** (no OHLCV refresh; ✅ fixed 2026-06-16 —
-> `pre_open` now refreshes OHLCV + a staleness guard) and shows how
-> F-019/F-022/F-023/F-024 manifest at the job level. Grounded in
+> `pre_open` now refreshes OHLCV + a staleness guard) and **F-019** (dead
+> risk gates; ✅ fixed 2026-06-16 — `build_scan_context` wires them), and shows
+> how F-022/F-023/F-024 manifest at the job level. Grounded in
 > `src/trading/jobs/*.py`.
 
 ## 1. Shared shape
@@ -94,9 +95,11 @@ This single job is where four findings from earlier phases concretely originate:
   `_step_scan`, and `scan()` skips bars older than `MAX_BAR_AGE_DAYS` with a
   warning (plus a Kite close cross-check on holdings). The scan no longer runs
   silently on stale data.
-- **F-019 (confirmed):** `_step_scan` builds `ScanContext(scan_date=as_of)` with
-  all defaults → 4 of 10 rules are no-ops (regime/ban/t2t/critical), even though
-  the macro snapshot and sentiment were computed earlier in the *same* run.
+- **F-019 (✅ fixed 2026-06-16):** `_step_scan` now builds the context via
+  `build_scan_context(conn, as_of)`, wiring the regime/VIX gate (from the macro
+  snapshot) and the critical-news veto (from `sentiment_daily.has_critical`)
+  computed earlier in the *same* run. Ban-list/T2T stay no-ops pending NSE feeds
+  (F-010).
 - **F-022 (extended):** `_step_portfolio` builds each `HoldingContext` with
   `FundamentalsSnapshot()` **and** `SentimentSnapshot()` empty — so holdings
   health is technicals-only *and the `has_critical` EXIT veto can never fire*,

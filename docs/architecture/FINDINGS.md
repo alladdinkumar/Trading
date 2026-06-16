@@ -20,11 +20,12 @@ in a live paper-trade run:
    prices~~ (✅ fixed — F-018: `pre_open` refreshes OHLCV + a staleness guard
    skips stale symbols). News attribution still covers only 12 symbols (F-015),
    so the sentiment signals remain partly starved.
-2. **Measurement integrity.** Four of ten risk rules are silently disabled, every
-   prediction is a constant +20%, and the paper **equity curve never compounds
-   realised P&L** — which is exactly the metric the Phase 18.5 go/no-go gate
-   ("OOS Sharpe > 1.0") depends on. The system cannot currently measure whether
-   it works.
+2. **Measurement integrity.** ~~Four of ten risk rules are silently disabled~~
+   (✅ fixed — F-019: the regime/VIX + critical-news gates are now wired from
+   live macro/sentiment data), but every prediction is still a constant +20%
+   (F-029) and the paper **equity curve never compounds realised P&L** (F-023)
+   — which is exactly the metric the Phase 18.5 go/no-go gate ("OOS Sharpe >
+   1.0") depends on. The system still cannot fully measure whether it works.
 
 **Bottom line:** the build is solid; the gaps are in *what data flows through it*
 and *how its results are measured*. Both are fixable with localized changes.
@@ -33,17 +34,17 @@ and *how its results are measured*. Both are fixable with localized changes.
 
 | Severity | Count | IDs |
 |---|---:|---|
-| **High** | 4 | F-002, F-005†, F-019, F-023 |
+| **High** | 3 | F-002, F-005†, F-023 |
 | Med | 16 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-022, F-024, F-025, F-026, F-029, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 3 | F-012, F-014, F-018 |
+| ✅ Fixed | 4 | F-012, F-014, F-018, F-019 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
 
 | Category | Count |
 |---|---:|
-| VULN (correctness/data-integrity) | 5 (F-019, F-022, F-023, F-024, F-029) |
+| VULN (correctness/data-integrity) | 5 (F-019 ✅, F-022, F-023, F-024, F-029) |
 | GAP (missing functionality/guardrail) | 11 |
 | INACC (code ≠ spec/docstring) | 7 |
 | DEBT (cleanup) | 8 |
@@ -60,7 +61,7 @@ The highest-leverage cluster; everything else is noise until these land.
 |---|---|---|---|
 | ~~**F-014 + F-012**~~ ✅ | High/Med | **Done (2026-06-16).** Ingested OHLCV for all 50 Nifty constituents + 8 holdings; pinned `nifty50.txt` (candidate set) and rebuilt `universe.txt` (ingest set); added `load_candidate_universe()`; `_step_scan` now scans the 50; aligned `sector_map.csv`. Verified: `pre-open` `candidates_total` 12→50. *(`nifty200/` subdir rename deferred — cosmetic.)* | Unblocks the real universe **and** gives the ranker enough labels to ever promote |
 | ~~**F-018**~~ ✅ | High | **Done (2026-06-16).** New `data/ohlcv_refresh.py` (`refresh_ohlcv` + `cross_check_closes`); `pre_open._step_ohlcv` runs before the scan; `scan()` skips symbols whose last bar is >5 days stale (warns); `Candidate.bar_date` rendered in the brief; new `trading refresh-ohlcv` CLI | Prevents the scan running on stale prices |
-| **F-019** | High | Populate `ScanContext` in `_step_scan` from data already fetched (regime, `has_critical`; ban-list/T2T as available) | Re-enables 3 risk vetoes + the regime gate |
+| ~~**F-019**~~ ✅ | High | **Done (2026-06-16).** `build_scan_context` populates `india_vix` (from `macro_snapshot`) + `critical_event_symbols` (from `sentiment_daily.has_critical`); `_step_scan`/CLI `scan` use it. Re-enables the regime/VIX gate + critical-news veto. `fno_ban`/`t2t` still need NSE feeds (F-010) | Re-enables 3 risk vetoes + the regime gate |
 | **F-023** | High | Paper-cash ledger: debit on open, credit net P&L on close; equity = cash + open MTM | Makes the Phase-18.5 Sharpe metric trustworthy |
 | **F-029** | Med | Derive `predicted_return_pct` + `signal.target` from the real target/ranker, not a constant +20% | Makes calibration meaningful |
 
@@ -91,8 +92,8 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 18.5 outcome; needs its own spec before any code.
 
 > **Suggested first PR:** ~~F-014 + F-012 (Nifty-50 ingest).~~ ✅ **Shipped
-> 2026-06-16.** F-018 (OHLCV freshness guard) also shipped 2026-06-16. Next
-> up in Wave 1: F-019 (ScanContext wiring), F-023 (paper-cash ledger), F-029
+> 2026-06-16.** F-018 (OHLCV freshness guard) and F-019 (ScanContext wiring)
+> also shipped 2026-06-16. Next up in Wave 1: F-023 (paper-cash ledger), F-029
 > (real predictions).
 
 ## How to use this file
@@ -146,8 +147,8 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-016 | DEBT | Med | 3 | News dedup is URL-only and single-run; daily event/headline re-fetch creates duplicate `news_items` rows (no DB-level uniqueness) | Open |
 | F-017 | INACC | Low | 3 | `macro_snapshot.dow_fut`/`nasdaq_fut` store spot index closes not futures; `sgx_nifty` always NULL | Open |
 | F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | ✅ Fixed (2026-06-16) — refresh step + scan staleness guard + Kite close cross-check; IST-clock centralisation ([[F-004]]) still open |
-| F-019 | VULN | High | 4 | 4 of 10 Layer-A rules (regime, fno_banned, t2t, critical_event) are unconditional passes — `pre_open`/`scan` build `ScanContext` with all defaults; risk vetoes + regime gate are dead despite the data being available | Open |
-| F-020 | INACC | Med | 4 | Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate, unused) — different thresholds/inputs | Open |
+| F-019 | VULN | High | 4 | 4 of 10 Layer-A rules (regime, fno_banned, t2t, critical_event) are unconditional passes — `pre_open`/`scan` build `ScanContext` with all defaults; risk vetoes + regime gate are dead despite the data being available | ✅ Fixed (2026-06-16) — `build_scan_context` wires regime/VIX + critical-news gates; `fno_banned`/`t2t` still await NSE feeds ([[F-010]]) |
+| F-020 | INACC | Med | 4 | Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate) — different thresholds/inputs (the rule is now live as of F-019, sharpening the naming-collision risk) | Open |
 | F-021 | INACC | Med | 5 | `BacktestResult.total_costs` omits buy-side charges (only sell-side accumulated); aggregate cost-drag understated (per-trade `costs_paid` is correct) | Open |
 | F-022 | VULN | Med | 5 | Health scorer structurally TRIM-biased: fundamentals AND sentiment never wired (pre_open/monthly_sip pass empty snapshots) → technicals-only + critical-news EXIT veto dead; docstring claims vote-count scaling not implemented (fixed ±3) | Open |
 | F-023 | VULN | High | 5 | Paper equity curve never compounds realised P&L — cash is a constant; closing a winner drops its gain from `portfolio_snapshots.equity`. Equity/drawdown are not a true track record | Open |
@@ -352,7 +353,25 @@ assumes the host clock is IST (naive `datetime.now()`).
 
 ---
 
-### F-019 — Four Layer-A gates are no-ops in production (`VULN`, High, Phase 4)
+### F-019 — Four Layer-A gates are no-ops in production (`VULN`, High, Phase 4) — ✅ Fixed 2026-06-16
+**Resolution:** New `jobs/pre_open.build_scan_context(conn, as_of)` assembles the
+`ScanContext` from data this run already persisted:
+- `india_vix` ← `macro_snapshot.vix` → re-enables the regime/VIX gate
+  (`passes_regime`);
+- `critical_event_symbols` ← new `store/news_store.list_critical_symbols`
+  (`sentiment_daily.has_critical` for `as_of`) → the FinBERT critical-news veto
+  now fires.
+
+`pre_open._step_scan` (signature gained `conn`) and `cli.py::scan_cmd` both call
+it — the CLI builds it best-effort from the DB, degrading to the indicator-only
+preview when no snapshot exists. `nifty200_drawdown_5d_pct` stays `None` (not yet
+stored; the rule degrades gracefully). `fno_ban_symbols`/`t2t_symbols` remain
+empty until the NSE ban-list/T2T feeds land ([[F-010]]). Tests assert a critical
+symbol is vetoed and that an empty DB degrades to passing. Supersedes [[F-011]].
+*Naming caveat:* `passes_regime` is now live, which makes the [[F-020]] name
+collision worth resolving next.
+
+*Original finding:*
 `jobs/pre_open.py::_step_scan` and `cli.py::scan_cmd` both construct
 `ScanContext(scan_date=...)` with every context field at its empty default.
 Therefore rules 7–10 always pass:
@@ -363,11 +382,6 @@ Therefore rules 7–10 always pass:
   though `is_critical`/`has_critical` are computed and stored.
 Effect: only the 6 indicator rules filter; 3 risk vetoes + the regime gate are
 dead. Supersedes [[F-011]].
-- **Fix idea:** Populate `ScanContext` in `_step_scan` from data already on hand —
-  `india_vix`/drawdown from the macro snapshot, `critical_event_symbols` from
-  `sentiment_daily.has_critical` (and/or `news_items.is_critical`), `fno_ban_symbols`
-  from an NSE ban-list fetch (F-010), `t2t_symbols` from a maintained list. Add a
-  test asserting a banned/critical symbol is filtered.
 - **Doc to revisit:** `04-analysis-strategy.md` §3.4; `07-jobs-workflows.md`.
 
 ### F-020 — "regime" name collision (`INACC`, Med, Phase 4)

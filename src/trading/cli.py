@@ -58,7 +58,7 @@ from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
 from trading.jobs.mid_day import MidDayAborted, run_mid_day
 from trading.jobs.post_close import PostCloseAborted, run_post_close
-from trading.jobs.pre_open import PreOpenAborted, run_pre_open
+from trading.jobs.pre_open import PreOpenAborted, build_scan_context, run_pre_open
 from trading.jobs.pre_open_iep import PreOpenIepAborted, run_pre_open_iep
 from trading.llm.briefing import MissingNarrativeError, compile_brief
 from trading.llm.context import ContextInputs
@@ -82,7 +82,7 @@ from trading.store.news_store import get_sentiment_daily, insert_news_items
 from trading.store.ohlcv import list_symbols, parquet_path, read_ohlcv, write_ohlcv
 from trading.store.repo import Signal, get_signal
 from trading.store.sector_store import upsert_sector_daily
-from trading.strategy.rules import ScanContext, passing, scan
+from trading.strategy.rules import passing, scan
 
 app = typer.Typer(help="Trading — research and paper-trading CLI.", add_completion=False)
 console = Console()
@@ -350,7 +350,12 @@ def scan_cmd(
     else:
         scan_date = date.fromisoformat(as_of)
 
-    ctx = ScanContext(scan_date=scan_date)
+    # Build the same risk-gate context pre_open uses, best-effort: when a macro
+    # snapshot / sentiment rollup exists for scan_date the regime + critical
+    # vetoes are live; otherwise they degrade to the indicator-only preview.
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        ctx = build_scan_context(conn, scan_date)
     candidates = scan(paths, scan_date, ctx=ctx)
     surfaced = candidates if show_all else passing(candidates)
 

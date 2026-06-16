@@ -26,12 +26,18 @@ from trading.jobs.pre_open import (
     _step_portfolio,
     _step_scan,
     _step_sector,
+    build_scan_context,
     run_pre_open,
 )
 from trading.store.migrations import run_migrations
 from trading.store.ohlcv import write_ohlcv
 from trading.strategy.ranker import ScoredCandidate
-from trading.strategy.rules import Candidate, RuleResult
+from trading.strategy.rules import (
+    Candidate,
+    RuleResult,
+    passes_no_critical_event,
+    passes_regime,
+)
 
 
 def _sc(
@@ -80,7 +86,7 @@ def test_run_pre_open_returns_result_with_bundle_path(paths, monkeypatch) -> Non
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_scan",
-        lambda paths, as_of, warnings: [],
+        lambda conn, paths, as_of, warnings: [],
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_portfolio",
@@ -231,7 +237,7 @@ def _candidate(symbol: str, n_passed: int) -> Candidate:
     )
 
 
-def test_step_scan_delegates_to_strategy(paths) -> None:
+def test_step_scan_delegates_to_strategy(conn, paths) -> None:
     warnings: list[str] = []
     fake = [_candidate("RVNL", 9), _candidate("NTPC", 7)]
     with (
@@ -241,12 +247,12 @@ def test_step_scan_delegates_to_strategy(paths) -> None:
         ),
         patch("trading.jobs.pre_open.scan", return_value=fake),
     ):
-        out = _step_scan(paths, date(2026, 5, 15), warnings)
+        out = _step_scan(conn, paths, date(2026, 5, 15), warnings)
     assert out == fake
     assert warnings == []
 
 
-def test_step_scan_restricts_to_candidate_universe(paths) -> None:
+def test_step_scan_restricts_to_candidate_universe(conn, paths) -> None:
     """_step_scan passes the Nifty-50 candidate list, not the full universe."""
     candidates = ["RELIANCE", "INFY", "TCS"]
     with (
@@ -256,19 +262,80 @@ def test_step_scan_restricts_to_candidate_universe(paths) -> None:
         ),
         patch("trading.jobs.pre_open.scan", return_value=[]) as mock_scan,
     ):
-        _step_scan(paths, date(2026, 5, 15), [])
+        _step_scan(conn, paths, date(2026, 5, 15), [])
     assert mock_scan.call_args.kwargs["symbols"] == candidates
 
 
-def test_step_scan_passes_warnings_accumulator(paths) -> None:
+def test_step_scan_passes_warnings_accumulator(conn, paths) -> None:
     """_step_scan threads the run warnings list into scan() for staleness."""
     warnings: list[str] = []
     with (
         patch("trading.jobs.pre_open.load_candidate_universe", return_value=["FOO"]),
         patch("trading.jobs.pre_open.scan", return_value=[]) as mock_scan,
     ):
-        _step_scan(paths, date(2026, 5, 15), warnings)
+        _step_scan(conn, paths, date(2026, 5, 15), warnings)
     assert mock_scan.call_args.kwargs["warnings"] is warnings
+
+
+def _seed_macro_vix(conn: sqlite3.Connection, as_of: date, vix: float) -> None:
+    from trading.store.macro_store import upsert_macro_snapshot
+
+    upsert_macro_snapshot(
+        conn,
+        MacroSnapshot(
+            date=as_of.isoformat(),
+            sgx_nifty=None,
+            dow_fut=None,
+            nasdaq_fut=None,
+            sp500=None,
+            usdinr=None,
+            crude=None,
+            vix=vix,
+            us_10y=None,
+            fii_flow_cr=None,
+            dii_flow_cr=None,
+            regime="NEUTRAL",
+        ),
+    )
+
+
+def _seed_critical(conn: sqlite3.Connection, as_of: date, symbol: str) -> None:
+    from trading.store.news_store import SentimentDailyRow, upsert_sentiment_daily
+
+    upsert_sentiment_daily(
+        conn,
+        SentimentDailyRow(
+            date=as_of.isoformat(),
+            symbol=symbol,
+            score_7d=-0.4,
+            score_30d=-0.2,
+            news_count=3,
+            negative_news_count=2,
+            has_critical=True,
+        ),
+    )
+
+
+def test_build_scan_context_pulls_vix_and_critical(conn) -> None:
+    """F-019: context is populated from this run's macro + sentiment data."""
+    as_of = date(2026, 5, 15)
+    _seed_macro_vix(conn, as_of, vix=27.5)
+    _seed_critical(conn, as_of, "RVNL")
+
+    ctx = build_scan_context(conn, as_of)
+    assert ctx.india_vix == 27.5
+    assert "RVNL" in ctx.critical_event_symbols
+    # The critical symbol now trips the hard veto that was previously dead.
+    assert not passes_no_critical_event("RVNL", ctx).passed
+
+
+def test_build_scan_context_empty_when_no_data(conn) -> None:
+    ctx = build_scan_context(conn, date(2026, 5, 15))
+    assert ctx.india_vix is None
+    assert ctx.critical_event_symbols == frozenset()
+    # No macro/sentiment ⇒ gates degrade to passing (indicator-only).
+    assert passes_regime(ctx).passed
+    assert passes_no_critical_event("ANY", ctx).passed
 
 
 def test_step_ohlcv_returns_bars_and_surfaces_warnings(paths) -> None:
@@ -304,7 +371,7 @@ def test_step_ohlcv_runs_before_scan(paths, monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_scan",
-        lambda p, d, w: order.append("scan") or [],
+        lambda c, p, d, w: order.append("scan") or [],
     )
     monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (False, "NEUTRAL"))
     monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
@@ -321,7 +388,7 @@ def test_cross_check_warnings_surface_in_run(paths, monkeypatch) -> None:
 
     seed_kite_snapshot(paths, date(2026, 5, 15), holdings=[_PRE_OPEN_HOLDING])
     monkeypatch.setattr("trading.jobs.pre_open._step_ohlcv", lambda p, d, w: 0)
-    monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda p, d, w: [])
+    monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda c, p, d, w: [])
     monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (False, "NEUTRAL"))
     monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
@@ -611,7 +678,7 @@ def test_pre_open_persists_ml_score_on_all_passing(paths, monkeypatch) -> None:
     monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr("trading.jobs.pre_open._step_ohlcv", lambda p, d, w: 0)
-    monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda p, d, w: fake_cands)
+    monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda c, p, d, w: fake_cands)
     monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: [])
 
     result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=False)
@@ -642,7 +709,7 @@ def test_pre_open_without_active_model_opens_all_passing(paths, monkeypatch) -> 
     monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr("trading.jobs.pre_open._step_ohlcv", lambda p, d, w: 0)
-    monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda p, d, w: fake_cands)
+    monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda c, p, d, w: fake_cands)
     monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: [])
 
     result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=False)

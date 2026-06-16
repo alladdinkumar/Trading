@@ -66,9 +66,9 @@ Three things per headline:
 `negative_news_count` (≤ −0.20), and `has_critical` into a `sentiment_daily` row
 (UPSERT). Symbols with zero news in 30d are skipped (no empty rows).
 
-> The critical veto is *computed* (`has_critical`, `is_critical`) but, as §3.4
-> shows, **never enforced** in the live scan because the gate that would use it
-> reads an unpopulated context field. → F-019.
+> The critical veto is computed (`has_critical`, `is_critical`) **and now
+> enforced** — `build_scan_context` feeds `has_critical` into the scan's
+> `critical_event_symbols`, so the gate fires (✅ F-019, 2026-06-16). See §3.4.
 
 ### 2.3 `regime.py` — 4-axis macro voter
 A pure classifier over four axes, each voting −1/0/+1:
@@ -88,8 +88,8 @@ RISK_ON/NEUTRAL/RISK_OFF → 1.0 / 0.75 / 0.5.
 > **Two different "regime" concepts coexist** and shouldn't be confused: this
 > 4-axis voter (feeds *sizing*) vs. the Layer-A `passes_regime` *rule* (a gate
 > using VIX < 25 AND Nifty-200 5d drawdown > −5%, different thresholds, different
-> inputs). The names collide and the rule version is currently a no-op (§3.4).
-> → F-020.
+> inputs). The names collide; the rule version is now **live** (F-019, §3.4),
+> which makes the collision more important to resolve. → F-020.
 
 ## 3. `strategy/` — decision logic
 
@@ -155,32 +155,32 @@ flowchart TD
 The caller threads `new_stop` forward and bumps `days_held`; v2 schema columns
 `current_stop`/`atr_at_entry` persist this across daily MTM runs.
 
-### 3.4 🔴 RESOLVED: F-011 — four Layer-A gates are no-ops in production
+### 3.4 ✅ FIXED (2026-06-16): F-019 — four Layer-A gates were no-ops in production
 
-Both production callers build the context with **all defaults**:
+**Now fixed.** Both production callers populate the context via
+`jobs/pre_open.build_scan_context(conn, as_of)`:
 
 ```python
 # jobs/pre_open.py::_step_scan   and   cli.py::scan_cmd
-ctx = ScanContext(scan_date=as_of)   # india_vix=None, fno_ban_symbols=∅, …
+ctx = build_scan_context(conn, as_of)
+#   india_vix              ← macro_snapshot.vix
+#   critical_event_symbols ← sentiment_daily.has_critical (list_critical_symbols)
 ```
 
-Nothing populates `india_vix`, `nifty200_drawdown_5d_pct`, `fno_ban_symbols`,
-`t2t_symbols`, or `critical_event_symbols`. Consequences:
+- **`regime` (rule 7)** → now reads the live `india_vix`; the VIX<25 gate fires
+  (Nifty200 5d drawdown stays `None` until stored — degrades gracefully).
+- **`no_critical_event` (10)** → reads `sentiment_daily.has_critical`, so the
+  FinBERT critical-news hard veto fires.
+- **`not_fno_banned` (8)** / **`not_t2t` (9)** → still empty sets; they await the
+  NSE ban-list / T2T feeds (**F-010**). These two remain free passes for now.
 
-- **`regime` (rule 7)** → both inputs None → returns *"no macro data — passing by
-  default"* — **always passes**, even though `pre_open` fetched the macro
-  snapshot moments earlier. The regime gate is dead.
-- **`not_fno_banned` (8)** → empty set → always passes (and the `fno_ban_list`
-  table is empty too, F-010).
-- **`not_t2t` (9)** → always passes.
-- **`no_critical_event` (10)** → always passes — even though `sentiment.has_critical`
-  / `is_critical` are computed and stored. The intended hard veto never fires.
+So 8 of 10 rules now filter (was 6). The remaining two are data-blocked, not
+logic-blocked. Supersedes the table-centric F-011.
 
-**So only rules 1–6 actually filter.** A "9/10" candidate failed exactly one of
-the six *real* rules (e.g. today's JIOFIN at close 234 < SMA200 285 fails
-`uptrend`; the 4 context rules contribute free passes). This inflates pass counts
-and removes three safety vetoes (ban list, T2T, critical news) plus the
-macro-regime gate. → **F-019** (supersedes the table-centric F-011).
+> **Original problem (pre-fix):** both callers built `ScanContext(scan_date=as_of)`
+> with all defaults, so rules 7–10 always passed — only rules 1–6 filtered, and
+> three safety vetoes plus the macro-regime gate were dead despite the data being
+> available.
 
 ### 3.5 Layer B — the LightGBM ranker (`ranker*.py`)
 Advisory re-ranker over Layer-A survivors. Four modules:
@@ -219,14 +219,15 @@ adds no value until a model promotes.
 
 ## ⚠️ Robustness notes / open questions
 
-- **🔴 Four of ten Layer-A rules don't do anything** (regime, F&O-ban, T2T,
-  critical-news). The scan is effectively a 6-rule technical filter. Three of the
-  four missing gates are *risk vetoes*. Highest-priority correctness finding. →
-  F-019.
-- **The critical-news hard veto is fully built but unwired.** FinBERT flags
-  `is_critical`, `sentiment_daily.has_critical` is stored, yet a flagged stock is
-  never excluded — because `critical_event_symbols` is never populated from it. →
-  F-019.
+- **✅ (Fixed 2026-06-16) Four of ten Layer-A rules did nothing** (regime,
+  F&O-ban, T2T, critical-news). `build_scan_context` now wires the regime/VIX
+  gate and the critical-news veto from live macro/sentiment data, so 8 of 10
+  rules filter. F&O-ban + T2T stay free passes only until their NSE feeds land
+  (F-010). → F-019.
+- **✅ (Fixed 2026-06-16) The critical-news hard veto is now wired.** FinBERT
+  flags `is_critical`, `sentiment_daily.has_critical` is stored, and
+  `critical_event_symbols` is now populated from it via `list_critical_symbols`,
+  so a flagged stock is excluded. → F-019.
 - **Regime is fetched but not used as a gate**, only as a sizing multiplier. The
   Layer-A regime rule and the macro voter are different mechanisms with the same
   name. → F-020.
