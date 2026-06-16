@@ -10,7 +10,10 @@
 > actually does today*, read straight from `src/trading/`.
 
 Each layer doc ends with a **⚠️ Robustness notes / open questions** section
-that flags fragility, assumptions, and hardening candidates for review.
+that flags fragility, assumptions, and hardening candidates for review. Concrete
+actionable issues (vulnerabilities, gaps, inaccuracies, missing tests/fixtures,
+tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
+— **don't fix inline during doc writing; capture and keep moving**.
 
 ## Legend
 
@@ -42,7 +45,11 @@ that flags fragility, assumptions, and hardening candidates for review.
 1. Read the actual source modules for the layer (not just the old specs).
 2. Write the doc: prose + tables + Mermaid diagrams, reviewer-friendly.
 3. Close with **⚠️ Robustness notes / open questions**.
-4. Update this tracker; commit `docs(arch): <phase> …`.
+4. Append concrete actionable items to [`FINDINGS.md`](./FINDINGS.md) (`F-NNN`).
+5. Update this tracker; commit `docs(arch): <phase> …`.
+
+After all phases: triage `FINDINGS.md`, fix in a dedicated pass, then revisit
+and update any docs the fixes invalidate.
 
 ## Phase checklist
 
