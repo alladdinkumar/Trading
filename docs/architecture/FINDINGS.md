@@ -49,7 +49,7 @@
 | F-008 | DEBT | Med | 1 | `strategy ⇄ backtest` package-level import cycle, broken only by lazy/TYPE_CHECKING imports | Open |
 | F-009 | GAP | Low | 1 | No automated dependency-layering enforcement (e.g. import-linter); layering is convention-only | Open |
 | F-010 | GAP | Med | 2 | 8 of 16 SQLite domain tables are defined but have zero writers (dormant schema reservations) | Open |
-| F-011 | VULN | High | 2 | Rule gates `passes_not_fno_banned` / `passes_no_critical_event` depend on empty tables (`fno_ban_list`, `event_calendar`) — likely no-ops, so banned/event-risk stocks may pass | Open |
+| F-011 | VULN | High | 2 | Rule gates depend on empty tables — **superseded by F-019** (root cause is unpopulated `ScanContext`, not the tables) | Superseded |
 | F-012 | INACC | Med | 2 | Universe scope: paper-trading candidate set should be **Nifty 50 (50 stocks)** per user req; currently ~57 (Nifty 50 + holdings) under a `nifty200/` subdir | Open |
 | F-013 | GAP | Low | 2 | No retention/compaction policy for `news_items` (append-only) or `data/raw/<date>/` JSON — unbounded growth | Open |
 | F-014 | GAP | High | 3 | Only 12 symbols have parquet OHLCV on disk → live candidate universe is 12, not the configured ~57 nor the required Nifty 50 | Open |
@@ -57,6 +57,8 @@
 | F-016 | DEBT | Med | 3 | News dedup is URL-only and single-run; daily event/headline re-fetch creates duplicate `news_items` rows (no DB-level uniqueness) | Open |
 | F-017 | INACC | Low | 3 | `macro_snapshot.dow_fut`/`nasdaq_fut` store spot index closes not futures; `sgx_nifty` always NULL | Open |
 | F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | Open |
+| F-019 | VULN | High | 4 | 4 of 10 Layer-A rules (regime, fno_banned, t2t, critical_event) are unconditional passes — `pre_open`/`scan` build `ScanContext` with all defaults; risk vetoes + regime gate are dead despite the data being available | Open |
+| F-020 | INACC | Med | 4 | Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate, unused) — different thresholds/inputs | Open |
 
 ---
 
@@ -212,4 +214,32 @@ assumes the host clock is IST (naive `datetime.now()`).
 
 ---
 
-_Counts: 18 open · 0 fixed. Updated through Phase 3._
+### F-019 — Four Layer-A gates are no-ops in production (`VULN`, High, Phase 4)
+`jobs/pre_open.py::_step_scan` and `cli.py::scan_cmd` both construct
+`ScanContext(scan_date=...)` with every context field at its empty default.
+Therefore rules 7–10 always pass:
+- `regime` → "no macro data — passing by default" (despite macro snapshot being
+  fetched in the same job);
+- `not_fno_banned`, `not_t2t` → empty sets;
+- `no_critical_event` → empty set, so the FinBERT critical veto never fires even
+  though `is_critical`/`has_critical` are computed and stored.
+Effect: only the 6 indicator rules filter; 3 risk vetoes + the regime gate are
+dead. Supersedes [[F-011]].
+- **Fix idea:** Populate `ScanContext` in `_step_scan` from data already on hand —
+  `india_vix`/drawdown from the macro snapshot, `critical_event_symbols` from
+  `sentiment_daily.has_critical` (and/or `news_items.is_critical`), `fno_ban_symbols`
+  from an NSE ban-list fetch (F-010), `t2t_symbols` from a maintained list. Add a
+  test asserting a banned/critical symbol is filtered.
+- **Doc to revisit:** `04-analysis-strategy.md` §3.4; `07-jobs-workflows.md`.
+
+### F-020 — "regime" name collision (`INACC`, Med, Phase 4)
+`features.regime.classify_regime` (4-axis voter, VIX 14/20 thresholds, feeds
+sizing multiplier) vs `strategy.rules.passes_regime` (gate: VIX<25 AND Nifty-200
+5d dd>−5%). Same word, different logic; the rule one is also unused (F-019).
+- **Fix idea:** Rename the Layer-A rule (e.g. `passes_market_filter`) and, when
+  wiring F-019, decide whether the gate should reuse the macro voter's RISK_OFF
+  classification instead of its own thresholds.
+
+---
+
+_Counts: 19 open · 1 superseded · 0 fixed. Updated through Phase 4._

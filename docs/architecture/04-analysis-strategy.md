@@ -1,0 +1,240 @@
+# 04 — Analysis & Strategy (`features/`, `strategy/`)
+
+> Part of the [`docs/architecture/`](./PROGRESS.md) set. This is the analytical
+> core: how raw bars become indicators (`features/`) and how indicators + context
+> become trade decisions (`strategy/`). Grounded in the source. **This phase
+> resolves the F-011 question** (§3.4) and surfaces the most important
+> correctness finding in the review so far.
+
+## 1. The pipeline
+
+```mermaid
+flowchart LR
+    OHLCV["parquet OHLCV"] --> TECH["features.technicals<br/>add_indicators()"]
+    TECH --> RULES["strategy.rules (Layer A)<br/>10 pass/fail gates"]
+    CTX["ScanContext<br/>(regime / ban / events)"] --> RULES
+    RULES -->|all_passed| RANK["strategy.ranker (Layer B)<br/>LightGBM score + top-K"]
+    RANK --> SEL["selected candidates"]
+    SEL --> SIZE["strategy.sizing<br/>position_size()"]
+    SIZE --> OPEN["paper-trade opened"]
+    OPEN --> EXITS["strategy.exits<br/>evaluate_exit() daily"]
+    MACRO["features.regime<br/>4-axis voter"] -->|regime mult| SIZE
+    NEWS["features.sentiment<br/>FinBERT + critical veto"] --> CTX
+    MACRO --> CTX
+```
+
+The key structural point: **Layer A is a hard gate, Layer B re-ranks the
+survivors, sizing/exits manage the position.** Sentiment and regime are *meant*
+to feed both the gate (`ScanContext`) and sizing — §3.4 shows where that wiring
+is currently missing.
+
+## 2. `features/` — analysis
+
+### 2.1 `technicals.py` — indicator suite
+Thin wrappers over the `ta` library; every function returns a `pd.Series`, no
+mutation. `add_indicators(df)` returns an enriched copy with the default suite
+that Layer A consumes:
+
+| Indicator | Columns added | Default params |
+|---|---|---|
+| RSI | `rsi_14` | 14 |
+| SMA | `sma_20`, `sma_50`, `sma_200` | 20/50/200 |
+| EMA | `ema_20`, `ema_50` | 20/50 |
+| MACD | line / signal / hist | 12/26/9 |
+| Bollinger | upper/mid/lower | 20, 2σ |
+| ATR | `atr_14` | 14 |
+| ADX | `adx_14` | 14 |
+| VWAP | `vwap_14` | 14 |
+| OBV | `obv` | — |
+| returns | daily return | — |
+
+NaN warm-up is preserved (`fillna=False`) — the first 199 rows have no `sma_200`,
+which is why the scanner needs `MIN_HISTORY_BARS = 200`.
+
+### 2.2 `sentiment.py` — FinBERT + critical veto
+Three things per headline:
+- **Score** — FinBERT (`ProsusAI/finbert`, lazy singleton, ~440 MB CPU) →
+  `score = P(positive) − P(negative) ∈ [-1, +1]`. Empty text → 0.
+- **Category** — first-match keyword bucket (results / management / regulatory /
+  M&A / downgrade / dividend / pledge). Low-precision by design — the ranker only
+  uses counts, not the category itself.
+- **`is_critical`** — a regex set (`CRITICAL_PATTERNS`: SEBI bar/probe, auditor
+  resign, fraud, going-concern, promoter pledge, default, NCLT, ED/CBI raid, …)
+  intended as a **hard veto**.
+
+**Aggregation:** `aggregate_symbol` rolls trailing 7d/30d mean score, `news_count`,
+`negative_news_count` (≤ −0.20), and `has_critical` into a `sentiment_daily` row
+(UPSERT). Symbols with zero news in 30d are skipped (no empty rows).
+
+> The critical veto is *computed* (`has_critical`, `is_critical`) but, as §3.4
+> shows, **never enforced** in the live scan because the gate that would use it
+> reads an unpopulated context field. → F-019.
+
+### 2.3 `regime.py` — 4-axis macro voter
+A pure classifier over four axes, each voting −1/0/+1:
+
+| Axis | +1 | −1 | Source |
+|---|---|---|---|
+| India VIX | < 14 (calm) | > 20 (fear) | macro `vix` close |
+| Global futures | mean Δ ≥ +0.30% | ≤ −0.30% | S&P/Nasdaq/Dow 1d% |
+| FII flow | ≥ +₹2000 cr | ≤ −₹2000 cr | NSE FII net |
+| USDINR | ≤ −0.50% (₹ strong) | ≥ +0.50% (₹ weak) | USDINR 1d% |
+
+`composite_score ∈ [−4, +4]`: ≥ +2 → **RISK_ON**, ≤ −2 → **RISK_OFF**, else
+**NEUTRAL**. A missing reading votes 0 (neutral). The result carries per-axis
+votes + reasons (the brief renders them). `position_size_multiplier` maps
+RISK_ON/NEUTRAL/RISK_OFF → 1.0 / 0.75 / 0.5.
+
+> **Two different "regime" concepts coexist** and shouldn't be confused: this
+> 4-axis voter (feeds *sizing*) vs. the Layer-A `passes_regime` *rule* (a gate
+> using VIX < 25 AND Nifty-200 5d drawdown > −5%, different thresholds, different
+> inputs). The names collide and the rule version is currently a no-op (§3.4).
+> → F-020.
+
+## 3. `strategy/` — decision logic
+
+### 3.1 Layer A — the 10 rules (`rules.py`)
+`evaluate_symbol` runs all ten against one enriched frame and returns a
+`Candidate` whose `all_passed` is the gate. The ten:
+
+| # | Rule | Logic | Input |
+|---|---|---|---|
+| 1 | `uptrend` | close > SMA200 **and** SMA50 > SMA200 | indicators |
+| 2 | `pullback` | within 3% of SMA20 **or** SMA50 | indicators |
+| 3 | `rsi_band` | 30 ≤ RSI(14) ≤ 45 | indicators |
+| 4 | `volume_exhaustion` | on a down day, vol < 20d avg (up days pass) | indicators |
+| 5 | `liquidity` | 20d avg turnover ≥ ₹10 cr | indicators |
+| 6 | `no_recent_breakdown` | not > 15% below its 30d high | indicators |
+| 7 | `regime` | VIX < 25 **and** Nifty200 5d dd > −5% | **`ScanContext`** |
+| 8 | `not_fno_banned` | symbol ∉ F&O ban list | **`ScanContext`** |
+| 9 | `not_t2t` | symbol ∉ trade-to-trade segment | **`ScanContext`** |
+| 10 | `no_critical_event` | symbol ∉ critical-event set (30d) | **`ScanContext`** |
+
+Rules 1–6 are computed from the price frame. **Rules 7–10 read `ScanContext`**,
+and by deliberate design *an empty context field makes the rule pass* (docstring:
+"tightens automatically once Phases 8/9 light up the missing inputs").
+
+`scan()` iterates `list_symbols()`, skips symbols with < 200 bars, enriches, and
+evaluates. `passing()` keeps only `all_passed`.
+
+### 3.2 Sizing (`sizing.py`)
+Pure `position_size(SizingInput) → SizingResult`. Integer share count is the min
+of three budgets, floored at 0:
+
+```
+risk_qty   = floor(capital × risk_pct × regime_mult / (entry − stop))
+stock_qty  = floor((25% × capital − deployed_in_symbol) / entry)
+sector_qty = floor((30% × capital − deployed_in_sector) / entry)
+qty        = max(0, min(risk_qty, stock_qty, sector_qty))
+```
+
+`regime_mult` is the 1.0/0.75/0.5 factor from the macro voter. `reasons` names
+the *binding* constraint (the one equal to `qty`), or why it floored to 0.
+Validation rejects `entry ≤ stop`, non-positive capital, `risk_pct ∉ (0,1]`.
+
+### 3.3 Exits (`exits.py`)
+A pure one-bar state machine, `evaluate_exit(TradeState, Bar) → ExitDecision`.
+Precedence within a bar (stop wins ties — conservative):
+
+```mermaid
+flowchart TD
+    A["bar.low ≤ current_stop?"] -->|yes| S["EXIT_STOP @ stop"]
+    A -->|no| B["bar.high ≥ target?"]
+    B -->|yes| T["EXIT_TARGET @ target"]
+    B -->|no| C["days_held ≥ 25 AND close ≤ entry?"]
+    C -->|yes| TM["EXIT_TIME @ close"]
+    C -->|no| H["HOLD — maybe ratchet stop"]
+```
+
+- **Target** = `min(entry × 1.20, entry + 2.5 × (entry − initial_stop))` — the
+  lesser of +20% or 2.5R.
+- **Trailing** (`_trail_new_stop`, never lowers): close ≥ +15% → stop = `close −
+  ATR_at_entry`; close ≥ +10% → stop = breakeven (`entry`).
+- **Time stop** only fires when *not* in profit (`close ≤ entry`) at ≥ 25 days.
+
+The caller threads `new_stop` forward and bumps `days_held`; v2 schema columns
+`current_stop`/`atr_at_entry` persist this across daily MTM runs.
+
+### 3.4 🔴 RESOLVED: F-011 — four Layer-A gates are no-ops in production
+
+Both production callers build the context with **all defaults**:
+
+```python
+# jobs/pre_open.py::_step_scan   and   cli.py::scan_cmd
+ctx = ScanContext(scan_date=as_of)   # india_vix=None, fno_ban_symbols=∅, …
+```
+
+Nothing populates `india_vix`, `nifty200_drawdown_5d_pct`, `fno_ban_symbols`,
+`t2t_symbols`, or `critical_event_symbols`. Consequences:
+
+- **`regime` (rule 7)** → both inputs None → returns *"no macro data — passing by
+  default"* — **always passes**, even though `pre_open` fetched the macro
+  snapshot moments earlier. The regime gate is dead.
+- **`not_fno_banned` (8)** → empty set → always passes (and the `fno_ban_list`
+  table is empty too, F-010).
+- **`not_t2t` (9)** → always passes.
+- **`no_critical_event` (10)** → always passes — even though `sentiment.has_critical`
+  / `is_critical` are computed and stored. The intended hard veto never fires.
+
+**So only rules 1–6 actually filter.** A "9/10" candidate failed exactly one of
+the six *real* rules (e.g. today's JIOFIN at close 234 < SMA200 285 fails
+`uptrend`; the 4 context rules contribute free passes). This inflates pass counts
+and removes three safety vetoes (ban list, T2T, critical news) plus the
+macro-regime gate. → **F-019** (supersedes the table-centric F-011).
+
+### 3.5 Layer B — the LightGBM ranker (`ranker*.py`)
+Advisory re-ranker over Layer-A survivors. Four modules:
+
+- **`ranker_features.py`** — 20 features (`FEATURE_NAMES`, the single source of
+  column order): 5 setup (RSI, pullback%×2, ATR%, dist-from-52w-high), 5 trend
+  (SMA slopes 5/10/20d, ADX, dist-from-52w-low), 2 volume (vol vs 20d, OBV
+  slope), 5 macro (VIX, VIX Δ5d, FII 5d sum, USDINR Δ5d, regime ordinal), 3
+  sentiment (7d, 30d, neg-news count 7d). Pure, NaN-safe — any missing input
+  becomes NaN (LightGBM handles NaN natively).
+- **`ranker_labels.py`** — `label_candidate` replays **Phase 6 exits** forward
+  from signal_date+1 (next-open fill + slippage + buy/sell charges) and labels
+  1 if net P&L > 0 else 0; `None` if < `max_days+1` forward bars. This is the
+  `strategy ⇄ backtest` entanglement from [01 §3.3](./01-architecture.md) — the
+  label *is* the backtest outcome.
+- **`ranker_train.py`** — `train_walkforward` over rolling windows; LightGBM
+  hyperparams tuned for small data (`num_leaves=15`, `min_data_in_leaf=10`,
+  `lr=0.05`, `n_estimators=200`, `is_unbalance=True`, `random_state=42`, early
+  stopping). `InsufficientDataError` when the final window has < 30 examples or
+  one class.
+- **`ranker.py`** — `score_and_filter`: loads the active model, builds the
+  feature matrix, `predict_proba`, marks top-K (`k=5`) `selected`. **Cold-start**
+  (no active model / missing pkl / feature mismatch / any IO error) →
+  `ScoredCandidate(c, None, True)` for *every* candidate, so behaviour falls back
+  to pure Layer A. `RankerSignalProvider` plugs the same scoring into the
+  backtest engine via the `SignalProvider` seam.
+
+**Promotion** (registry, [02 §8](./02-data-schema.md)): a newly trained model
+only goes `active` if its OOS Sharpe beats the current active by > 0.05 (NaN never
+promotes). **Current live state:** the one trained model is *inactive* (first
+model, NaN Sharpe declined promotion), so the system is in **cold-start** — Layer
+B selects nothing; all rules-passers pass through. Not a bug, but means the ranker
+adds no value until a model promotes.
+
+---
+
+## ⚠️ Robustness notes / open questions
+
+- **🔴 Four of ten Layer-A rules don't do anything** (regime, F&O-ban, T2T,
+  critical-news). The scan is effectively a 6-rule technical filter. Three of the
+  four missing gates are *risk vetoes*. Highest-priority correctness finding. →
+  F-019.
+- **The critical-news hard veto is fully built but unwired.** FinBERT flags
+  `is_critical`, `sentiment_daily.has_critical` is stored, yet a flagged stock is
+  never excluded — because `critical_event_symbols` is never populated from it. →
+  F-019.
+- **Regime is fetched but not used as a gate**, only as a sizing multiplier. The
+  Layer-A regime rule and the macro voter are different mechanisms with the same
+  name. → F-020.
+- **Ranker is inactive (cold-start).** With < ~200 training examples (itself a
+  consequence of the 12-symbol universe, F-014) the model can't clear the
+  promotion gate, so Layer B is presently inert. Expanding to Nifty 50 (F-012)
+  both fixes the universe *and* gives the ranker enough labels to matter.
+- **RSI band [30,45] + within-3%-pullback is a tight, mean-reversion-biased
+  setup.** Worth validating against the backtest that this gate isn't so strict it
+  starves the system of trades (zero opens every day so far). Revisit in
+  [05-backtest-portfolio-paper](./05-backtest-portfolio-paper.md).

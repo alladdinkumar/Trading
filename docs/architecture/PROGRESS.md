@@ -29,14 +29,14 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | 1 | `01-architecture.md` | `[x]` |
 | 2 | `02-data-schema.md` | `[x]` |
 | 3 | `03-data-layer.md` | `[x]` |
-| 4 | `04-analysis-strategy.md` | `[ ]` |
+| 4 | `04-analysis-strategy.md` | `[x]` |
 | 5 | `05-backtest-portfolio-paper.md` | `[ ]` |
 | 6 | `06-llm-and-skills.md` | `[ ]` |
 | 7 | `07-jobs-workflows.md` | `[ ]` |
 | 8 | `08-ops-cli-ui.md` | `[ ]` |
 
-**Currently working on:** _Phase 3 complete — data/ ingestion layer shipped._
-**Next up:** _Phase 4 — `04-analysis-strategy.md` (features/ + strategy/; verify F-011 gate behaviour)._
+**Currently working on:** _Phase 4 complete — analysis + strategy core shipped; F-011 resolved → F-019._
+**Next up:** _Phase 5 — `05-backtest-portfolio-paper.md`._
 
 ---
 
@@ -68,7 +68,10 @@ and update any docs the fixes invalidate.
   - [x] Per-module deep dives (yfinance, cache, kite, kite_snapshot, quotes_snapshot, macro, news, sector, universe)
   - [x] Source→module→sink Mermaid; MCP-vs-SDK split; coverage reality (12 symbols)
   - [x] Findings F-014..F-018 (incl. high-sev F-014 universe coverage, F-018 freshness)
-- [ ] **Phase 4 — Analysis + strategy (`features/`, `strategy/`)**
+- [x] **Phase 4 — Analysis + strategy (`features/`, `strategy/`)**
+  - [x] features: technicals suite, FinBERT sentiment + critical veto, 4-axis regime voter
+  - [x] strategy: 10 Layer-A rules, sizing formula, exit state machine, Layer-B ranker (features/labels/train/registry)
+  - [x] **Resolved F-011 → F-019** (4 rules are no-ops: empty ScanContext); + F-020 regime name collision
 - [ ] **Phase 5 — Backtest + portfolio + paper (`backtest/`, `portfolio/`, `paper/`)**
 - [ ] **Phase 6 — LLM layer + Claude Code skills (`llm/`, `.claude/skills/`)**
 - [ ] **Phase 7 — Jobs + workflows (`jobs/`)**
