@@ -1,0 +1,233 @@
+# 03 — Data Layer (`data/`)
+
+> Part of the [`docs/architecture/`](./PROGRESS.md) set. Covers the **ingestion
+> layer**: every external source, how it's normalised into frozen DTOs, and how
+> each one fails. Grounded in `src/trading/data/*.py`. Storage of what these
+> fetch is in [02-data-schema](./02-data-schema.md).
+
+## 1. Role & shape
+
+`data/` is the only layer that talks to the outside world. Its contract to the
+rest of the system:
+
+- **In:** external sources (yfinance, NSE via nsepython, RSS, Kite via MCP/SDK).
+- **Out:** frozen dataclasses (`Holding`, `Quote`, `MacroSnapshot`, `SectorRow`,
+  `NewsItem`, …) — never raw dicts or live HTTP responses.
+- **Failure mode:** best-effort. A failing source returns `None`/`[]`/partial
+  rather than raising, so the caller degrades (the one exception that *does*
+  raise is OHLCV fetch — `OhlcvFetchError` — because an empty price history is
+  unusable, not degraded).
+
+```mermaid
+flowchart LR
+    subgraph SRC["External sources"]
+        YF["yfinance"]
+        NSE["NSE (nsepython)"]
+        RSS["RSS feeds"]
+        MCP["Kite MCP (Claude Code)"]
+        SDK["Kite SDK (fallback)"]
+    end
+    subgraph DATA["data/ ingestion"]
+        yfm["yfinance.py"]
+        macm["macro.py"]
+        secm["sector.py"]
+        newm["news.py"]
+        ksnap["kite_snapshot.py"]
+        qsnap["quotes_snapshot.py"]
+        kitem["kite.py"]
+        cache["cache.py"]
+    end
+    subgraph SINK["Persistence / consumers"]
+        PARQ["parquet (store.ohlcv)"]
+        DB["SQLite (store.*)"]
+        JOBS["jobs / strategy"]
+    end
+
+    YF --> yfm --> PARQ
+    YF --> macm --> DB
+    YF --> secm --> DB
+    RSS --> newm --> DB
+    NSE --> macm
+    NSE --> newm
+    MCP -. "writes JSON" .-> ksnap --> JOBS
+    MCP -. "writes JSON" .-> qsnap --> JOBS
+    SDK --> kitem -. "emergency only" .-> JOBS
+    RSS --> cache
+    NSE --> cache
+```
+
+## 2. Module map
+
+| Module | Source | Output DTO | Failure |
+|---|---|---|---|
+| `yfinance.py` | yfinance | OHLCV `DataFrame` | raises `OhlcvFetchError` |
+| `cache.py` | — | `CachedSession` (SQLite, 1h TTL) | n/a |
+| `kite.py` | Kite SDK | `Holding`/`Position`/`GttOrder`/`Quote`/`Margin` | `KiteAuthError` on token expiry |
+| `kite_snapshot.py` | JSON (from `/kite-snapshot`) | `Holding`/`GttOrder`/`Position` | `KiteSnapshotMissing`/`StaleError` |
+| `quotes_snapshot.py` | JSON (from `/kite-quotes-snapshot`) | `dict[symbol, Quote]` | `QuoteSnapshotMissing`/`StaleError` |
+| `macro.py` | yfinance + NSE | `MacroSnapshot`, `YfQuote` | per-source `None` |
+| `news.py` | RSS + NSE events | `NewsItem` | per-source isolation (skip) |
+| `sector.py` | yfinance | `SectorRow` | per-ticker skip |
+| `universe.py` | `data/static/universe.txt` | `list[str]` | reads file |
+
+## 3. Per-module logic
+
+### 3.1 `yfinance.py` — historical OHLCV
+`fetch_ohlcv(symbol, start, end, auto_adjust=True)` hides yfinance's
+irregularities: it flattens MultiIndex columns, lowercases names, enforces the
+exact `(open, high, low, close, volume)` set, and strips tz to a naive
+`DatetimeIndex(name="date")`. `to_yf_symbol` appends the `.NS` NSE suffix
+idempotently. Adjusted prices are the default (`auto_adjust=True`), so splits/
+dividends are already baked in — which is why the dormant `corp_actions` table
+isn't needed for price adjustment.
+
+**Freshness:** there is *no* staleness guard on read. `store.ohlcv.read_ohlcv`
+applies `_drop_trailing_nan_close` (Phase 12.5 — strips yfinance's current-day
+NaN stub bar) but nothing checks that the last stored bar is recent. History is
+refreshed only when the operator runs `trading ingest-history`; no daily job
+re-pulls OHLCV. → **F-018**.
+
+### 3.2 `cache.py` — HTTP cache
+`get_cached_session()` returns a `requests_cache.CachedSession` backed by
+`data/cache/http.sqlite` with a 1-hour TTL. Used by the RSS fetchers so repeated
+runs in a session don't re-hit feeds. (yfinance and nsepython manage their own
+HTTP, so the cache covers news only.)
+
+### 3.3 `kite.py` — SDK wrapper (emergency fallback only)
+A typed wrapper over `kiteconnect`. Each call returns a frozen dataclass; the
+adapters (`_to_holding`, `_to_quote`, …) defensively coerce types and tolerate
+missing optional fields. `TokenException` is translated to `KiteAuthError` so
+callers branch on "re-login required" without importing SDK internals. **Post
+Phase 13.5 this is wired only into the `kite-emergency-*` CLI commands** — the
+production path reads JSON snapshots instead (§3.4). `_to_quote` derives `bid`/
+`ask` from the top of the depth ladder.
+
+### 3.4 `kite_snapshot.py` — the production broker reader (MCP pivot)
+Readers for the JSON that the `/kite-snapshot` skill writes. `read_holdings`/
+`read_gtts`/`read_positions` open `data/raw/<as_of>/<resource>.json` and splat
+each row into the `data.kite` dataclass (`Holding(**row)`). `_validate_meta`
+checks that `_meta.json`'s `snapshot_at` date-prefix equals `as_of`, else
+`KiteSnapshotStaleError`; a missing file raises `KiteSnapshotMissingError` with a
+"run /kite-snapshot" remediation.
+
+> **Validation gap:** `Holding(**row)` is the *only* structural check — an extra
+> key raises a raw `TypeError`, a missing key a `TypeError`, and a wrong-typed
+> value is silently accepted (no coercion, unlike the SDK adapters). The skill
+> is responsible for emitting exactly the dataclass fields. → F-002.
+
+### 3.5 `quotes_snapshot.py` — intraday quotes reader
+`read_latest_quotes(paths, as_of, max_age_minutes=30)` scans the date dir for
+`quotes_HHMM.json`, picks the newest by `HHMM`, and rebuilds a
+`dict[symbol, Quote]` (popping `tradingsymbol` before `Quote(**row)`). **The
+filename HHMM is the single source of truth for capture time**; staleness is
+`datetime.now() - capture_ts > max_age_minutes`. A tightened regex rejects
+invalid hours/minutes.
+
+> `datetime.now()` is **naive local time** and `capture_ts` is built from
+> `as_of` + HHMM — both assume the host clock is IST. Correct on the intended
+> machine, fragile anywhere else. Ties to F-004 (no canonical clock). → F-018.
+
+### 3.6 `macro.py` — macro snapshot + regime trigger
+- **yfinance tickers** (`YF_TICKERS`): `^GSPC`/`^IXIC`/`^DJI` (US spot indices),
+  `INR=X` (USDINR), `BZ=F` (Brent), `^INDIAVIX` (India VIX), `^TNX` (US 10y).
+  `fetch_yf_quote` returns latest close + 1-day % change, pulling
+  `lookback_days=10` bars so weekends/holidays don't empty the window.
+- **FII/DII** (`fetch_fii_dii`): wraps `nsepython.nse_fiidii`, tolerant of both
+  modern (`category`/`netValue`) and legacy (`type`/`netVal`) schemas; any
+  failure → `(None, None)`.
+- **`build_snapshot`** assembles a `MacroSnapshot` (regime left `None`).
+- **`snapshot_and_classify`** is the end-to-end call: fetch once → build snapshot
+  → run the regime classifier → return a snapshot with `regime` filled. This is
+  the documented **upward back-edge** into `features.regime` (F-007).
+
+> Column-naming mismatch: the schema's `dow_fut`/`nasdaq_fut` columns actually
+> store **spot** index closes (`^DJI`/`^IXIC`), not futures, and `sgx_nifty` is
+> always `None` (no reliable ticker post SGX→IFSC). Harmless to logic (regime
+> uses the values regardless of name) but misleading. → F-017.
+
+### 3.7 `news.py` — RSS + NSE events + symbol attribution
+- **Sources** behind a `NewsSource` Protocol: three RSS feeds (Moneycontrol, ET,
+  Business Standard) via the cached session, plus `NseEventsSource`
+  (corporate-event calendar via `nsepython.nse_events`). `default_sources()`
+  bundles them.
+- **`fetch_all_news`** pulls every source with **per-source isolation** (a
+  raising adapter contributes nothing, doesn't abort), **dedups by URL**, and
+  attributes a symbol via `attribute_symbol` (whole-word, case-insensitive match
+  against `DEFAULT_ALIASES`). Unmatched → `symbol=None` (still useful for
+  macro/sector narrative).
+
+> Two real gaps here, both relevant to the Nifty-50 goal:
+> - **`DEFAULT_ALIASES` covers only 12 symbols** (holdings + smoke universe).
+>   Candidate/holdings news for the other ~45 Nifty-50 names is never attributed,
+>   so `sentiment_daily` stays sparse and the per-symbol sentiment/critical
+>   inputs are mostly empty. → **F-015**.
+> - **Dedup is URL-only and within a single run.** NSE events re-fetched each day
+>   (and re-pulled headlines) create duplicate `news_items` rows across runs —
+>   there's no DB-level uniqueness on `url`/`headline`. → **F-016**.
+
+### 3.8 `sector.py` — sectoral relative strength
+- **11 NSE sector indices** (`SECTOR_TICKERS`) benchmarked against `^NSEI`
+  (Nifty 50). `compute_rs` is simple-difference RS (`sector_ret_N −
+  bench_ret_N`) over 5/20/60-day windows; `None` when history is short or the
+  lookback close is zero.
+- **`_regime_for(rs_20d)`** labels LEADING/NEUTRAL/LAGGING at ±2%.
+- **`fetch_all_sectors`** returns no row for a failed sector ticker, and an empty
+  list if the *benchmark* fails (RS undefined without it). All rows are stamped
+  with `as_of` even if yfinance's last bar lags a day.
+- **`load_sector_map`** reads `data/static/sector_map.csv` (`symbol,sector`),
+  tolerating comments/blanks, returning `{}` if absent (callers degrade).
+
+### 3.9 `universe.py` — symbol list
+`load_universe()` reads `data/static/universe.txt` (one ticker per line,
+comments/blanks skipped, dedup preserving order). This is the *intended* trading
+universe — but see the coverage gap below.
+
+## 4. The coverage reality (important)
+
+The configured universe and what's actually ingested diverge sharply:
+
+| Source of truth | Count |
+|---|---|
+| `data/static/universe.txt` | 60 |
+| `data/static/sector_map.csv` | 57 |
+| **Parquet OHLCV actually on disk** (`data/parquet/nifty200/`) | **12** |
+
+Because the scanner iterates `store.ohlcv.list_symbols()` (the parquet
+directory), **the live candidate universe today is 12 stocks**, not 50/57/60.
+This is why every recent `pre-open` reports "12 candidates evaluated." It
+directly blocks the **Nifty-50 paper-trading requirement** — history must be
+ingested for all 50 constituents first. → **F-014** (and ties to the
+[Nifty-50 universe requirement](./FINDINGS.md) under F-012).
+
+## 5. MCP-vs-SDK split (recap)
+
+Two ways to reach Kite, deliberately separated:
+
+| Path | Module | When |
+|---|---|---|
+| **MCP via skill** (production) | `kite_snapshot`, `quotes_snapshot` | normal daily flow — Claude Code holds the session, writes JSON |
+| **SDK direct** (fallback) | `kite.py` | only `kite-emergency-login` / `kite-emergency-snapshot` CLI |
+
+This keeps the broker session and secrets in the interactive Claude Code
+session; the batch Python reads files. See [00-overview §1](./00-overview.md).
+
+---
+
+## ⚠️ Robustness notes / open questions
+
+- **🔴 The system is effectively trading 12 stocks.** Universe config says
+  ~57–60 and the requirement is Nifty 50, but only 12 symbols have parquet
+  history, so scan/rank/auto-open all operate on 12. Highest-priority gap for the
+  paper-trade goal. → F-014.
+- **OHLCV is never auto-refreshed.** No daily re-pull and no freshness guard on
+  read; a forgotten `ingest-history` means the scan silently runs on stale prices.
+  → F-018.
+- **Sentiment is mostly blind** because attribution covers 12 symbols. The
+  critical-news veto (F-011) and per-symbol sentiment features are therefore
+  near-empty for most candidates. → F-015.
+- **News table grows with duplicates.** URL-only, single-run dedup + daily event
+  re-fetch ⇒ duplicate rows accumulate. → F-016 (and F-013 retention).
+- **Snapshot readers trust the skill.** Structural validation is just
+  `Dataclass(**row)`; no schema/type enforcement at the boundary. → F-002.
+- **Naive local clock** in quote staleness assumes host == IST. → F-004/F-018.
+- **Macro column labels lie** (`*_fut` hold spot; `sgx_nifty` always None). → F-017.

@@ -52,6 +52,11 @@
 | F-011 | VULN | High | 2 | Rule gates `passes_not_fno_banned` / `passes_no_critical_event` depend on empty tables (`fno_ban_list`, `event_calendar`) — likely no-ops, so banned/event-risk stocks may pass | Open |
 | F-012 | INACC | Med | 2 | Universe scope: paper-trading candidate set should be **Nifty 50 (50 stocks)** per user req; currently ~57 (Nifty 50 + holdings) under a `nifty200/` subdir | Open |
 | F-013 | GAP | Low | 2 | No retention/compaction policy for `news_items` (append-only) or `data/raw/<date>/` JSON — unbounded growth | Open |
+| F-014 | GAP | High | 3 | Only 12 symbols have parquet OHLCV on disk → live candidate universe is 12, not the configured ~57 nor the required Nifty 50 | Open |
+| F-015 | GAP | Med | 3 | News symbol-attribution alias map covers only 12 symbols → sparse `sentiment_daily`, near-empty per-symbol sentiment/critical inputs | Open |
+| F-016 | DEBT | Med | 3 | News dedup is URL-only and single-run; daily event/headline re-fetch creates duplicate `news_items` rows (no DB-level uniqueness) | Open |
+| F-017 | INACC | Low | 3 | `macro_snapshot.dow_fut`/`nasdaq_fut` store spot index closes not futures; `sgx_nifty` always NULL | Open |
+| F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | Open |
 
 ---
 
@@ -167,4 +172,44 @@ Parquet lives under `data/parquet/nifty200/` but the active set is ~57 symbols
 
 ---
 
-_Counts: 13 open · 0 fixed. Updated through Phase 2._
+### F-014 — Only 12 symbols ingested (`GAP`, High, Phase 3)
+`data/parquet/nifty200/` holds 12 `.parquet` files; `universe.txt` lists 60 and
+`sector_map.csv` 57. The scanner iterates the parquet dir, so the candidate
+universe is 12. Blocks the Nifty-50 paper-trade requirement ([[F-012]]).
+- **Fix idea (fix pass):** `trading ingest-history` for the 50 Nifty-50
+  constituents; verify `list_symbols()` returns 50; re-run `pre-open` and
+  confirm `candidates_total` ≈ 50.
+
+### F-015 — Sentiment attribution covers 12 symbols (`GAP`, Med, Phase 3)
+`news.DEFAULT_ALIASES` has 12 entries. Most Nifty-50 names' news is never
+attributed → `sentiment_daily` sparse → sentiment + critical-news inputs empty
+for most candidates (compounds [[F-011]]).
+- **Fix idea:** Build an alias map for all 50 (ticker + common names); consider
+  fuzzy/company-name matching from a maintained CSV.
+
+### F-016 — Duplicate news rows across runs (`DEBT`, Med, Phase 3)
+`fetch_all_news` dedups by URL within one call only; daily re-fetch of RSS + NSE
+events re-inserts the same headlines/events. No DB uniqueness constraint.
+- **Fix idea:** Unique index on `news_items(url)` (or `(date,url)`), or
+  insert-or-ignore; dedupe NSE events by `(symbol, purpose, event_date)`.
+
+### F-017 — Macro column labels misleading (`INACC`, Low, Phase 3)
+`dow_fut`/`nasdaq_fut` hold spot index closes (`^DJI`/`^IXIC`); `sgx_nifty`
+always NULL. Logic unaffected (regime uses values by key), naming misleads.
+- **Fix idea:** Rename columns to `dow`/`nasdaq` (schema v3) or document inline.
+
+### F-018 — No OHLCV freshness / refresh (`GAP`, High, Phase 3)
+History is refreshed only via manual `ingest-history`; no daily re-pull, no
+read-time staleness check beyond the trailing-NaN drop. A skipped refresh means
+the scan runs on stale prices with no signal. Quote staleness additionally
+assumes the host clock is IST (naive `datetime.now()`).
+- **Verify in:** Phase 7 (does any job refresh OHLCV?). Phase 12.7 spec
+  (`2026-06-11-phase-12-7-ohlcv-freshness-design.md`) exists — confirm whether
+  implemented.
+- **Fix idea:** Add an OHLCV refresh step to `pre_open` (or a freshness guard
+  that warns/fails when the latest bar is older than the last trading day);
+  centralise the IST clock ([[F-004]]).
+
+---
+
+_Counts: 18 open · 0 fixed. Updated through Phase 3._

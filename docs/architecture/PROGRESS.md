@@ -28,15 +28,15 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | 0 | `00-overview.md` (+ scaffold) | `[x]` |
 | 1 | `01-architecture.md` | `[x]` |
 | 2 | `02-data-schema.md` | `[x]` |
-| 3 | `03-data-layer.md` | `[ ]` |
+| 3 | `03-data-layer.md` | `[x]` |
 | 4 | `04-analysis-strategy.md` | `[ ]` |
 | 5 | `05-backtest-portfolio-paper.md` | `[ ]` |
 | 6 | `06-llm-and-skills.md` | `[ ]` |
 | 7 | `07-jobs-workflows.md` | `[ ]` |
 | 8 | `08-ops-cli-ui.md` | `[ ]` |
 
-**Currently working on:** _Phase 2 complete — schema + on-disk contracts shipped._
-**Next up:** _Phase 3 — `03-data-layer.md` (the `data/` ingestion package)._
+**Currently working on:** _Phase 3 complete — data/ ingestion layer shipped._
+**Next up:** _Phase 4 — `04-analysis-strategy.md` (features/ + strategy/; verify F-011 gate behaviour)._
 
 ---
 
@@ -64,7 +64,10 @@ and update any docs the fixes invalidate.
   - [x] SQLite ER diagram + all 16 tables (8 active / 8 dormant), field-level notes
   - [x] Parquet layout, JSON snapshot contracts, `models/registry.csv`, `data/` map
   - [x] Findings F-010..F-013 (incl. high-sev F-011 empty-table gates)
-- [ ] **Phase 3 — Data layer (`data/`)**
+- [x] **Phase 3 — Data layer (`data/`)**
+  - [x] Per-module deep dives (yfinance, cache, kite, kite_snapshot, quotes_snapshot, macro, news, sector, universe)
+  - [x] Source→module→sink Mermaid; MCP-vs-SDK split; coverage reality (12 symbols)
+  - [x] Findings F-014..F-018 (incl. high-sev F-014 universe coverage, F-018 freshness)
 - [ ] **Phase 4 — Analysis + strategy (`features/`, `strategy/`)**
 - [ ] **Phase 5 — Backtest + portfolio + paper (`backtest/`, `portfolio/`, `paper/`)**
 - [ ] **Phase 6 — LLM layer + Claude Code skills (`llm/`, `.claude/skills/`)**
