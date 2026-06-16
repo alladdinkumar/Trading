@@ -70,6 +70,7 @@
 | F-029 | VULN | Med | 7 | `pre_open._step_auto_open` hardcodes `predicted_return_pct=20.0` + target=+20% for every signal → prediction calibration is a single meaningless bucket; signal.target disagrees with exit engine's min(+20%,2.5R) | Open |
 | F-030 | DEBT | Low | 7 | Visibility-only (non-selected) signals inserted unconditionally each pre_open run → duplicate `signals` rows on re-run | Open |
 | F-031 | INACC | Low | 7 | Train/serve skew: `negative_news_count_7d` empty during weekly retrain (`negative_news_lookup={}`) but populated at inference | Open |
+| F-032 | GAP | Med | 8 | Daily pipeline is human-run reminders only (sole unattended job is weekly_train); a missed day = no snapshot/bundle/MTM, open trades unmanaged, track-record holes | Open |
 
 ---
 
@@ -338,4 +339,16 @@ inference.
 
 ---
 
-_Counts: 30 open · 1 superseded · 0 fixed. Updated through Phase 7._
+### F-032 — Live-run continuity depends on the human (`GAP`, Med, Phase 8)
+Only `weekly_train` runs unattended; all daily steps are reminder-driven and
+human-executed. A missed day leaves no Kite snapshot, no bundle, no MTM (open
+trades unmanaged that day), and a gap in `portfolio_snapshots` — undermining the
+3–6 month continuous track record the live run is meant to produce.
+- **Fix idea:** Split the daily flow into broker-free steps (macro, sector, news,
+  scan, OHLCV refresh) that can run unattended on a schedule like weekly_train,
+  and Kite-dependent steps (snapshot, MTM) that still need the interactive session.
+  Keeps the macro/scan/equity spine continuous on missed days.
+
+---
+
+_Counts: 31 open · 1 superseded · 0 fixed. Updated through Phase 8._

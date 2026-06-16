@@ -33,10 +33,10 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | 5 | `05-backtest-portfolio-paper.md` | `[x]` |
 | 6 | `06-llm-and-skills.md` | `[x]` |
 | 7 | `07-jobs-workflows.md` | `[x]` |
-| 8 | `08-ops-cli-ui.md` | `[ ]` |
+| 8 | `08-ops-cli-ui.md` | `[x]` |
 
-**Currently working on:** _Phase 7 complete — 6 job orchestrators shipped; F-018 confirmed (no OHLCV refresh)._
-**Next up:** _Phase 8 — `08-ops-cli-ui.md` (ops/, cli.py, ui/) — final phase._
+**Currently working on:** _All 9 phases (0–8) complete — full architecture doc set + 31 findings shipped._
+**Next up:** _Optional: findings triage/summary pass, then the dedicated fix pass (apply fixes → revisit docs)._
 
 ---
 
@@ -84,4 +84,7 @@ and update any docs the fixes invalidate.
   - [x] shared job shape; daily lifecycle sequence diagram; all 6 orchestrators
   - [x] pre_open degradation matrix; confirmed F-018/F-019/F-022/F-023/F-024 at job level
   - [x] Findings F-029 (constant predictions), F-030 (dup signals), F-031 (train/serve skew); extended F-022
-- [ ] **Phase 8 — Ops + CLI + UI (`ops/`, `cli.py`, `ui/`)**
+- [x] **Phase 8 — Ops + CLI + UI (`ops/`, `cli.py`, `ui/`)**
+  - [x] ops: calendar/holiday gate, notify, logging sinks, runner/SCHEDULE; reminder-driven automation model
+  - [x] cli.py thin-wrapper + exit-2 abort; ui/ cached read-only dashboard
+  - [x] Finding F-032 (live-run continuity depends on human)
