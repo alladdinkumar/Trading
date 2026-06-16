@@ -32,11 +32,11 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | 4 | `04-analysis-strategy.md` | `[x]` |
 | 5 | `05-backtest-portfolio-paper.md` | `[x]` |
 | 6 | `06-llm-and-skills.md` | `[x]` |
-| 7 | `07-jobs-workflows.md` | `[ ]` |
+| 7 | `07-jobs-workflows.md` | `[x]` |
 | 8 | `08-ops-cli-ui.md` | `[ ]` |
 
-**Currently working on:** _Phase 6 complete — llm/ + skills shipped (F-026..F-028)._
-**Next up:** _Phase 7 — `07-jobs-workflows.md` (the 6 job orchestrators; verify F-018 OHLCV refresh)._
+**Currently working on:** _Phase 7 complete — 6 job orchestrators shipped; F-018 confirmed (no OHLCV refresh)._
+**Next up:** _Phase 8 — `08-ops-cli-ui.md` (ops/, cli.py, ui/) — final phase._
 
 ---
 
@@ -80,5 +80,8 @@ and update any docs the fixes invalidate.
   - [x] human/LLM-in-the-loop contract; context.py bundle; briefing.py compile
   - [x] the 3 skills (kite-snapshot, kite-quotes-snapshot, analyst); trust-boundary table
   - [x] Findings F-026 (narrative unverified), F-027 (heading coupling), F-028 (stale docstring)
-- [ ] **Phase 7 — Jobs + workflows (`jobs/`)**
+- [x] **Phase 7 — Jobs + workflows (`jobs/`)**
+  - [x] shared job shape; daily lifecycle sequence diagram; all 6 orchestrators
+  - [x] pre_open degradation matrix; confirmed F-018/F-019/F-022/F-023/F-024 at job level
+  - [x] Findings F-029 (constant predictions), F-030 (dup signals), F-031 (train/serve skew); extended F-022
 - [ ] **Phase 8 — Ops + CLI + UI (`ops/`, `cli.py`, `ui/`)**

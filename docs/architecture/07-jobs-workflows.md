@@ -1,0 +1,212 @@
+# 07 — Jobs & Workflows (`jobs/`)
+
+> Part of the [`docs/architecture/`](./PROGRESS.md) set. The orchestration layer:
+> six jobs that wire the lower layers into the daily/weekly/monthly cadence. This
+> phase **confirms F-018** (no OHLCV refresh) and shows how F-019/F-022/F-023/F-024
+> manifest at the job level. Grounded in `src/trading/jobs/*.py`.
+
+## 1. Shared shape
+
+Every job follows the same skeleton — a genuinely clean, consistent design:
+
+- A frozen `*Result` dataclass returned to the CLI (counts + `warnings` + output
+  paths).
+- A `*Aborted` exception for a missing hard prerequisite (the Kite/quote
+  snapshot) → CLI catches it and exits **2** with remediation.
+- `configure_logging(<job>)` at the entrypoint; `get_conn` + `run_migrations`
+  inside.
+- **Graceful degradation:** soft steps catch their own errors, append to
+  `warnings`, and continue; only the snapshot prerequisite aborts.
+- **Idempotency:** SQLite UPSERTs + guards (`_already_opened_today`,
+  `has_row_for_train_end`) + atomic file writes.
+- **Two-phase (mid_day/post_close):** `prepare` writes `_quote_symbols.txt`;
+  the `/kite-quotes-snapshot` skill runs; `apply` consumes the quotes.
+
+## 2. The daily lifecycle
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Skill as Claude Code skill
+    participant Job as trading CLI (job)
+    participant DB as SQLite + files
+
+    Note over User,DB: Pre-open 08:30–08:45
+    User->>Skill: /kite-snapshot
+    Skill->>DB: holdings.json, gtts.json, _meta.json
+    User->>Job: trading pre-open
+    Job->>DB: macro, sector, news, signals, _context.md
+    User->>Skill: /analyst
+    Skill->>DB: macro_brief/candidates/*.md
+    User->>Job: trading brief compile → brief.md
+
+    Note over User,DB: IEP 08:55–09:00
+    User->>Skill: /kite-quotes-snapshot
+    User->>Job: trading pre-open-iep (rewrites _context.md)
+
+    Note over User,DB: Mid-day 12:25–12:35
+    User->>Job: trading mid-day (prepare)
+    User->>Skill: /kite-quotes-snapshot
+    User->>Job: trading mid-day --apply (MTM)
+
+    Note over User,DB: Post-close 16:05–16:15
+    User->>Job: trading post-close (prepare)
+    User->>Skill: /kite-quotes-snapshot
+    User->>Job: trading post-close --apply (MTM + reconcile + snapshot)
+```
+
+## 3. `pre_open` — the morning pipeline
+
+`run_pre_open` runs eight steps in dependency order, all inside one connection:
+
+```mermaid
+flowchart TD
+    M["_step_macro<br/>snapshot+classify → regime"] --> SEC["_step_sector"]
+    SEC --> N["_step_news<br/>fetch+score+aggregate"]
+    N --> SC["_step_scan<br/>Layer A (empty ScanContext)"]
+    SC --> RK["_step_rank<br/>Layer B (cold-start)"]
+    RK --> PF["_step_portfolio<br/>holdings health (Kite snapshot)"]
+    PF --> AO["_step_auto_open<br/>signals + paper-trades"]
+    AO --> AS["_step_assemble → _context.md"]
+```
+
+**Degradation matrix:**
+
+| Step | On failure | Hard-abort? |
+|---|---|---|
+| macro | warn, regime defaults `NEUTRAL` | no |
+| sector | warn, `sector_written=False` | no |
+| news | warn, `(0,0)` | no |
+| scan | (reads parquet; missing symbol skipped) | no |
+| rank | warn, cold-start (all selected) | no |
+| **portfolio** | **`PreOpenAborted` → exit 2** | **yes** (missing/stale Kite snapshot) |
+| auto_open | per-candidate warn (sizing 0, ATR≥close) | no |
+| assemble | always writes bundle | no |
+
+**Idempotency:** `_already_opened_today` prevents a duplicate paper-trade for a
+symbol+date on re-run. Macro/sector/news/sentiment all UPSERT.
+
+This single job is where four findings from earlier phases concretely originate:
+
+- **F-018 (confirmed):** there is **no OHLCV ingest step**. `_step_scan` reads
+  whatever parquet exists; nothing re-pulls prices. A skipped `ingest-history`
+  ⇒ the scan runs on stale data with no warning.
+- **F-019 (confirmed):** `_step_scan` builds `ScanContext(scan_date=as_of)` with
+  all defaults → 4 of 10 rules are no-ops (regime/ban/t2t/critical), even though
+  the macro snapshot and sentiment were computed earlier in the *same* run.
+- **F-022 (extended):** `_step_portfolio` builds each `HoldingContext` with
+  `FundamentalsSnapshot()` **and** `SentimentSnapshot()` empty — so holdings
+  health is technicals-only *and the `has_critical` EXIT veto can never fire*,
+  despite `sentiment_daily.has_critical` being available in the DB. → F-022 now
+  covers "sentiment not wired into health" too.
+- **F-029 (new):** `_step_auto_open` hardcodes `predicted_return_pct=20.0` and
+  `target = close × 1.20` for **every** signal (the `ml_score` is stored but not
+  used as the prediction). So every prediction is +20%, and the
+  prediction-calibration loop (and the weekly review's calibration buckets) only
+  ever has one bucket — calibration is moot. Also `signal.target` (+20% flat)
+  disagrees with the exit engine's `min(+20%, 2.5R)`.
+
+> **F-030 (new):** for non-selected (visibility-only) candidates, `_step_auto_open`
+> calls `insert_signal` **unconditionally** — no idempotency guard (the guard only
+> covers *opened* trades). Re-running `pre-open` for the same date inserts
+> duplicate `signals` rows, inflating dashboard signal counts. (SIP dedupes by
+> symbol so it's unaffected.)
+
+## 4. `pre_open_iep` — the 08:55 gap filter
+
+`run_pre_open_iep` reads the existing `_context.md` candidates + the latest Kite
+quotes + parquet D-1 closes + the macro regime; computes overnight gaps; applies
+a regime filter (and optional sector filter); reranks survivors by
+`gap_norm×0.6 + sector_pct×0.4`; and **rewrites `_context.md` in place**. Quotes
+missing → warns, `quotes={}`, no gaps (degrades to "keep all"). Regime missing →
+NEUTRAL. This is the one job that mutates a bundle another tool produced — it
+must preserve the `### SYM — passes N/M rules` heading format the briefing parser
+expects (F-027).
+
+## 5. `mid_day` & `post_close` — the MTM jobs
+
+Both two-phase (prepare → skill → apply). `gather_quote_symbols` = open
+paper-trades ∪ today's signals ∪ holdings. `apply` reads the freshest
+`quotes_HHMM.json`, builds bars (`close = last_price`, **not** Kite's
+yesterday-close), and runs `mtm_open_trades`.
+
+- **mid_day** stops here, writing `mid_day_update.md`. Intraday quote bars have
+  `high/low` from the live snapshot, so an intraday stop/target *can* close a
+  trade before post-close.
+- **post_close** additionally runs `reconcile_day` (matured predictions +
+  portfolio snapshot) and writes `post_close_summary.md`.
+
+> Two confirmed findings surface here:
+> - **F-024:** both jobs call `mtm_open_trades`, which bumps `days_held` per call
+>   → a held trade gains 2 days per calendar day → the 25-day time stop fires at
+>   ~12 days.
+> - **F-023:** `run_post_close` passes a **constant** `cash=100_000` into
+>   `reconcile_day`; opens/closes never adjust it, so `portfolio_snapshots.equity`
+>   is cash + open-MTM only — realised P&L never enters the equity curve.
+
+## 6. `weekly_train` — Sunday retrain + review
+
+`run_weekly_train` (Task Scheduler, Sundays): `_step_retrain` does a rolling-3y
+`train_walkforward` (graceful; `InsufficientDataError` continues), saves the
+pickle, appends a registry row, and applies the soft-promotion gate; then
+`gather_review_data` + `render_weekly_review` writes
+`data/research/weekly/<date>_review.md` and a Slack summary. The registry guard
+(`has_row_for_train_end`) makes Sunday re-runs idempotent.
+
+> Two knock-on effects of earlier findings:
+> - The review's **"Cumulative Sharpe (portfolio snapshots)"** is computed from
+>   the equity curve broken by F-023 — and that Sharpe is *exactly the metric the
+>   Phase 18.5 go/no-go gate uses*. The decision metric is currently unreliable.
+> - The **calibration** section groups by `predicted_return_pct`, which is always
+>   +20% (F-029) → a single, meaningless bucket.
+> - `_step_retrain` passes `negative_news_lookup={}` — the `negative_news_count_7d`
+>   feature is always empty in *training* (though populated at inference). → F-031.
+
+## 7. `monthly_sip` — 1st-of-month plan
+
+`run_monthly_sip` reads holdings (Kite snapshot; `MonthlySipAborted` if absent),
+scores each holding (`_score_holdings` — again fundamentals/sentiment empty),
+gathers candidates from `signals` in the trailing 10-trading-day window
+(priority = max `ml_score`, dedup by symbol), runs `allocate_sip`, and writes
+`sip_plan.md` + Slack. `gate_holidays=False` on its reminder slot so it fires on
+the 1st even if a holiday.
+
+> Because health is TRIM-biased (F-022), the **TOPUP bucket rarely fires** (it
+> needs a HOLD verdict), so SIP structurally skews to NEW/CASH. With the ranker in
+> cold-start, candidate `priority` is 0 for all (ml_score NULL→0), so ordering is
+> arbitrary-but-stable.
+
+## 8. Degradation & idempotency summary
+
+| Job | Hard prereq (abort) | Re-run safety |
+|---|---|---|
+| pre_open | Kite snapshot | UPSERTs + `_already_opened_today` (but F-030 dups visibility signals) |
+| pre_open_iep | `_context.md` present | rewrites in place (idempotent-ish) |
+| mid_day | fresh quotes | MTM persists; re-run re-evaluates (F-024 day bump) |
+| post_close | fresh quotes | snapshot UPSERT by date; MTM persists |
+| weekly_train | none (review always written) | `has_row_for_train_end` guard |
+| monthly_sip | Kite snapshot | plan file overwrite by date |
+
+---
+
+## ⚠️ Robustness notes / open questions
+
+- **No OHLCV refresh anywhere in the daily flow (F-018).** The single biggest
+  operational gap — add an ingest/freshness step to `pre_open` (or a guard that
+  fails loudly when the latest bar predates the last trading day).
+- **Predictions are a constant +20% (F-029)** so the entire prediction-calibration
+  apparatus (reconcile → weekly review → dashboard scatter) measures error against
+  a fixed number. Derive the prediction from the signal's actual target or the
+  ranker score.
+- **The Phase 18.5 decision metric is computed off a broken equity curve
+  (F-023).** Until paper cash compounds realised P&L, "OOS Sharpe > 1.0" can't be
+  trusted. Highest-priority fix for the live-run's stated purpose.
+- **Health veto + sentiment unwired (F-022 extended).** Both `pre_open` and
+  `monthly_sip` pass empty sentiment into health, disabling the critical-news EXIT
+  veto on holdings.
+- **Visibility-only signals duplicate on re-run (F-030).**
+- **Training feature gap (F-031):** `negative_news_count_7d` is empty during
+  training but populated at inference — a train/serve skew.
+- **Strengths worth keeping:** the per-job `warnings` discipline, the abort/exit-2
+  contract, the two-phase prepare/apply, and the registry idempotency guard are all
+  solid and should be the template when wiring the fixes above.

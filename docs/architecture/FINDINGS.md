@@ -60,13 +60,16 @@
 | F-019 | VULN | High | 4 | 4 of 10 Layer-A rules (regime, fno_banned, t2t, critical_event) are unconditional passes — `pre_open`/`scan` build `ScanContext` with all defaults; risk vetoes + regime gate are dead despite the data being available | Open |
 | F-020 | INACC | Med | 4 | Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate, unused) — different thresholds/inputs | Open |
 | F-021 | INACC | Med | 5 | `BacktestResult.total_costs` omits buy-side charges (only sell-side accumulated); aggregate cost-drag understated (per-trade `costs_paid` is correct) | Open |
-| F-022 | VULN | Med | 5 | Health scorer structurally TRIM-biased: fundamentals never fetched (always None) + docstring claims vote-count-scaled thresholds but code uses fixed ±3 | Open |
+| F-022 | VULN | Med | 5 | Health scorer structurally TRIM-biased: fundamentals AND sentiment never wired (pre_open/monthly_sip pass empty snapshots) → technicals-only + critical-news EXIT veto dead; docstring claims vote-count scaling not implemented (fixed ±3) | Open |
 | F-023 | VULN | High | 5 | Paper equity curve never compounds realised P&L — cash is a constant; closing a winner drops its gain from `portfolio_snapshots.equity`. Equity/drawdown are not a true track record | Open |
 | F-024 | VULN | Med | 5 | `days_held` bumped per MTM call, so mid-day + post-close double-count → 25-day time stop fires at ~12 calendar days | Open |
 | F-025 | INACC | Med | 5 | Cost asymmetry: backtest applies full Zerodha costs but live paper MTM applies none (raw-price fills) → paper results flatter than backtest | Open |
 | F-026 | GAP | Med | 6 | Analyst narrative is unvalidated against the bundle — "evidence-first" is an LLM instruction, not a code check; wrong/invented numbers in brief.md pass through. Refuse-stale (12h) is also advisory-only | Open |
 | F-027 | DEBT | Low | 6 | Brittle 3-way coupling on the `### SYM — passes N/M rules` heading (context renderer / pre_open_iep rewrite / briefing regex), no spanning test | Open |
 | F-028 | INACC | Low | 6 | `assemble_context` docstring omits the sector + Layer-B ranker sections (added Phases 12.6/16) | Open |
+| F-029 | VULN | Med | 7 | `pre_open._step_auto_open` hardcodes `predicted_return_pct=20.0` + target=+20% for every signal → prediction calibration is a single meaningless bucket; signal.target disagrees with exit engine's min(+20%,2.5R) | Open |
+| F-030 | DEBT | Low | 7 | Visibility-only (non-selected) signals inserted unconditionally each pre_open run → duplicate `signals` rows on re-run | Open |
+| F-031 | INACC | Low | 7 | Train/serve skew: `negative_news_count_7d` empty during weekly retrain (`negative_news_lookup={}`) but populated at inference | Open |
 
 ---
 
@@ -312,4 +315,27 @@ and Layer-B ranker sections actually rendered.
 
 ---
 
-_Counts: 27 open · 1 superseded · 0 fixed. Updated through Phase 6._
+### F-029 — Constant predictions break calibration (`VULN`, Med, Phase 7)
+`pre_open._step_auto_open` sets `predicted_return_pct=20.0` and `target =
+close×1.20` for every signal; `ml_score` is stored but unused as the prediction.
+Reconcile → weekly-review calibration buckets therefore collapse to one (+20%)
+bucket; `signal.target` also disagrees with the exit engine's `min(+20%, 2.5R)`.
+- **Fix idea:** Set `predicted_return_pct` from the actual target vs entry (or the
+  ranker probability mapped to an expected return), and set `signal.target` to the
+  same `min(+20%, 2.5R)` the exit logic uses.
+
+### F-030 — Visibility signals duplicate on re-run (`DEBT`, Low, Phase 7)
+Non-selected candidates' `insert_signal` has no idempotency guard; re-running
+pre_open the same day re-inserts them.
+- **Fix idea:** Guard on `(symbol, date, created_by)` or UPSERT a daily signal row.
+
+### F-031 — Train/serve feature skew (`INACC`, Low, Phase 7)
+`weekly_train._step_retrain` passes `negative_news_lookup={}`, so
+`negative_news_count_7d` is always NaN/empty in training but populated at
+inference.
+- **Fix idea:** Build the negative-news lookup for the training window too (or
+  drop the feature until both paths feed it).
+
+---
+
+_Counts: 30 open · 1 superseded · 0 fixed. Updated through Phase 7._
