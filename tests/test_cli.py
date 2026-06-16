@@ -117,6 +117,37 @@ def test_ingest_history_skip_existing(tmp_path: Path, monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
+# refresh-ohlcv
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_ohlcv_happy_path(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    with patch("trading.data.ohlcv_refresh.fetch_ohlcv", return_value=_fake_ohlcv()):
+        result = runner.invoke(
+            app,
+            ["refresh-ohlcv", "--date", "2026-06-10", "--symbols", "RVNL"],
+        )
+    assert result.exit_code == 0, result.stdout
+    assert "1 refreshed" in result.stdout
+    assert (tmp_path / "data" / "parquet" / "nifty200" / "RVNL.parquet").is_file()
+
+
+def test_refresh_ohlcv_exits_1_on_failure(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    with patch(
+        "trading.data.ohlcv_refresh.fetch_ohlcv",
+        side_effect=RuntimeError("yfinance down"),
+    ):
+        result = runner.invoke(
+            app,
+            ["refresh-ohlcv", "--date", "2026-06-10", "--symbols", "BAD"],
+        )
+    assert result.exit_code == 1
+    assert "1 failed" in result.stdout
+
+
+# ---------------------------------------------------------------------------
 # kite-login
 # ---------------------------------------------------------------------------
 

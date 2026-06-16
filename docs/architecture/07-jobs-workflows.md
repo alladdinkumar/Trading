@@ -2,8 +2,10 @@
 
 > Part of the [`docs/architecture/`](./PROGRESS.md) set. The orchestration layer:
 > six jobs that wire the lower layers into the daily/weekly/monthly cadence. This
-> phase **confirms F-018** (no OHLCV refresh) and shows how F-019/F-022/F-023/F-024
-> manifest at the job level. Grounded in `src/trading/jobs/*.py`.
+> phase originally **confirmed F-018** (no OHLCV refresh; ✅ fixed 2026-06-16 —
+> `pre_open` now refreshes OHLCV + a staleness guard) and shows how
+> F-019/F-022/F-023/F-024 manifest at the job level. Grounded in
+> `src/trading/jobs/*.py`.
 
 ## 1. Shared shape
 
@@ -88,9 +90,10 @@ symbol+date on re-run. Macro/sector/news/sentiment all UPSERT.
 
 This single job is where four findings from earlier phases concretely originate:
 
-- **F-018 (confirmed):** there is **no OHLCV ingest step**. `_step_scan` reads
-  whatever parquet exists; nothing re-pulls prices. A skipped `ingest-history`
-  ⇒ the scan runs on stale data with no warning.
+- **F-018 (✅ fixed 2026-06-16):** `_step_ohlcv` now runs `refresh_ohlcv` before
+  `_step_scan`, and `scan()` skips bars older than `MAX_BAR_AGE_DAYS` with a
+  warning (plus a Kite close cross-check on holdings). The scan no longer runs
+  silently on stale data.
 - **F-019 (confirmed):** `_step_scan` builds `ScanContext(scan_date=as_of)` with
   all defaults → 4 of 10 rules are no-ops (regime/ban/t2t/critical), even though
   the macro snapshot and sentiment were computed earlier in the *same* run.
@@ -191,9 +194,10 @@ the 1st even if a holiday.
 
 ## ⚠️ Robustness notes / open questions
 
-- **No OHLCV refresh anywhere in the daily flow (F-018).** The single biggest
-  operational gap — add an ingest/freshness step to `pre_open` (or a guard that
-  fails loudly when the latest bar predates the last trading day).
+- **✅ (Fixed 2026-06-16) No OHLCV refresh in the daily flow (F-018).** Was the
+  single biggest operational gap. `pre_open._step_ohlcv` now refreshes parquet
+  before the scan, and `scan()` skips stale symbols (>`MAX_BAR_AGE_DAYS`) with a
+  warning rather than scanning silently-old prices.
 - **Predictions are a constant +20% (F-029)** so the entire prediction-calibration
   apparatus (reconcile → weekly review → dashboard scatter) measures error against
   a fixed number. Derive the prediction from the signal's actual target or the

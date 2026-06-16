@@ -23,6 +23,7 @@ from trading.data.kite_snapshot import (
 )
 from trading.data.macro import snapshot_and_classify
 from trading.data.news import DEFAULT_ALIASES, fetch_all_news
+from trading.data.ohlcv_refresh import cross_check_closes, refresh_ohlcv
 from trading.data.sector import fetch_all_sectors
 from trading.data.universe import load_candidate_universe
 from trading.features.regime import Regime
@@ -76,6 +77,7 @@ class PreOpenResult:
     candidates_selected: int
     paper_trades_opened: int
     holdings_scored: int
+    ohlcv_bars_added: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -111,11 +113,14 @@ def run_pre_open(
         else:
             news_inserted, sentiment_rows = _step_news(conn, as_of, warnings)
 
+        ohlcv_bars_added = _step_ohlcv(p, as_of, warnings)
+
         candidates = _step_scan(p, as_of, warnings)
         passing_candidates = passing(candidates)
         scored = _step_rank(conn, p, as_of, passing_candidates, warnings)
 
         holdings = _step_portfolio(p, s, warnings, as_of=as_of)
+        _step_cross_check(p, as_of, warnings)
 
         opened = _step_auto_open(
             conn,
@@ -148,6 +153,7 @@ def run_pre_open(
         candidates_selected=sum(1 for sc in scored if sc.selected),
         paper_trades_opened=opened,
         holdings_scored=len(holdings),
+        ohlcv_bars_added=ohlcv_bars_added,
         warnings=warnings,
     )
 
@@ -224,16 +230,48 @@ def _step_news(conn: sqlite3.Connection, as_of: date, warnings: list[str]) -> tu
     return inserted, len(rollups)
 
 
+def _step_ohlcv(paths: Paths, as_of: date, warnings: list[str]) -> int:
+    """Refresh parquet OHLCV up to D-1 before the scan reads it.
+
+    Runs over the full ingest universe (candidates + holdings) so both the
+    scan and portfolio-health steps see current bars. Refresh failures degrade
+    to warnings — the scan's own staleness guard skips any symbol still stale.
+    Returns the total number of bars appended.
+    """
+    try:
+        result = refresh_ohlcv(paths, as_of)
+    except Exception as e:  # pragma: no cover — defensive; refresh isolates per-symbol
+        warnings.append(f"ohlcv refresh failed: {e!s}")
+        return 0
+    warnings.extend(result.warnings)
+    return result.bars_added
+
+
 def _step_scan(paths: Paths, as_of: date, warnings: list[str]) -> list[Candidate]:
     """Run Layer A scanner over the Nifty-50 candidate universe.
 
     Candidates are restricted to the Nifty 50 (`data/static/nifty50.txt`) so
     the user's non-Nifty holdings are scored for health but never auto-traded.
-    Symbols without parquet (or <200 bars) are skipped inside `scan`.
+    Symbols without parquet (or <200 bars) are skipped inside `scan`; symbols
+    whose latest bar is stale are skipped with a warning.
     """
     ctx = ScanContext(scan_date=as_of)
     symbols = load_candidate_universe(paths)
-    return scan(paths, as_of, symbols=symbols, ctx=ctx)
+    return scan(paths, as_of, symbols=symbols, ctx=ctx, warnings=warnings)
+
+
+def _step_cross_check(paths: Paths, as_of: date, warnings: list[str]) -> None:
+    """Flag holdings whose parquet close disagrees with the broker close.
+
+    Best-effort: reads the same `holdings.json` `_step_portfolio` validated.
+    A missing/stale snapshot is silently skipped (the portfolio step already
+    raised or warned). Each divergent holding appends a warning.
+    """
+    try:
+        holdings = read_holdings(paths, as_of)
+    except (KiteSnapshotMissingError, KiteSnapshotStaleError):
+        return
+    warnings.extend(cross_check_closes(paths, as_of, holdings))
 
 
 def _step_portfolio(

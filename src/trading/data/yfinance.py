@@ -65,4 +65,9 @@ def fetch_ohlcv(
         idx = idx.tz_localize(None)
     idx.name = "date"
     df.index = idx
+    # Drop partial-bar artifacts: yfinance returns a row for the still-forming
+    # current day with NaN OHLC (sometimes a real volume). Those rows poison
+    # downstream indicator math, so strip them at the fetch boundary — both the
+    # ingest_history backfill and the daily refresh benefit.
+    df = df[df["close"].notna()]
     return df

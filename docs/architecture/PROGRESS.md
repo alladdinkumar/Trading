@@ -35,8 +35,8 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | 7 | `07-jobs-workflows.md` | `[x]` |
 | 8 | `08-ops-cli-ui.md` | `[x]` |
 
-**Currently working on:** _Fix pass — Wave 1. **F-014 + F-012 (Nifty-50 ingest) shipped 2026-06-16:** all 50 Nifty constituents + 8 holdings ingested, candidate set pinned to `nifty50.txt`, `_step_scan` scans the 50, `pre-open` `candidates_total` 12→50; docs 02/03 + FINDINGS updated._
-**Next up:** _Rest of Wave 1 — F-018 (OHLCV freshness guard), F-019 (ScanContext wiring), F-023 (paper-cash ledger), F-029 (real predictions)._
+**Currently working on:** _Fix pass — Wave 1. Shipped 2026-06-16: **F-014 + F-012** (Nifty-50 ingest; `candidates_total` 12→50) and **F-018** (OHLCV freshness — `refresh_ohlcv` + scan staleness guard + Kite close cross-check + `trading refresh-ohlcv` CLI + `Candidate.bar_date`)._
+**Next up:** _Rest of Wave 1 — F-019 (ScanContext wiring), F-023 (paper-cash ledger), F-029 (real predictions)._
 
 ---
 

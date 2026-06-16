@@ -22,6 +22,7 @@ from trading.jobs.pre_open import (
     _step_auto_open,
     _step_macro,
     _step_news,
+    _step_ohlcv,
     _step_portfolio,
     _step_scan,
     _step_sector,
@@ -72,6 +73,10 @@ def test_run_pre_open_returns_result_with_bundle_path(paths, monkeypatch) -> Non
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_news",
         lambda conn, as_of, warnings: (0, 0),
+    )
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_ohlcv",
+        lambda paths, as_of, warnings: 0,
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_scan",
@@ -222,6 +227,7 @@ def _candidate(symbol: str, n_passed: int) -> Candidate:
         sma_200=100.0,
         atr_14=2.0,
         rules=rules,
+        bar_date=date(2026, 5, 15),
     )
 
 
@@ -252,6 +258,81 @@ def test_step_scan_restricts_to_candidate_universe(paths) -> None:
     ):
         _step_scan(paths, date(2026, 5, 15), [])
     assert mock_scan.call_args.kwargs["symbols"] == candidates
+
+
+def test_step_scan_passes_warnings_accumulator(paths) -> None:
+    """_step_scan threads the run warnings list into scan() for staleness."""
+    warnings: list[str] = []
+    with (
+        patch("trading.jobs.pre_open.load_candidate_universe", return_value=["FOO"]),
+        patch("trading.jobs.pre_open.scan", return_value=[]) as mock_scan,
+    ):
+        _step_scan(paths, date(2026, 5, 15), warnings)
+    assert mock_scan.call_args.kwargs["warnings"] is warnings
+
+
+def test_step_ohlcv_returns_bars_and_surfaces_warnings(paths) -> None:
+    from trading.data.ohlcv_refresh import RefreshResult
+
+    fake = RefreshResult(
+        symbols_refreshed=2, symbols_failed=1, bars_added=7, warnings=["BAD: boom"]
+    )
+    warnings: list[str] = []
+    with patch("trading.jobs.pre_open.refresh_ohlcv", return_value=fake):
+        added = _step_ohlcv(paths, date(2026, 5, 15), warnings)
+    assert added == 7
+    assert warnings == ["BAD: boom"]
+
+
+def test_step_ohlcv_degrades_on_top_level_failure(paths) -> None:
+    warnings: list[str] = []
+    with patch(
+        "trading.jobs.pre_open.refresh_ohlcv",
+        side_effect=RuntimeError("universe missing"),
+    ):
+        added = _step_ohlcv(paths, date(2026, 5, 15), warnings)
+    assert added == 0
+    assert any("ohlcv refresh failed" in w for w in warnings)
+
+
+def test_step_ohlcv_runs_before_scan(paths, monkeypatch) -> None:
+    """The orchestrator refreshes OHLCV before reading it in the scan."""
+    order: list[str] = []
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_ohlcv",
+        lambda p, d, w: order.append("ohlcv") or 0,
+    )
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_scan",
+        lambda p, d, w: order.append("scan") or [],
+    )
+    monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (False, "NEUTRAL"))
+    monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
+    monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
+    monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: [])
+
+    result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=True)
+    assert order == ["ohlcv", "scan"]
+    assert result.ohlcv_bars_added == 0
+
+
+def test_cross_check_warnings_surface_in_run(paths, monkeypatch) -> None:
+    from tests.conftest import seed_kite_snapshot
+
+    seed_kite_snapshot(paths, date(2026, 5, 15), holdings=[_PRE_OPEN_HOLDING])
+    monkeypatch.setattr("trading.jobs.pre_open._step_ohlcv", lambda p, d, w: 0)
+    monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda p, d, w: [])
+    monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (False, "NEUTRAL"))
+    monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
+    monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
+    monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: [])
+    monkeypatch.setattr(
+        "trading.jobs.pre_open.cross_check_closes",
+        lambda paths, as_of, holdings: ["RVNL: parquet vs Kite mismatch"],
+    )
+
+    result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=True)
+    assert any("RVNL" in w for w in result.warnings)
 
 
 def _settings(token: str | None = None) -> Settings:
@@ -428,6 +509,10 @@ def test_run_pre_open_full_happy_path_integration(paths, monkeypatch) -> None:
         lambda p: ["TESTSYM"],
     )
     monkeypatch.setattr(
+        "trading.jobs.pre_open._step_ohlcv",
+        lambda p, d, w: 0,
+    )
+    monkeypatch.setattr(
         "trading.jobs.pre_open._step_macro",
         lambda c, d, w: (True, "RISK_ON"),
     )
@@ -525,6 +610,7 @@ def test_pre_open_persists_ml_score_on_all_passing(paths, monkeypatch) -> None:
     monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (True, "RISK_ON"))
     monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
+    monkeypatch.setattr("trading.jobs.pre_open._step_ohlcv", lambda p, d, w: 0)
     monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda p, d, w: fake_cands)
     monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: [])
 
@@ -555,6 +641,7 @@ def test_pre_open_without_active_model_opens_all_passing(paths, monkeypatch) -> 
     monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (True, "RISK_ON"))
     monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
+    monkeypatch.setattr("trading.jobs.pre_open._step_ohlcv", lambda p, d, w: 0)
     monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda p, d, w: fake_cands)
     monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: [])
 

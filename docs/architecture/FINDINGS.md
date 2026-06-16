@@ -16,9 +16,10 @@ job/CLI/UI layers — but two themes undermine its current goal of proving itsel
 in a live paper-trade run:
 
 1. **Data coverage.** ~~It trades **12 stocks, not the intended Nifty 50**~~
-   (✅ fixed — now scans all 50 Nifty constituents), but it still never
-   refreshes prices (F-018) and attributes news for only 12 symbols (F-015). So
-   the ranker's training data and the sentiment signals remain partly starved.
+   (✅ fixed — now scans all 50 Nifty constituents) and ~~never refreshes
+   prices~~ (✅ fixed — F-018: `pre_open` refreshes OHLCV + a staleness guard
+   skips stale symbols). News attribution still covers only 12 symbols (F-015),
+   so the sentiment signals remain partly starved.
 2. **Measurement integrity.** Four of ten risk rules are silently disabled, every
    prediction is a constant +20%, and the paper **equity curve never compounds
    realised P&L** — which is exactly the metric the Phase 18.5 go/no-go gate
@@ -32,10 +33,10 @@ and *how its results are measured*. Both are fixable with localized changes.
 
 | Severity | Count | IDs |
 |---|---:|---|
-| **High** | 5 | F-002, F-005†, F-018, F-019, F-023 |
+| **High** | 4 | F-002, F-005†, F-019, F-023 |
 | Med | 16 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-022, F-024, F-025, F-026, F-029, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 2 | F-012, F-014 |
+| ✅ Fixed | 3 | F-012, F-014, F-018 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -58,7 +59,7 @@ The highest-leverage cluster; everything else is noise until these land.
 | ID | Sev | Fix | Why first |
 |---|---|---|---|
 | ~~**F-014 + F-012**~~ ✅ | High/Med | **Done (2026-06-16).** Ingested OHLCV for all 50 Nifty constituents + 8 holdings; pinned `nifty50.txt` (candidate set) and rebuilt `universe.txt` (ingest set); added `load_candidate_universe()`; `_step_scan` now scans the 50; aligned `sector_map.csv`. Verified: `pre-open` `candidates_total` 12→50. *(`nifty200/` subdir rename deferred — cosmetic.)* | Unblocks the real universe **and** gives the ranker enough labels to ever promote |
-| **F-018** | High | Add an OHLCV refresh + read-time freshness guard to `pre_open` | Prevents the scan running on stale prices |
+| ~~**F-018**~~ ✅ | High | **Done (2026-06-16).** New `data/ohlcv_refresh.py` (`refresh_ohlcv` + `cross_check_closes`); `pre_open._step_ohlcv` runs before the scan; `scan()` skips symbols whose last bar is >5 days stale (warns); `Candidate.bar_date` rendered in the brief; new `trading refresh-ohlcv` CLI | Prevents the scan running on stale prices |
 | **F-019** | High | Populate `ScanContext` in `_step_scan` from data already fetched (regime, `has_critical`; ban-list/T2T as available) | Re-enables 3 risk vetoes + the regime gate |
 | **F-023** | High | Paper-cash ledger: debit on open, credit net P&L on close; equity = cash + open MTM | Makes the Phase-18.5 Sharpe metric trustworthy |
 | **F-029** | Med | Derive `predicted_return_pct` + `signal.target` from the real target/ranker, not a constant +20% | Makes calibration meaningful |
@@ -90,8 +91,9 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 18.5 outcome; needs its own spec before any code.
 
 > **Suggested first PR:** ~~F-014 + F-012 (Nifty-50 ingest).~~ ✅ **Shipped
-> 2026-06-16.** Next up in Wave 1: F-018 (OHLCV freshness guard), F-019
-> (ScanContext wiring), F-023 (paper-cash ledger), F-029 (real predictions).
+> 2026-06-16.** F-018 (OHLCV freshness guard) also shipped 2026-06-16. Next
+> up in Wave 1: F-019 (ScanContext wiring), F-023 (paper-cash ledger), F-029
+> (real predictions).
 
 ## How to use this file
 
@@ -143,7 +145,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-015 | GAP | Med | 3 | News symbol-attribution alias map covers only 12 symbols → sparse `sentiment_daily`, near-empty per-symbol sentiment/critical inputs | Open |
 | F-016 | DEBT | Med | 3 | News dedup is URL-only and single-run; daily event/headline re-fetch creates duplicate `news_items` rows (no DB-level uniqueness) | Open |
 | F-017 | INACC | Low | 3 | `macro_snapshot.dow_fut`/`nasdaq_fut` store spot index closes not futures; `sgx_nifty` always NULL | Open |
-| F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | Open |
+| F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | ✅ Fixed (2026-06-16) — refresh step + scan staleness guard + Kite close cross-check; IST-clock centralisation ([[F-004]]) still open |
 | F-019 | VULN | High | 4 | 4 of 10 Layer-A rules (regime, fno_banned, t2t, critical_event) are unconditional passes — `pre_open`/`scan` build `ScanContext` with all defaults; risk vetoes + regime gate are dead despite the data being available | Open |
 | F-020 | INACC | Med | 4 | Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate, unused) — different thresholds/inputs | Open |
 | F-021 | INACC | Med | 5 | `BacktestResult.total_costs` omits buy-side charges (only sell-side accumulated); aggregate cost-drag understated (per-trade `costs_paid` is correct) | Open |
@@ -318,17 +320,35 @@ events re-inserts the same headlines/events. No DB uniqueness constraint.
 always NULL. Logic unaffected (regime uses values by key), naming misleads.
 - **Fix idea:** Rename columns to `dow`/`nasdaq` (schema v3) or document inline.
 
-### F-018 — No OHLCV freshness / refresh (`GAP`, High, Phase 3)
+### F-018 — No OHLCV freshness / refresh (`GAP`, High, Phase 3) — ✅ Fixed 2026-06-16
+**Resolution (implements the approved Phase 12.7 spec):**
+- New `src/trading/data/ohlcv_refresh.py`:
+  - `refresh_ohlcv(paths, as_of, symbols=None)` pulls only the missing tail per
+    symbol (incremental from the last bar; full 3y backfill when absent),
+    excludes the forming `as_of` bar, dedupes (new wins), and isolates
+    per-symbol errors. Returns a `RefreshResult` (refreshed/failed/bars_added +
+    warnings).
+  - `cross_check_closes(paths, as_of, holdings)` flags any holding whose parquet
+    last close diverges >0.5% from the broker `close_price`.
+- `pre_open._step_ohlcv` runs **before** `_step_scan`; `_step_cross_check` runs
+  after the portfolio step. Both degrade to warnings. `PreOpenResult` gains
+  `ohlcv_bars_added` (rendered in the CLI table).
+- `strategy/rules.py`: `MAX_BAR_AGE_DAYS = 5` staleness guard in `scan()` —
+  symbols whose last bar is older are skipped with a warning (scan gained a
+  `warnings` accumulator). `Candidate.bar_date` records the data basis and is
+  rendered on the candidate bullet (`close … (bar YYYY-MM-DD)`).
+- Partial-bar hygiene moved into `data/yfinance.py::fetch_ohlcv` (drops NaN-OHLC
+  rows) so the ingest path benefits too.
+- New `trading refresh-ohlcv [--date] [--symbols]` CLI for manual runs.
+
+The failure mode changed from "silent stale brief" to "visible degraded run".
+*Still open:* centralising the IST clock for quote staleness ([[F-004]]).
+
+*Original finding:*
 History is refreshed only via manual `ingest-history`; no daily re-pull, no
 read-time staleness check beyond the trailing-NaN drop. A skipped refresh means
 the scan runs on stale prices with no signal. Quote staleness additionally
 assumes the host clock is IST (naive `datetime.now()`).
-- **Verify in:** Phase 7 (does any job refresh OHLCV?). Phase 12.7 spec
-  (`2026-06-11-phase-12-7-ohlcv-freshness-design.md`) exists — confirm whether
-  implemented.
-- **Fix idea:** Add an OHLCV refresh step to `pre_open` (or a freshness guard
-  that warns/fails when the latest bar is older than the last trading day);
-  centralise the IST clock ([[F-004]]).
 
 ---
 

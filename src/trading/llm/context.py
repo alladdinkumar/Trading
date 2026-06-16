@@ -62,9 +62,7 @@ def assemble_context(
     parts.append(_render_header(as_of, mode))
     parts.append(_render_macro(conn, as_of))
     parts.append(_render_sector_snapshot(conn, as_of))
-    parts.append(
-        _render_candidates(conn, as_of, inputs.candidates, sector_map, sector_rows)
-    )
+    parts.append(_render_candidates(conn, as_of, inputs.candidates, sector_map, sector_rows))
     ranker_section = _render_ranker_section(inputs.scored_candidates)
     if ranker_section:
         parts.append(ranker_section)
@@ -79,17 +77,12 @@ def assemble_context(
 
 def _render_header(as_of: date, mode: Mode) -> str:
     ts = datetime.now().isoformat(timespec="seconds")
-    return (
-        f"# Trading context bundle — {as_of.isoformat()}  (mode: {mode})\n"
-        f"\n"
-        f"_Assembled at {ts}._"
-    )
+    return f"# Trading context bundle — {as_of.isoformat()}  (mode: {mode})\n\n_Assembled at {ts}._"
 
 
 def _render_macro(conn: sqlite3.Connection, as_of: date) -> str:
     row = conn.execute(
-        "SELECT vix, usdinr, fii_flow_cr, dii_flow_cr, regime "
-        "FROM macro_snapshot WHERE date = ?",
+        "SELECT vix, usdinr, fii_flow_cr, dii_flow_cr, regime FROM macro_snapshot WHERE date = ?",
         (as_of.isoformat(),),
     ).fetchone()
     if row is None:
@@ -177,11 +170,10 @@ def _render_candidates(
         blocks.append("")
         blocks.append(f"### {c.symbol} — passes {n_passed}/{n_total} rules")
         blocks.append(
-            f"- close {c.close:.2f}, RSI {c.rsi_14:.1f}, ATR(14) {c.atr_14:.2f}"
+            f"- close {c.close:.2f} (bar {c.bar_date.isoformat()}), "
+            f"RSI {c.rsi_14:.1f}, ATR(14) {c.atr_14:.2f}"
         )
-        blocks.append(
-            f"- SMA20 {c.sma_20:.2f} · SMA50 {c.sma_50:.2f} · SMA200 {c.sma_200:.2f}"
-        )
+        blocks.append(f"- SMA20 {c.sma_20:.2f} · SMA50 {c.sma_50:.2f} · SMA200 {c.sma_200:.2f}")
         sector_line = _sector_bullet_for(c.symbol, sector_map, sector_rows)
         if sector_line:
             blocks.append(sector_line)
@@ -189,9 +181,7 @@ def _render_candidates(
     return "\n".join(blocks)
 
 
-def _render_news_for_symbol(
-    conn: sqlite3.Connection, symbol: str, as_of: date
-) -> list[str]:
+def _render_news_for_symbol(conn: sqlite3.Connection, symbol: str, as_of: date) -> list[str]:
     """Last 7 days of headlines + sentiment_daily summary + critical flag."""
     cutoff = (as_of - timedelta(days=7)).isoformat()
     # Cap upper bound at as_of end-of-day. NSE event-calendar entries arrive
@@ -217,9 +207,7 @@ def _render_news_for_symbol(
             f"- sentiment 7d {score_str} · "
             f"{sd['news_count']} headlines ({sd['negative_news_count']} negative)"
         )
-        out.append(
-            f"- Critical news flag: {'YES' if sd['has_critical'] else 'NO'}"
-        )
+        out.append(f"- Critical news flag: {'YES' if sd['has_critical'] else 'NO'}")
     else:
         out.append("- sentiment: _(no daily aggregate)_")
         out.append("- Critical news flag: NO")
@@ -241,9 +229,15 @@ def _render_ranker_section(scored: list[ScoredCandidate] | None) -> str:
     """
     if not scored:
         return ""
-    lines = ["## Layer B ranker", "", "| Rank | Symbol | Score | Selected |", "|---:|---|---:|:---:|"]
+    lines = [
+        "## Layer B ranker",
+        "",
+        "| Rank | Symbol | Score | Selected |",
+        "|---:|---|---:|:---:|",
+    ]
     sorted_scored = sorted(
-        scored, key=lambda s: (-(s.ml_score if s.ml_score is not None else -1.0), s.candidate.symbol)
+        scored,
+        key=lambda s: (-(s.ml_score if s.ml_score is not None else -1.0), s.candidate.symbol),
     )
     for i, sc in enumerate(sorted_scored, start=1):
         score_str = f"{sc.ml_score:.3f}" if sc.ml_score is not None else "—"

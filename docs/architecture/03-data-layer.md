@@ -81,11 +81,13 @@ idempotently. Adjusted prices are the default (`auto_adjust=True`), so splits/
 dividends are already baked in — which is why the dormant `corp_actions` table
 isn't needed for price adjustment.
 
-**Freshness:** there is *no* staleness guard on read. `store.ohlcv.read_ohlcv`
-applies `_drop_trailing_nan_close` (Phase 12.5 — strips yfinance's current-day
-NaN stub bar) but nothing checks that the last stored bar is recent. History is
-refreshed only when the operator runs `trading ingest-history`; no daily job
-re-pulls OHLCV. → **F-018**.
+**Freshness (✅ F-018 fixed 2026-06-16):** `store.ohlcv.read_ohlcv` applies
+`_drop_trailing_nan_close` (Phase 12.5 — strips yfinance's current-day NaN stub
+bar). `pre_open` now runs `data/ohlcv_refresh.py::refresh_ohlcv` (incremental
+tail pull) before the scan, and `strategy/rules.py::scan` enforces a
+`MAX_BAR_AGE_DAYS = 5` staleness guard — symbols whose last bar is older are
+skipped with a warning instead of silently scanning stale prices. Manual
+`trading refresh-ohlcv` is also available. → **F-018**.
 
 ### 3.2 `cache.py` — HTTP cache
 `get_cached_session()` returns a `requests_cache.CachedSession` backed by
@@ -228,9 +230,11 @@ session; the batch Python reads files. See [00-overview §1](./00-overview.md).
   symbols had parquet history, so scan/rank/auto-open all operated on 12. Now
   resolved: all 50 Nifty constituents are ingested and the candidate set is
   pinned to the Nifty 50, so `pre-open` evaluates 50. → F-014 / F-012.
-- **OHLCV is never auto-refreshed.** No daily re-pull and no freshness guard on
-  read; a forgotten `ingest-history` means the scan silently runs on stale prices.
-  → F-018.
+- **✅ (Fixed 2026-06-16) OHLCV is never auto-refreshed.** `pre_open` now runs
+  `refresh_ohlcv` (incremental tail pull) before the scan, the scanner skips
+  bars older than `MAX_BAR_AGE_DAYS` (5) with a warning, and a Kite close
+  cross-check flags >0.5% divergence on holdings. Manual `trading refresh-ohlcv`
+  also available. → F-018.
 - **Sentiment is mostly blind** because attribution covers 12 symbols. The
   critical-news veto (F-011) and per-symbol sentiment features are therefore
   near-empty for most candidates. → F-015.

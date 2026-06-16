@@ -50,6 +50,7 @@ from trading.data.kite_snapshot import (
 )
 from trading.data.macro import snapshot_and_classify
 from trading.data.news import DEFAULT_ALIASES, fetch_all_news
+from trading.data.ohlcv_refresh import refresh_ohlcv
 from trading.data.sector import fetch_all_sectors
 from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
@@ -176,6 +177,38 @@ def ingest_history(
         console.print("\n[red]Failures:[/red]")
         for sym, reason in failed:
             console.print(f"  [red]{sym}[/red]: {reason}")
+
+
+@app.command("refresh-ohlcv")
+def refresh_ohlcv_cmd(
+    date_str: Annotated[
+        str | None,
+        typer.Option("--date", help="As-of date YYYY-MM-DD (defaults to today)."),
+    ] = None,
+    symbols: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--symbols",
+            "-s",
+            help="Ticker(s) to refresh. Repeat the flag for multiple. Defaults to universe.txt.",
+        ),
+    ] = None,
+) -> None:
+    """Append any OHLCV bars missing up to D-1 for each symbol (F-018)."""
+    paths = get_paths()
+    as_of = date.fromisoformat(date_str) if date_str else date.today()
+    result = refresh_ohlcv(paths, as_of, symbols=list(symbols) if symbols else None)
+    console.print(
+        f"[green]{result.symbols_refreshed} refreshed[/green]"
+        f"  [red]{result.symbols_failed} failed[/red]"
+        f"  ({result.bars_added:,} bars added)"
+    )
+    if result.warnings:
+        console.print("\n[yellow]Warnings:[/yellow]")
+        for w in result.warnings:
+            console.print(f"  - {w}")
+    if result.symbols_failed:
+        raise typer.Exit(code=1)
 
 
 @app.command("kite-emergency-login")
@@ -1210,6 +1243,7 @@ def pre_open_cmd(
     table = Table(title=f"pre_open {as_of.isoformat()}", show_header=True)
     table.add_column("step")
     table.add_column("count", justify="right")
+    table.add_row("ohlcv_bars_added", str(result.ohlcv_bars_added))
     table.add_row("macro_written", "yes" if result.macro_written else "no")
     table.add_row("sector_written", "yes" if result.sector_written else "no")
     table.add_row("news_inserted", str(result.news_inserted))

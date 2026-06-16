@@ -93,6 +93,17 @@ def test_fetch_ohlcv_raises_on_none() -> None:
         fetch_ohlcv("BOGUS", "2025-01-01", "2025-01-10")
 
 
+def test_fetch_ohlcv_drops_partial_nan_close_row() -> None:
+    """A forming-day row with NaN OHLC (real volume) is stripped at fetch."""
+    base = _fake_yf_response(rows=3)
+    partial_idx = base.index[-1] + pd.Timedelta(days=1)
+    base.loc[partial_idx] = [float("nan")] * 4 + [1_234_567]
+    with patch("trading.data.yfinance.yf.download", return_value=base):
+        df = fetch_ohlcv("RVNL", "2025-01-01", "2025-01-10")
+    assert df["close"].notna().all()
+    assert len(df) == 3  # the partial row is gone
+
+
 def test_fetch_ohlcv_passes_yfinance_args_correctly() -> None:
     fake = _fake_yf_response()
     with patch("trading.data.yfinance.yf.download", return_value=fake) as mock:

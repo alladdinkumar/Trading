@@ -65,6 +65,7 @@ def _candidate(sym: str, scan_date: date) -> Candidate:
         sma_200=95.0,
         atr_14=2.0,
         rules=(RuleResult("uptrend", True),),
+        bar_date=scan_date,
     )
 
 

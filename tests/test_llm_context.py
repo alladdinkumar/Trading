@@ -31,9 +31,7 @@ def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return get_paths()
 
 
-def test_assemble_context_writes_file_with_header(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_assemble_context_writes_file_with_header(conn: sqlite3.Connection, paths) -> None:
     out = assemble_context(
         conn=conn,
         paths=paths,
@@ -61,12 +59,12 @@ def _seed_macro(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def test_assemble_context_includes_macro_section(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_assemble_context_includes_macro_section(conn: sqlite3.Connection, paths) -> None:
     _seed_macro(conn)
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
         inputs=ContextInputs(candidates=[], holdings_health=[]),
     )
@@ -78,11 +76,11 @@ def test_assemble_context_includes_macro_section(
     assert "NEUTRAL" in body
 
 
-def test_assemble_context_macro_no_data_when_missing(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_assemble_context_macro_no_data_when_missing(conn: sqlite3.Connection, paths) -> None:
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
         inputs=ContextInputs(candidates=[], holdings_health=[]),
     )
@@ -92,10 +90,7 @@ def test_assemble_context_macro_no_data_when_missing(
 
 
 def _candidate(symbol: str = "RVNL", n_passed: int = 9) -> Candidate:
-    rules = tuple(
-        RuleResult(name=f"r{i}", passed=(i < n_passed), reason="")
-        for i in range(10)
-    )
+    rules = tuple(RuleResult(name=f"r{i}", passed=(i < n_passed), reason="") for i in range(10))
     return Candidate(
         symbol=symbol,
         scan_date=date(2026, 5, 15),
@@ -106,6 +101,7 @@ def _candidate(symbol: str = "RVNL", n_passed: int = 9) -> Candidate:
         sma_200=275.0,
         atr_14=8.4,
         rules=rules,
+        bar_date=date(2026, 5, 13),
     )
 
 
@@ -133,15 +129,14 @@ def _seed_news(conn: sqlite3.Connection, symbol: str) -> None:
     conn.commit()
 
 
-def test_assemble_context_includes_candidates_section(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_assemble_context_includes_candidates_section(conn: sqlite3.Connection, paths) -> None:
     _seed_news(conn, "RVNL")
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
-        inputs=ContextInputs(candidates=[_candidate("RVNL", n_passed=9)],
-                             holdings_health=[]),
+        inputs=ContextInputs(candidates=[_candidate("RVNL", n_passed=9)], holdings_health=[]),
     )
     body = out.read_text(encoding="utf-8")
     assert "## Today's candidates" in body
@@ -153,11 +148,11 @@ def test_assemble_context_includes_candidates_section(
     assert "Critical news flag: NO" in body
 
 
-def test_assemble_context_candidates_no_data_when_empty(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_assemble_context_candidates_no_data_when_empty(conn: sqlite3.Connection, paths) -> None:
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
         inputs=ContextInputs(candidates=[], holdings_health=[]),
     )
@@ -194,43 +189,33 @@ def test_context_includes_ranker_section_when_scored_supplied(
     assert "✓" in body
 
 
-def test_context_omits_ranker_section_when_scored_none(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_context_omits_ranker_section_when_scored_none(conn: sqlite3.Connection, paths) -> None:
     cand = _candidate("A", n_passed=10)
     out = assemble_context(
         conn=conn,
         paths=paths,
         as_of=date(2026, 5, 15),
         mode="pre_open",
-        inputs=ContextInputs(
-            candidates=[cand], holdings_health=[], scored_candidates=None
-        ),
+        inputs=ContextInputs(candidates=[cand], holdings_health=[], scored_candidates=None),
     )
     body = out.read_text(encoding="utf-8")
     assert "## Layer B ranker" not in body
 
 
-def test_context_omits_ranker_section_when_scored_empty(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_context_omits_ranker_section_when_scored_empty(conn: sqlite3.Connection, paths) -> None:
     cand = _candidate("A", n_passed=10)
     out = assemble_context(
         conn=conn,
         paths=paths,
         as_of=date(2026, 5, 15),
         mode="pre_open",
-        inputs=ContextInputs(
-            candidates=[cand], holdings_health=[], scored_candidates=[]
-        ),
+        inputs=ContextInputs(candidates=[cand], holdings_health=[], scored_candidates=[]),
     )
     body = out.read_text(encoding="utf-8")
     assert "## Layer B ranker" not in body
 
 
-def test_assemble_context_includes_holdings_health(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_assemble_context_includes_holdings_health(conn: sqlite3.Connection, paths) -> None:
     health = HealthScore(
         symbol="TATAPOWER",
         verdict="TRIM",
@@ -241,7 +226,9 @@ def test_assemble_context_includes_holdings_health(
         pnl_pct=-3.2,
     )
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
         inputs=ContextInputs(candidates=[], holdings_health=[health]),
     )
@@ -257,7 +244,9 @@ def test_assemble_context_holdings_health_no_data_when_empty(
     conn: sqlite3.Connection, paths
 ) -> None:
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
         inputs=ContextInputs(candidates=[], holdings_health=[]),
     )
@@ -291,12 +280,12 @@ def _seed_matured_prediction(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def test_assemble_context_includes_open_trades(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_assemble_context_includes_open_trades(conn: sqlite3.Connection, paths) -> None:
     _seed_open_trade(conn)
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
         inputs=ContextInputs(candidates=[], holdings_health=[]),
     )
@@ -311,7 +300,9 @@ def test_assemble_context_pre_open_omits_matured_predictions(
 ) -> None:
     _seed_matured_prediction(conn)
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
         inputs=ContextInputs(candidates=[], holdings_health=[]),
     )
@@ -324,7 +315,9 @@ def test_assemble_context_post_close_includes_matured_predictions(
 ) -> None:
     _seed_matured_prediction(conn)
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="post_close",
         inputs=ContextInputs(candidates=[], holdings_health=[]),
     )
@@ -336,18 +329,23 @@ def test_assemble_context_post_close_includes_matured_predictions(
 
 
 @freeze_time("2026-05-15T08:30:00")
-def test_full_pre_open_bundle_snapshot(
-    conn: sqlite3.Connection, paths, snapshot
-) -> None:
+def test_full_pre_open_bundle_snapshot(conn: sqlite3.Connection, paths, snapshot) -> None:
     _seed_macro(conn)
     _seed_news(conn, "RVNL")
     _seed_open_trade(conn)
     health = HealthScore(
-        symbol="TATAPOWER", verdict="TRIM", score=22, net_votes=-2,
-        votes_cast=8, reasons=["below 200-DMA", "RSI 38"], pnl_pct=-3.2,
+        symbol="TATAPOWER",
+        verdict="TRIM",
+        score=22,
+        net_votes=-2,
+        votes_cast=8,
+        reasons=["below 200-DMA", "RSI 38"],
+        pnl_pct=-3.2,
     )
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
         inputs=ContextInputs(
             candidates=[_candidate("RVNL", n_passed=9)],
@@ -358,44 +356,59 @@ def test_full_pre_open_bundle_snapshot(
 
 
 @freeze_time("2026-05-15T16:30:00")
-def test_full_post_close_bundle_snapshot(
-    conn: sqlite3.Connection, paths, snapshot
-) -> None:
+def test_full_post_close_bundle_snapshot(conn: sqlite3.Connection, paths, snapshot) -> None:
     _seed_macro(conn)
     _seed_open_trade(conn)
     _seed_matured_prediction(conn)
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="post_close",
         inputs=ContextInputs(candidates=[], holdings_health=[]),
     )
     assert out.read_text(encoding="utf-8") == snapshot
 
 
-def test_assemble_context_excludes_future_dated_news(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_assemble_context_excludes_future_dated_news(conn: sqlite3.Connection, paths) -> None:
     """NSE event-calendar entries arrive with future ts and must not leak."""
     # Past headline (within 7d window)
     conn.execute(
         "INSERT INTO news_items (ts, symbol, source, headline, url, "
         "sentiment, category, is_critical) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ("2026-05-13T10:00:00", "RVNL", "moneycontrol",
-         "Past RVNL story", "https://example.com/p", 0.3, "results", 0),
+        (
+            "2026-05-13T10:00:00",
+            "RVNL",
+            "moneycontrol",
+            "Past RVNL story",
+            "https://example.com/p",
+            0.3,
+            "results",
+            0,
+        ),
     )
     # Future headline (NSE event scheduled for next week)
     conn.execute(
         "INSERT INTO news_items (ts, symbol, source, headline, url, "
         "sentiment, category, is_critical) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        ("2026-05-21T15:00:00", "RVNL", "nse_events",
-         "RVNL: Financial Results on 21-May-2026", "https://nse.example", None, None, 0),
+        (
+            "2026-05-21T15:00:00",
+            "RVNL",
+            "nse_events",
+            "RVNL: Financial Results on 21-May-2026",
+            "https://nse.example",
+            None,
+            None,
+            0,
+        ),
     )
     conn.commit()
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
-        inputs=ContextInputs(candidates=[_candidate("RVNL", n_passed=9)],
-                             holdings_health=[]),
+        inputs=ContextInputs(candidates=[_candidate("RVNL", n_passed=9)], holdings_health=[]),
     )
     body = out.read_text(encoding="utf-8")
     assert "Past RVNL story" in body
@@ -414,23 +427,44 @@ def _seed_sector(conn: sqlite3.Connection) -> None:
     upsert_sector_daily(
         conn,
         [
-            SectorRow(date="2026-05-15", sector="IT", close=36000.0,
-                      rs_5d=0.012, rs_20d=0.035, rs_60d=0.02, regime="LEADING"),
-            SectorRow(date="2026-05-15", sector="METAL", close=9000.0,
-                      rs_5d=-0.01, rs_20d=-0.03, rs_60d=-0.04, regime="LAGGING"),
-            SectorRow(date="2026-05-15", sector="FMCG", close=58000.0,
-                      rs_5d=0.001, rs_20d=0.005, rs_60d=0.002, regime="NEUTRAL"),
+            SectorRow(
+                date="2026-05-15",
+                sector="IT",
+                close=36000.0,
+                rs_5d=0.012,
+                rs_20d=0.035,
+                rs_60d=0.02,
+                regime="LEADING",
+            ),
+            SectorRow(
+                date="2026-05-15",
+                sector="METAL",
+                close=9000.0,
+                rs_5d=-0.01,
+                rs_20d=-0.03,
+                rs_60d=-0.04,
+                regime="LAGGING",
+            ),
+            SectorRow(
+                date="2026-05-15",
+                sector="FMCG",
+                close=58000.0,
+                rs_5d=0.001,
+                rs_20d=0.005,
+                rs_60d=0.002,
+                regime="NEUTRAL",
+            ),
         ],
     )
     conn.commit()
 
 
-def test_assemble_context_includes_sector_snapshot(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_assemble_context_includes_sector_snapshot(conn: sqlite3.Connection, paths) -> None:
     _seed_sector(conn)
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
         inputs=ContextInputs(candidates=[], holdings_health=[]),
     )
@@ -440,11 +474,11 @@ def test_assemble_context_includes_sector_snapshot(
     assert "METAL" in body and "-3.00%" in body and "LAGGING" in body
 
 
-def test_assemble_context_sector_empty_when_no_rows(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_assemble_context_sector_empty_when_no_rows(conn: sqlite3.Connection, paths) -> None:
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
         inputs=ContextInputs(candidates=[], holdings_health=[]),
     )
@@ -454,19 +488,17 @@ def test_assemble_context_sector_empty_when_no_rows(
     assert "_(no data)_" in sector_chunk
 
 
-def test_assemble_context_per_candidate_sector_bullet(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_assemble_context_per_candidate_sector_bullet(conn: sqlite3.Connection, paths) -> None:
     """When a candidate's symbol is in sector_map AND sector_daily, the
     candidate block gains a one-line 'sector: <code> — 20d RS …' bullet."""
     static_dir = paths.project_root / "data" / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
-    (static_dir / "sector_map.csv").write_text(
-        "symbol,sector\nRVNL,IT\n", encoding="utf-8"
-    )
+    (static_dir / "sector_map.csv").write_text("symbol,sector\nRVNL,IT\n", encoding="utf-8")
     _seed_sector(conn)
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
         inputs=ContextInputs(
             candidates=[_candidate("RVNL", n_passed=9)],
@@ -477,18 +509,16 @@ def test_assemble_context_per_candidate_sector_bullet(
     assert "sector: IT — 20d RS +3.50% (LEADING)" in body
 
 
-def test_assemble_context_no_sector_bullet_when_unmapped(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_assemble_context_no_sector_bullet_when_unmapped(conn: sqlite3.Connection, paths) -> None:
     """Candidate not present in sector_map.csv → no sector bullet rendered."""
     static_dir = paths.project_root / "data" / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
-    (static_dir / "sector_map.csv").write_text(
-        "symbol,sector\nINFY,IT\n", encoding="utf-8"
-    )
+    (static_dir / "sector_map.csv").write_text("symbol,sector\nINFY,IT\n", encoding="utf-8")
     _seed_sector(conn)
     out = assemble_context(
-        conn=conn, paths=paths, as_of=date(2026, 5, 15),
+        conn=conn,
+        paths=paths,
+        as_of=date(2026, 5, 15),
         mode="pre_open",
         inputs=ContextInputs(
             candidates=[_candidate("BHARTIARTL", n_passed=9)],

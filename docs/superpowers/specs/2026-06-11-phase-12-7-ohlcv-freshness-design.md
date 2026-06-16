@@ -1,7 +1,10 @@
 # Phase 12.7 — OHLCV freshness hardening
 
 **Date:** 2026-06-11
-**Status:** approved (design review 2026-06-11)
+**Status:** ✅ implemented 2026-06-16 (F-018) — `data/ohlcv_refresh.py`,
+`pre_open._step_ohlcv`/`_step_cross_check`, scan staleness guard +
+`Candidate.bar_date`, `trading refresh-ohlcv` CLI. IST-clock centralisation
+(§ "centralise the IST clock") deferred to F-004.
 
 ## Problem
 

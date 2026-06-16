@@ -24,6 +24,11 @@ from trading.store.ohlcv import list_symbols, read_ohlcv
 
 MIN_HISTORY_BARS = 200  # need this many to compute sma_200
 
+# Skip a symbol whose most recent bar is older than this many calendar days
+# before scan_date (covers weekends + holiday clusters). Guards against scanning
+# on silently-stale parquet when the daily OHLCV refresh failed or was skipped.
+MAX_BAR_AGE_DAYS = 5
+
 INSUFFICIENT_HISTORY = "insufficient history"
 
 
@@ -62,6 +67,7 @@ class Candidate:
     sma_200: float
     atr_14: float
     rules: tuple[RuleResult, ...]
+    bar_date: date  # date of the bar the metrics were computed on (data basis)
 
     @property
     def all_passed(self) -> bool:
@@ -249,6 +255,7 @@ def evaluate_symbol(symbol: str, df: pd.DataFrame, ctx: ScanContext) -> Candidat
         sma_200=_f(last.get("sma_200")),
         atr_14=_f(last.get("atr_14")),
         rules=rules,
+        bar_date=pd.Timestamp(df.index[-1]).date(),
     )
 
 
@@ -258,11 +265,16 @@ def scan(
     *,
     symbols: list[str] | None = None,
     ctx: ScanContext | None = None,
+    warnings: list[str] | None = None,
 ) -> list[Candidate]:
     """Run Layer A across the universe and return one Candidate per symbol.
 
     Symbols with fewer than `MIN_HISTORY_BARS` available bars are silently
     skipped (they can't compute SMA 200, so no rule can pass meaningfully).
+    A symbol whose most recent bar is more than `MAX_BAR_AGE_DAYS` before
+    `scan_date` is skipped with a warning appended to `warnings` (when given) —
+    so a stale parquet degrades the run visibly instead of silently feeding the
+    scanner month-old prices.
     """
     if ctx is None:
         ctx = ScanContext(scan_date=scan_date)
@@ -276,6 +288,11 @@ def scan(
         except FileNotFoundError:
             continue
         if len(raw) < MIN_HISTORY_BARS:
+            continue
+        last_bar = pd.Timestamp(raw.index[-1]).date()
+        if (scan_date - last_bar).days > MAX_BAR_AGE_DAYS:
+            if warnings is not None:
+                warnings.append(f"{sym}: last bar {last_bar.isoformat()} is stale — skipped")
             continue
         enriched = add_indicators(raw)
         candidates.append(evaluate_symbol(sym, enriched, ctx))

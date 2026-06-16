@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -329,6 +329,7 @@ def test_passing_filter_excludes_failures() -> None:
         sma_200=95.0,
         atr_14=2.0,
         rules=(RuleResult("uptrend", True), RuleResult("rsi_band", True)),
+        bar_date=date(2024, 1, 1),
     )
     fail_cand = Candidate(
         symbol="B",
@@ -340,6 +341,7 @@ def test_passing_filter_excludes_failures() -> None:
         sma_200=95.0,
         atr_14=2.0,
         rules=(RuleResult("uptrend", True), RuleResult("rsi_band", False, "RSI=80")),
+        bar_date=date(2024, 1, 1),
     )
     assert passing([pass_cand, fail_cand]) == [pass_cand]
 
@@ -362,7 +364,8 @@ def test_scan_skips_symbols_with_insufficient_history(tmp_path: Path) -> None:
     write_ohlcv(df_long, "ALONG", paths)
     write_ohlcv(df_short, "BSHORT", paths)
 
-    cands = scan(paths, scan_date=date(2024, 12, 31), symbols=["ALONG", "BSHORT"])
+    scan_date = df_long.index[-1].date()  # scan as of the last bar (fresh)
+    cands = scan(paths, scan_date=scan_date, symbols=["ALONG", "BSHORT"])
     symbols = {c.symbol for c in cands}
     assert "ALONG" in symbols
     assert "BSHORT" not in symbols
@@ -381,15 +384,71 @@ def test_scan_with_explicit_symbols(tmp_path: Path) -> None:
         index=pd.date_range("2024-01-01", periods=250, freq="B", name="date"),
     )
     write_ohlcv(df, "FOO", paths)
-    cands = scan(paths, scan_date=date(2024, 12, 31), symbols=["FOO"])
+    scan_date = df.index[-1].date()
+    cands = scan(paths, scan_date=scan_date, symbols=["FOO"])
     assert len(cands) == 1
     assert cands[0].symbol == "FOO"
+    assert cands[0].bar_date == scan_date
 
 
 def test_scan_returns_empty_when_no_parquet(tmp_path: Path) -> None:
     paths = get_paths(root=tmp_path)
     cands = scan(paths, scan_date=date(2024, 1, 1), symbols=["NOPE"])
     assert cands == []
+
+
+def test_scan_skips_stale_symbol_with_warning(tmp_path: Path) -> None:
+    paths = get_paths(root=tmp_path)
+    df = pd.DataFrame(
+        {
+            "open": [100.0] * 250,
+            "high": [101.0] * 250,
+            "low": [99.0] * 250,
+            "close": [100.0] * 250,
+            "volume": [1_000_000] * 250,
+        },
+        index=pd.date_range("2024-01-01", periods=250, freq="B", name="date"),
+    )
+    write_ohlcv(df, "STALE", paths)
+    last_bar = df.index[-1].date()
+    warnings: list[str] = []
+    # scan_date 30 days after the last bar → beyond MAX_BAR_AGE_DAYS
+    cands = scan(
+        paths,
+        scan_date=last_bar + timedelta(days=30),
+        symbols=["STALE"],
+        warnings=warnings,
+    )
+    assert cands == []
+    assert len(warnings) == 1
+    assert "STALE" in warnings[0]
+    assert "stale" in warnings[0].lower()
+
+
+def test_scan_fresh_symbol_no_warning(tmp_path: Path) -> None:
+    paths = get_paths(root=tmp_path)
+    df = pd.DataFrame(
+        {
+            "open": [100.0] * 250,
+            "high": [101.0] * 250,
+            "low": [99.0] * 250,
+            "close": [100.0] * 250,
+            "volume": [1_000_000] * 250,
+        },
+        index=pd.date_range("2024-01-01", periods=250, freq="B", name="date"),
+    )
+    write_ohlcv(df, "FRESH", paths)
+    last_bar = df.index[-1].date()
+    warnings: list[str] = []
+    # scan_date within MAX_BAR_AGE_DAYS of the last bar
+    cands = scan(
+        paths,
+        scan_date=last_bar + timedelta(days=3),
+        symbols=["FRESH"],
+        warnings=warnings,
+    )
+    assert len(cands) == 1
+    assert warnings == []
 
 
 @pytest.fixture
