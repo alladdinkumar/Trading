@@ -1,44 +1,50 @@
-# Trading universe — NSE symbols, one per line.
+# Trading universe — NSE symbols, one per line (the INGEST list).
 # Lines starting with `#` are comments; blank lines ignored.
-# Add/remove symbols here. Phase 2 (`trading ingest-history`) reads this file.
+# `trading ingest-history` reads this file to fetch OHLCV for everything we
+# need parquet for: the Nifty-50 candidate set PLUS the account holder's
+# non-Nifty holdings (needed for portfolio-health history).
 #
-# Current contents: Nifty 50 + the account holder's existing holdings.
-# To expand to Nifty 200, append the additional ~150 symbols.
+# The *candidate* universe (what the scan/ranker/auto-open trade) is the
+# Nifty 50 only — see data/static/nifty50.txt. Holdings here that aren't in
+# the Nifty 50 are ingested for health scoring but are not candidates.
+#
+# Nifty-50 membership reconciled to the live niftyindices.com list on
+# 2026-06-16 (Zomato→ETERNAL, +INDIGO/MAXHEALTH/TMPV, JIOFIN promoted in;
+# BPCL/BRITANNIA/HEROMOTOCO/INDUSINDBK/LTIM/TATAMOTORS removed).
 
-# --- Nifty 50 ---
+# --- Nifty 50 (candidate universe) ---
 ADANIENT
 ADANIPORTS
 APOLLOHOSP
 ASIANPAINT
 AXISBANK
 BAJAJ-AUTO
-BAJFINANCE
 BAJAJFINSV
+BAJFINANCE
 BEL
 BHARTIARTL
-BPCL
-BRITANNIA
 CIPLA
 COALINDIA
 DRREDDY
 EICHERMOT
+ETERNAL
 GRASIM
 HCLTECH
 HDFCBANK
 HDFCLIFE
-HEROMOTOCO
 HINDALCO
 HINDUNILVR
 ICICIBANK
-INDUSINDBK
+INDIGO
 INFY
 ITC
+JIOFIN
 JSWSTEEL
 KOTAKBANK
 LT
-LTIM
 M&M
 MARUTI
+MAXHEALTH
 NESTLEIND
 NTPC
 ONGC
@@ -49,16 +55,16 @@ SBIN
 SHRIRAMFIN
 SUNPHARMA
 TATACONSUM
-TATAMOTORS
 TATASTEEL
 TCS
 TECHM
 TITAN
+TMPV
 TRENT
 ULTRACEMCO
 WIPRO
 
-# --- User holdings (non-Nifty-50) ---
+# --- User holdings (non-Nifty-50; ingested for health, not candidates) ---
 RVNL
 TATAPOWER
 IRB
@@ -66,5 +72,4 @@ PFC
 RECLTD
 IDFCFIRSTB
 IREDA
-JIOFIN
 MAZDOCK

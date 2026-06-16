@@ -33,7 +33,9 @@ from trading.strategy.ranker import ScoredCandidate
 from trading.strategy.rules import Candidate, RuleResult
 
 
-def _sc(cand: Candidate, *, ml_score: float | None = None, selected: bool = True) -> ScoredCandidate:
+def _sc(
+    cand: Candidate, *, ml_score: float | None = None, selected: bool = True
+) -> ScoredCandidate:
     """Wrap a Candidate in a default-selected ScoredCandidate."""
     return ScoredCandidate(candidate=cand, ml_score=ml_score, selected=selected)
 
@@ -226,10 +228,30 @@ def _candidate(symbol: str, n_passed: int) -> Candidate:
 def test_step_scan_delegates_to_strategy(paths) -> None:
     warnings: list[str] = []
     fake = [_candidate("RVNL", 9), _candidate("NTPC", 7)]
-    with patch("trading.jobs.pre_open.scan", return_value=fake):
+    with (
+        patch(
+            "trading.jobs.pre_open.load_candidate_universe",
+            return_value=["RVNL", "NTPC"],
+        ),
+        patch("trading.jobs.pre_open.scan", return_value=fake),
+    ):
         out = _step_scan(paths, date(2026, 5, 15), warnings)
     assert out == fake
     assert warnings == []
+
+
+def test_step_scan_restricts_to_candidate_universe(paths) -> None:
+    """_step_scan passes the Nifty-50 candidate list, not the full universe."""
+    candidates = ["RELIANCE", "INFY", "TCS"]
+    with (
+        patch(
+            "trading.jobs.pre_open.load_candidate_universe",
+            return_value=candidates,
+        ),
+        patch("trading.jobs.pre_open.scan", return_value=[]) as mock_scan,
+    ):
+        _step_scan(paths, date(2026, 5, 15), [])
+    assert mock_scan.call_args.kwargs["symbols"] == candidates
 
 
 def _settings(token: str | None = None) -> Settings:
@@ -402,6 +424,10 @@ def test_run_pre_open_full_happy_path_integration(paths, monkeypatch) -> None:
     write_ohlcv(_all_pass_frame(), "TESTSYM", paths)
 
     monkeypatch.setattr(
+        "trading.jobs.pre_open.load_candidate_universe",
+        lambda p: ["TESTSYM"],
+    )
+    monkeypatch.setattr(
         "trading.jobs.pre_open._step_macro",
         lambda c, d, w: (True, "RISK_ON"),
     )
@@ -496,19 +522,11 @@ def test_pre_open_persists_ml_score_on_all_passing(paths, monkeypatch) -> None:
     _register_passive_top1_model(paths)
 
     fake_cands = [_candidate(s, n_passed=10) for s in syms]
-    monkeypatch.setattr(
-        "trading.jobs.pre_open._step_macro", lambda c, d, w: (True, "RISK_ON")
-    )
-    monkeypatch.setattr(
-        "trading.jobs.pre_open._step_sector", lambda c, d, w: False
-    )
+    monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (True, "RISK_ON"))
+    monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
-    monkeypatch.setattr(
-        "trading.jobs.pre_open._step_scan", lambda p, d, w: fake_cands
-    )
-    monkeypatch.setattr(
-        "trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: []
-    )
+    monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda p, d, w: fake_cands)
+    monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: [])
 
     result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=False)
     assert result.candidates_passing == 7
@@ -534,19 +552,11 @@ def test_pre_open_without_active_model_opens_all_passing(paths, monkeypatch) -> 
     _multi_pass_universe(paths, syms)
 
     fake_cands = [_candidate(s, n_passed=10) for s in syms]
-    monkeypatch.setattr(
-        "trading.jobs.pre_open._step_macro", lambda c, d, w: (True, "RISK_ON")
-    )
-    monkeypatch.setattr(
-        "trading.jobs.pre_open._step_sector", lambda c, d, w: False
-    )
+    monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (True, "RISK_ON"))
+    monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
-    monkeypatch.setattr(
-        "trading.jobs.pre_open._step_scan", lambda p, d, w: fake_cands
-    )
-    monkeypatch.setattr(
-        "trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: []
-    )
+    monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda p, d, w: fake_cands)
+    monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: [])
 
     result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=False)
     assert result.candidates_selected == result.candidates_passing
@@ -595,12 +605,22 @@ def test_step_sector_writes_rows_and_returns_true(
 ) -> None:
     rows = [
         SectorRow(
-            date="2026-05-26", sector="IT", close=36000.0,
-            rs_5d=0.012, rs_20d=0.035, rs_60d=0.02, regime="LEADING",
+            date="2026-05-26",
+            sector="IT",
+            close=36000.0,
+            rs_5d=0.012,
+            rs_20d=0.035,
+            rs_60d=0.02,
+            regime="LEADING",
         ),
         SectorRow(
-            date="2026-05-26", sector="METAL", close=9000.0,
-            rs_5d=-0.01, rs_20d=-0.03, rs_60d=-0.04, regime="LAGGING",
+            date="2026-05-26",
+            sector="METAL",
+            close=9000.0,
+            rs_5d=-0.01,
+            rs_20d=-0.03,
+            rs_60d=-0.04,
+            regime="LAGGING",
         ),
     ]
     monkeypatch.setattr("trading.jobs.pre_open.fetch_all_sectors", lambda _as_of: rows)
@@ -639,4 +659,3 @@ def test_step_sector_returns_false_when_no_rows(
     ok = _step_sector(conn, date(2026, 5, 26), warnings)
     assert ok is False
     assert any("no sector rows fetched" in w for w in warnings)
-

@@ -24,6 +24,7 @@ from trading.data.kite_snapshot import (
 from trading.data.macro import snapshot_and_classify
 from trading.data.news import DEFAULT_ALIASES, fetch_all_news
 from trading.data.sector import fetch_all_sectors
+from trading.data.universe import load_candidate_universe
 from trading.features.regime import Regime
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.llm.context import ContextInputs, assemble_context
@@ -224,9 +225,15 @@ def _step_news(conn: sqlite3.Connection, as_of: date, warnings: list[str]) -> tu
 
 
 def _step_scan(paths: Paths, as_of: date, warnings: list[str]) -> list[Candidate]:
-    """Run Layer A scanner over the parquet universe."""
+    """Run Layer A scanner over the Nifty-50 candidate universe.
+
+    Candidates are restricted to the Nifty 50 (`data/static/nifty50.txt`) so
+    the user's non-Nifty holdings are scored for health but never auto-traded.
+    Symbols without parquet (or <200 bars) are skipped inside `scan`.
+    """
     ctx = ScanContext(scan_date=as_of)
-    return scan(paths, as_of, ctx=ctx)
+    symbols = load_candidate_universe(paths)
+    return scan(paths, as_of, symbols=symbols, ctx=ctx)
 
 
 def _step_portfolio(

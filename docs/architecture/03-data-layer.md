@@ -182,22 +182,30 @@ invalid hours/minutes.
 comments/blanks skipped, dedup preserving order). This is the *intended* trading
 universe — but see the coverage gap below.
 
-## 4. The coverage reality (important)
+## 4. The coverage reality (resolved 2026-06-16)
 
-The configured universe and what's actually ingested diverge sharply:
+> **Update (2026-06-16):** the coverage gap below has been **fixed** (F-014 +
+> F-012). All 50 Nifty constituents plus 8 non-Nifty holdings are now ingested,
+> the candidate set is pinned to the Nifty 50 (`data/static/nifty50.txt`), and
+> `pre-open` now reports `candidates_total = 50`. The historical table is kept
+> for context.
 
-| Source of truth | Count |
-|---|---|
-| `data/static/universe.txt` | 60 |
-| `data/static/sector_map.csv` | 57 |
-| **Parquet OHLCV actually on disk** (`data/parquet/nifty200/`) | **12** |
+Originally the configured universe and what was actually ingested diverged
+sharply:
 
-Because the scanner iterates `store.ohlcv.list_symbols()` (the parquet
-directory), **the live candidate universe today is 12 stocks**, not 50/57/60.
-This is why every recent `pre-open` reports "12 candidates evaluated." It
-directly blocks the **Nifty-50 paper-trading requirement** — history must be
-ingested for all 50 constituents first. → **F-014** (and ties to the
-[Nifty-50 universe requirement](./FINDINGS.md) under F-012).
+| Source of truth | Count (pre-fix) | Now |
+|---|---|---|
+| `data/static/nifty50.txt` (candidate set) | — | **50** |
+| `data/static/universe.txt` (ingest set) | 60 | 58 |
+| `data/static/sector_map.csv` | 57 | 59 |
+| **Parquet OHLCV actually on disk** (`data/parquet/nifty200/`) | **12** | **58** |
+
+Previously the scanner iterated `store.ohlcv.list_symbols()` (the parquet
+directory), so the live candidate universe was just 12 stocks. The scan now
+drives off `load_candidate_universe()` (the pinned Nifty 50), and every Nifty-50
+symbol has history — so `pre-open` evaluates all 50. → **F-014 / F-012** (both
+✅ Fixed). The `nifty200/` subdir name is now a cosmetic misnomer (rename
+deferred).
 
 ## 5. MCP-vs-SDK split (recap)
 
@@ -215,10 +223,11 @@ session; the batch Python reads files. See [00-overview §1](./00-overview.md).
 
 ## ⚠️ Robustness notes / open questions
 
-- **🔴 The system is effectively trading 12 stocks.** Universe config says
-  ~57–60 and the requirement is Nifty 50, but only 12 symbols have parquet
-  history, so scan/rank/auto-open all operate on 12. Highest-priority gap for the
-  paper-trade goal. → F-014.
+- **✅ (Fixed 2026-06-16) The system was effectively trading 12 stocks.**
+  Universe config said ~57–60 and the requirement is Nifty 50, but only 12
+  symbols had parquet history, so scan/rank/auto-open all operated on 12. Now
+  resolved: all 50 Nifty constituents are ingested and the candidate set is
+  pinned to the Nifty 50, so `pre-open` evaluates 50. → F-014 / F-012.
 - **OHLCV is never auto-refreshed.** No daily re-pull and no freshness guard on
   read; a forgotten `ingest-history` means the scan silently runs on stale prices.
   → F-018.

@@ -193,8 +193,10 @@ data/parquet/nifty200/<SYMBOL>.parquet     # symbol suffix-stripped: RELIANCE.NS
   rejects any other column set on write (`REQUIRED_COLUMNS`). Index is the date.
 - `parquet_path()` strips the yfinance `.NS` suffix so the on-disk name is the
   bare ticker. `list_symbols()` enumerates the directory.
-- The subdir is hardcoded `nifty200` even though the active universe is smaller
-  (Nifty 50 + holdings ≈ 57). → **F-012** (naming vs. actual scope).
+- The subdir is hardcoded `nifty200` even though the active universe is the
+  Nifty 50 (+ 8 holdings, ≈ 58 ingested). The candidate scope was pinned to the
+  Nifty 50 on 2026-06-16 (**F-012 ✅ Fixed**); the `nifty200/` directory rename
+  itself is deferred (cosmetic, touches `store/ohlcv.py` + tests).
 - Storage-boundary cleaning: `_drop_trailing_nan_close` strips yfinance's
   current-day NaN-OHLC stub (Phase 12.5 fix) so indicators don't see a phantom
   bar.
@@ -263,8 +265,9 @@ compile flow (and mid/post-close).
 - **JSON contracts are unvalidated** (F-002) and the `holdings_json` /
   `rules_passed_json` blobs inside SQLite are opaque to queries — schema changes
   to those blobs are invisible to migrations.
-- **`nifty200` subdir name overstates the universe** (≈57 symbols). Harmless but
-  confusing for anyone sizing the data. → F-012.
+- **`nifty200` subdir name overstates the universe** (≈58 ingested symbols).
+  Candidate scope pinned to the Nifty 50 (F-012 ✅ Fixed 2026-06-16); the
+  directory rename is a deferred cosmetic follow-up.
 - **No retention/compaction policy** for `news_items` (append-only, one row per
   headline per day) or `data/raw/<date>/` JSON. Over months this grows unbounded.
   → F-013.

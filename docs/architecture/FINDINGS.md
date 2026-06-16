@@ -9,13 +9,16 @@
 ## Executive summary
 
 The architecture review (docs 00–08) produced **31 active findings** (1 earlier
-finding superseded). The system is **well-engineered at the seams** — graceful
-degradation, idempotency, pure-function cores, clean job/CLI/UI layers — but two
-themes undermine its current goal of proving itself in a live paper-trade run:
+finding superseded). **2 are now fixed** (F-014, F-012 — Nifty-50 ingest,
+shipped 2026-06-16), leaving **29 open**. The system is **well-engineered at the
+seams** — graceful degradation, idempotency, pure-function cores, clean
+job/CLI/UI layers — but two themes undermine its current goal of proving itself
+in a live paper-trade run:
 
-1. **Data coverage.** It trades **12 stocks, not the intended Nifty 50**, never
-   refreshes prices, and attributes news for only 12 symbols. So the candidate
-   set, the ranker's training data, and the sentiment signals are all starved.
+1. **Data coverage.** ~~It trades **12 stocks, not the intended Nifty 50**~~
+   (✅ fixed — now scans all 50 Nifty constituents), but it still never
+   refreshes prices (F-018) and attributes news for only 12 symbols (F-015). So
+   the ranker's training data and the sentiment signals remain partly starved.
 2. **Measurement integrity.** Four of ten risk rules are silently disabled, every
    prediction is a constant +20%, and the paper **equity curve never compounds
    realised P&L** — which is exactly the metric the Phase 18.5 go/no-go gate
@@ -29,9 +32,10 @@ and *how its results are measured*. Both are fixable with localized changes.
 
 | Severity | Count | IDs |
 |---|---:|---|
-| **High** | 6 | F-002, F-005†, F-014, F-018, F-019, F-023 |
-| Med | 17 | F-001, F-003, F-006, F-007, F-008, F-010, F-012, F-015, F-016, F-020, F-021, F-022, F-024, F-025, F-026, F-029, F-032 |
+| **High** | 5 | F-002, F-005†, F-018, F-019, F-023 |
+| Med | 16 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-022, F-024, F-025, F-026, F-029, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
+| ✅ Fixed | 2 | F-012, F-014 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -53,7 +57,7 @@ The highest-leverage cluster; everything else is noise until these land.
 
 | ID | Sev | Fix | Why first |
 |---|---|---|---|
-| **F-014 + F-012** | High/Med | Ingest OHLCV for the 50 Nifty-50 constituents; set `universe.txt` to 50; rename `nifty200/` subdir; align `sector_map.csv` | Unblocks the real universe **and** gives the ranker enough labels to ever promote |
+| ~~**F-014 + F-012**~~ ✅ | High/Med | **Done (2026-06-16).** Ingested OHLCV for all 50 Nifty constituents + 8 holdings; pinned `nifty50.txt` (candidate set) and rebuilt `universe.txt` (ingest set); added `load_candidate_universe()`; `_step_scan` now scans the 50; aligned `sector_map.csv`. Verified: `pre-open` `candidates_total` 12→50. *(`nifty200/` subdir rename deferred — cosmetic.)* | Unblocks the real universe **and** gives the ranker enough labels to ever promote |
 | **F-018** | High | Add an OHLCV refresh + read-time freshness guard to `pre_open` | Prevents the scan running on stale prices |
 | **F-019** | High | Populate `ScanContext` in `_step_scan` from data already fetched (regime, `has_critical`; ban-list/T2T as available) | Re-enables 3 risk vetoes + the regime gate |
 | **F-023** | High | Paper-cash ledger: debit on open, credit net P&L on close; equity = cash + open MTM | Makes the Phase-18.5 Sharpe metric trustworthy |
@@ -85,9 +89,9 @@ constant + spanning test), F-028 (docstring), F-030 (guard visibility signals).
 F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 18.5 outcome; needs its own spec before any code.
 
-> **Suggested first PR:** F-014 + F-012 (Nifty-50 ingest). It's low-risk (data
-> only), unblocks the ranker, and makes every other finding testable against a
-> realistic universe.
+> **Suggested first PR:** ~~F-014 + F-012 (Nifty-50 ingest).~~ ✅ **Shipped
+> 2026-06-16.** Next up in Wave 1: F-018 (OHLCV freshness guard), F-019
+> (ScanContext wiring), F-023 (paper-cash ledger), F-029 (real predictions).
 
 ## How to use this file
 
@@ -133,9 +137,9 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-009 | GAP | Low | 1 | No automated dependency-layering enforcement (e.g. import-linter); layering is convention-only | Open |
 | F-010 | GAP | Med | 2 | 8 of 16 SQLite domain tables are defined but have zero writers (dormant schema reservations) | Open |
 | F-011 | VULN | High | 2 | Rule gates depend on empty tables — **superseded by F-019** (root cause is unpopulated `ScanContext`, not the tables) | Superseded |
-| F-012 | INACC | Med | 2 | Universe scope: paper-trading candidate set should be **Nifty 50 (50 stocks)** per user req; currently ~57 (Nifty 50 + holdings) under a `nifty200/` subdir | Open |
+| F-012 | INACC | Med | 2 | Universe scope: paper-trading candidate set should be **Nifty 50 (50 stocks)** per user req; currently ~57 (Nifty 50 + holdings) under a `nifty200/` subdir | ✅ Fixed (2026-06-16) — candidate set pinned to Nifty 50; subdir rename deferred (cosmetic) |
 | F-013 | GAP | Low | 2 | No retention/compaction policy for `news_items` (append-only) or `data/raw/<date>/` JSON — unbounded growth | Open |
-| F-014 | GAP | High | 3 | Only 12 symbols have parquet OHLCV on disk → live candidate universe is 12, not the configured ~57 nor the required Nifty 50 | Open |
+| F-014 | GAP | High | 3 | Only 12 symbols have parquet OHLCV on disk → live candidate universe is 12, not the configured ~57 nor the required Nifty 50 | ✅ Fixed (2026-06-16) — all 50 Nifty + 8 holdings ingested; `candidates_total` 12→50 |
 | F-015 | GAP | Med | 3 | News symbol-attribution alias map covers only 12 symbols → sparse `sentiment_daily`, near-empty per-symbol sentiment/critical inputs | Open |
 | F-016 | DEBT | Med | 3 | News dedup is URL-only and single-run; daily event/headline re-fetch creates duplicate `news_items` rows (no DB-level uniqueness) | Open |
 | F-017 | INACC | Low | 3 | `macro_snapshot.dow_fut`/`nasdaq_fut` store spot index closes not futures; `sgx_nifty` always NULL | Open |
@@ -248,7 +252,19 @@ filtered out — a real correctness risk for live selection.
   calendar already fetched) and wire them into `ScanContext`; until then, make
   the gate's data-absence explicit (warn, not silently pass).
 
-### F-012 — Universe scope vs. naming (`INACC`, Low→**Med**, Phase 2)
+### F-012 — Universe scope vs. naming (`INACC`, Low→**Med**, Phase 2) — ✅ Fixed 2026-06-16
+**Resolution:** Candidate set is now the Nifty 50, pinned in
+`data/static/nifty50.txt` (50 symbols, sourced from the official
+niftyindices.com constituents CSV). `universe.txt` is now the *ingest* list
+(50 Nifty + 8 non-Nifty holdings for health scoring). A new
+`load_candidate_universe()` reads `nifty50.txt` (falls back to `universe.txt`),
+and `pre_open._step_scan` scans that candidate list — so holdings are scored for
+health but never auto-traded. `sector_map.csv` aligned (added `TMPV`,
+`MAXHEALTH`). The `nifty200/` parquet subdir rename is **deferred** (cosmetic;
+touches `store/ohlcv.py` + tests; tracked separately). Verified by tests in
+`tests/test_universe.py` + `test_jobs_pre_open.py`.
+
+*Original finding:*
 Parquet lives under `data/parquet/nifty200/` but the active set is ~57 symbols
 (Nifty 50 + personal holdings).
 - **User requirement (2026-06-16):** the **paper-trading candidate universe
@@ -269,13 +285,20 @@ Parquet lives under `data/parquet/nifty200/` but the active set is ~57 symbols
 
 ---
 
-### F-014 — Only 12 symbols ingested (`GAP`, High, Phase 3)
+### F-014 — Only 12 symbols ingested (`GAP`, High, Phase 3) — ✅ Fixed 2026-06-16
+**Resolution:** Ran `trading ingest-history` over the full ingest list — all 50
+Nifty-50 constituents plus the 8 non-Nifty holdings now have parquet OHLCV
+(history from 2023-01-01). Reconciled membership to the live niftyindices.com
+list (Zomato→ETERNAL rename; +INDIGO/MAXHEALTH/TMPV; JIOFIN promoted in;
+BPCL/BRITANNIA/HEROMOTOCO/INDUSINDBK/LTIM/TATAMOTORS dropped). With
+`_step_scan` now driving off the candidate list, `pre-open` `candidates_total`
+went **12 → 50** (verified 2026-06-16). Unblocks [[F-012]] and gives the ranker
+enough labelled symbols to train/promote.
+
+*Original finding:*
 `data/parquet/nifty200/` holds 12 `.parquet` files; `universe.txt` lists 60 and
 `sector_map.csv` 57. The scanner iterates the parquet dir, so the candidate
 universe is 12. Blocks the Nifty-50 paper-trade requirement ([[F-012]]).
-- **Fix idea (fix pass):** `trading ingest-history` for the 50 Nifty-50
-  constituents; verify `list_symbols()` returns 50; re-run `pre-open` and
-  confirm `candidates_total` ≈ 50.
 
 ### F-015 — Sentiment attribution covers 12 symbols (`GAP`, Med, Phase 3)
 `news.DEFAULT_ALIASES` has 12 entries. Most Nifty-50 names' news is never
