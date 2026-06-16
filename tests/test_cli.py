@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -9,9 +10,31 @@ import pandas as pd
 import pytest
 from typer.testing import CliRunner
 
-from trading.cli import app
+from trading.cli import _force_utf8_io, app
 
 runner = CliRunner()
+
+
+def test_force_utf8_io_reconfigures_cp1252_stream_and_survives_unicode() -> None:
+    """Regression: under a cp1252 console (Windows Task Scheduler default),
+    writing CLI output with '→', '₹', or emoji raises UnicodeEncodeError and
+    crashes the scheduled task. `_force_utf8_io` must switch such a stream to
+    UTF-8 so the write succeeds."""
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    assert stream.encoding.lower() == "cp1252"
+
+    _force_utf8_io(stream)
+
+    assert stream.encoding.lower() == "utf-8"
+    # The exact chars that crashed weekly-train (→) and paper-status (₹) + emoji.
+    stream.write("window 2023 → 2026  cash ₹100,000  🔔")
+    stream.flush()
+
+
+def test_force_utf8_io_ignores_streams_without_reconfigure() -> None:
+    """A stream lacking `reconfigure` (e.g. a plain StringIO sink) is skipped
+    silently — the helper must never raise."""
+    _force_utf8_io(io.StringIO())
 
 
 def _fake_ohlcv(rows: int = 5) -> pd.DataFrame:
@@ -278,6 +301,46 @@ def _init_db(tmp_path: Path) -> Path:
     with _get_conn(db_path) as conn:
         _run_migrations(conn)
     return db_path
+
+
+def test_paper_status_with_open_trade_does_not_crash(tmp_path: Path, monkeypatch) -> None:
+    """Regression: `paper-status` resolved signals with `get_signal(conn, …)`
+    *after* the `with get_conn()` block closed `conn`, raising
+    `ProgrammingError: Cannot operate on a closed database` whenever an open
+    trade existed. The lookup must happen while the connection is open."""
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    db_path = _init_db(tmp_path)
+
+    from trading.paper.ledger import log_signal_and_open_trade
+    from trading.store.db import get_conn as _get_conn
+    from trading.store.repo import Signal
+
+    sig = Signal(
+        id=None,
+        ts="2026-06-15T08:30:00",
+        symbol="RVNL",
+        side="LONG",
+        entry=100.0,
+        stop=97.0,
+        target=107.5,
+        horizon_days=25,
+        rules_passed_json="[]",
+        ml_score=None,
+        created_by="test",
+    )
+    with _get_conn(db_path) as conn:
+        log_signal_and_open_trade(
+            conn,
+            signal=sig,
+            entry_ts="2026-06-15T08:30:00",
+            entry_price=100.0,
+            qty=10,
+            atr_at_entry=2.0,
+        )
+
+    result = runner.invoke(app, ["paper-status"])
+    assert result.exit_code == 0, result.stdout
+    assert "RVNL" in result.stdout
 
 
 def test_brief_assemble_context_writes_bundle(tmp_path: Path, monkeypatch) -> None:

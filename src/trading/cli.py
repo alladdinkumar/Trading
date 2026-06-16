@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import sys
 from dataclasses import asdict
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -88,6 +89,28 @@ app = typer.Typer(help="Trading — research and paper-trading CLI.", add_comple
 console = Console()
 
 
+def _force_utf8_io(*streams: object) -> None:
+    """Reconfigure stdout/stderr (or the given streams) to UTF-8.
+
+    Windows Task Scheduler runs tasks under the system console code page
+    (cp1252), where printing characters the CLI routinely emits — `→` in the
+    weekly-train table, `₹` in paper-status, the `🔔/⚠️/❌` notify emoji — raises
+    `UnicodeEncodeError` and crashes the scheduled task (which then also posts
+    the traceback to Slack via the error sink). Forcing UTF-8 here makes every
+    `uv run trading …` invocation encoding-safe regardless of the console code
+    page, so we no longer depend on each Task Scheduler XML remembering to set
+    `PYTHONUTF8=1`. `errors="replace"` is a last-resort guard. Streams without
+    `reconfigure` (capture buffers, plain `StringIO`) are skipped.
+    """
+    targets = streams or (sys.stdout, sys.stderr)
+    for stream in targets:
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        with contextlib.suppress(ValueError, OSError):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 @app.callback()
 def _main() -> None:
     """Trading — research and paper-trading CLI.
@@ -98,6 +121,7 @@ def _main() -> None:
     so subcommands that read env vars directly (e.g. `notify-test` reading
     `SLACK_WEBHOOK_URL` inside `post_slack`) see the configured values.
     """
+    _force_utf8_io()
     get_settings()
 
 
@@ -1057,6 +1081,15 @@ def paper_status_cmd() -> None:
     with get_conn(paths.db_path) as conn:
         run_migrations(conn)
         opens = open_trades(conn)
+        # Resolve each open trade's signal *while the connection is open* —
+        # doing it in the render loop below crashed with "Cannot operate on a
+        # closed database" once the `with` block exited.
+        open_display: list[tuple[int | None, str, float, float, int, int]] = []
+        for t in opens:
+            sig = get_signal(conn, t.signal_id)
+            sym = sig.symbol if sig else "?"
+            curr_stop = t.current_stop if t.current_stop is not None else (sig.stop if sig else 0)
+            open_display.append((t.id, sym, t.entry_price, curr_stop, t.qty, t.days_held or 0))
         closed_rows = conn.execute(
             """SELECT pt.*, s.symbol FROM paper_trades pt
                JOIN signals s ON s.id = pt.signal_id
@@ -1068,7 +1101,7 @@ def paper_status_cmd() -> None:
         ).fetchone()
 
     # Open trades
-    if opens:
+    if open_display:
         table = Table(title="Open paper trades", show_header=True, header_style="bold")
         table.add_column("Trade")
         table.add_column("Symbol")
@@ -1076,17 +1109,14 @@ def paper_status_cmd() -> None:
         table.add_column("Qty", justify="right")
         table.add_column("Stop (curr)", justify="right")
         table.add_column("Days", justify="right")
-        for t in opens:
-            sig = get_signal(conn, t.signal_id)
-            sym = sig.symbol if sig else "?"
-            curr_stop = t.current_stop if t.current_stop is not None else (sig.stop if sig else 0)
+        for trade_id, sym, entry_price, curr_stop, qty, days_held in open_display:
             table.add_row(
-                str(t.id),
+                str(trade_id),
                 sym,
-                f"{t.entry_price:.2f}",
-                str(t.qty),
+                f"{entry_price:.2f}",
+                str(qty),
                 f"{curr_stop:.2f}",
-                str(t.days_held or 0),
+                str(days_held),
             )
         console.print(table)
     else:
