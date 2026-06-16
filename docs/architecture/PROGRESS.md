@@ -26,7 +26,7 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | Phase | Document | State |
 |---|---|---|
 | 0 | `00-overview.md` (+ scaffold) | `[x]` |
-| 1 | `01-architecture.md` | `[ ]` |
+| 1 | `01-architecture.md` | `[x]` |
 | 2 | `02-data-schema.md` | `[ ]` |
 | 3 | `03-data-layer.md` | `[ ]` |
 | 4 | `04-analysis-strategy.md` | `[ ]` |
@@ -35,8 +35,8 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | 7 | `07-jobs-workflows.md` | `[ ]` |
 | 8 | `08-ops-cli-ui.md` | `[ ]` |
 
-**Currently working on:** _Phase 0 complete — overview + scaffold shipped._
-**Next up:** _Phase 1 — `01-architecture.md` (module dependency graph + cross-cutting patterns)._
+**Currently working on:** _Phase 1 complete — architecture + dependency graph shipped._
+**Next up:** _Phase 2 — `02-data-schema.md` (SQLite ER diagram, all tables, on-disk contracts)._
 
 ---
 
@@ -56,9 +56,10 @@ and update any docs the fixes invalidate.
 - [x] **Phase 0 — Overview + scaffold**
   - [x] Create `docs/architecture/` + this tracker
   - [x] `00-overview.md`: purpose, daily lifecycle, tech stack, repo map, CLI surface, design principles
-- [ ] **Phase 1 — Architecture**
-  - [ ] Layered architecture + module-dependency graph (Mermaid)
-  - [ ] Cross-cutting patterns: graceful degradation, idempotency, pure functions, `SignalProvider`
+- [x] **Phase 1 — Architecture**
+  - [x] Layered architecture + module-dependency graph (Mermaid)
+  - [x] Cross-cutting patterns: graceful degradation, idempotency, pure functions, `SignalProvider`
+  - [x] Notable couplings (F-006..F-009)
 - [ ] **Phase 2 — Data schema**
   - [ ] SQLite ER diagram + all 16 tables, field-level notes
   - [ ] Parquet layout, JSON snapshot contracts, `models/registry.csv`, `data/` map
