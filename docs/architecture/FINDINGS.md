@@ -50,7 +50,7 @@
 | F-009 | GAP | Low | 1 | No automated dependency-layering enforcement (e.g. import-linter); layering is convention-only | Open |
 | F-010 | GAP | Med | 2 | 8 of 16 SQLite domain tables are defined but have zero writers (dormant schema reservations) | Open |
 | F-011 | VULN | High | 2 | Rule gates `passes_not_fno_banned` / `passes_no_critical_event` depend on empty tables (`fno_ban_list`, `event_calendar`) — likely no-ops, so banned/event-risk stocks may pass | Open |
-| F-012 | INACC | Low | 2 | Parquet subdir hardcoded `nifty200` but active universe is ~57 symbols (Nifty 50 + holdings) | Open |
+| F-012 | INACC | Med | 2 | Universe scope: paper-trading candidate set should be **Nifty 50 (50 stocks)** per user req; currently ~57 (Nifty 50 + holdings) under a `nifty200/` subdir | Open |
 | F-013 | GAP | Low | 2 | No retention/compaction policy for `news_items` (append-only) or `data/raw/<date>/` JSON — unbounded growth | Open |
 
 ---
@@ -146,9 +146,19 @@ filtered out — a real correctness risk for live selection.
   calendar already fetched) and wire them into `ScanContext`; until then, make
   the gate's data-absence explicit (warn, not silently pass).
 
-### F-012 — `nifty200` subdir misnames the universe (`INACC`, Low, Phase 2)
-Parquet lives under `data/parquet/nifty200/` but the universe is ~57 symbols.
-- **Fix idea:** Rename to `ohlcv/` or `universe/`, or actually expand to Nifty 200.
+### F-012 — Universe scope vs. naming (`INACC`, Low→**Med**, Phase 2)
+Parquet lives under `data/parquet/nifty200/` but the active set is ~57 symbols
+(Nifty 50 + personal holdings).
+- **User requirement (2026-06-16):** the **paper-trading candidate universe
+  should be the Nifty 50 (50 stocks)** — not the ad-hoc 57, not Nifty 200.
+  Holdings may still be scored for portfolio health, but candidate scanning /
+  ranking / auto-open should operate over the Nifty 50.
+- **Fix idea (fix pass):** Set `data/static/universe.txt` to the 50 Nifty 50
+  constituents; align `sector_map.csv`; ensure `ingest-history`, `scan`, the
+  ranker, and all daily jobs use that set; rename the `nifty200/` subdir to match
+  reality (e.g. `nifty50/` or generic `ohlcv/`).
+- **Severity bumped** Low→Med because it now reflects an explicit scope
+  requirement, not just a naming nit.
 
 ### F-013 — No data retention policy (`GAP`, Low, Phase 2)
 `news_items` and `data/raw/<date>/` grow without bound.
