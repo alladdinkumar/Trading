@@ -30,13 +30,13 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | 2 | `02-data-schema.md` | `[x]` |
 | 3 | `03-data-layer.md` | `[x]` |
 | 4 | `04-analysis-strategy.md` | `[x]` |
-| 5 | `05-backtest-portfolio-paper.md` | `[ ]` |
+| 5 | `05-backtest-portfolio-paper.md` | `[x]` |
 | 6 | `06-llm-and-skills.md` | `[ ]` |
 | 7 | `07-jobs-workflows.md` | `[ ]` |
 | 8 | `08-ops-cli-ui.md` | `[ ]` |
 
-**Currently working on:** _Phase 4 complete — analysis + strategy core shipped; F-011 resolved → F-019._
-**Next up:** _Phase 5 — `05-backtest-portfolio-paper.md`._
+**Currently working on:** _Phase 5 complete — backtest/portfolio/paper shipped (F-021..F-025)._
+**Next up:** _Phase 6 — `06-llm-and-skills.md` (llm/ context+brief, Claude Code skills)._
 
 ---
 
@@ -72,7 +72,10 @@ and update any docs the fixes invalidate.
   - [x] features: technicals suite, FinBERT sentiment + critical veto, 4-axis regime voter
   - [x] strategy: 10 Layer-A rules, sizing formula, exit state machine, Layer-B ranker (features/labels/train/registry)
   - [x] **Resolved F-011 → F-019** (4 rules are no-ops: empty ScanContext); + F-020 regime name collision
-- [ ] **Phase 5 — Backtest + portfolio + paper (`backtest/`, `portfolio/`, `paper/`)**
+- [x] **Phase 5 — Backtest + portfolio + paper (`backtest/`, `portfolio/`, `paper/`)**
+  - [x] backtest: cost model, event-loop engine (+F-021 cost bug), walk-forward, metrics
+  - [x] portfolio: health (+F-022 TRIM bias), GTT Monte-Carlo, SIP allocator
+  - [x] paper: ledger, MTM (+F-024 days_held), reconcile (+F-023 equity not compounded), +F-025 cost asymmetry
 - [ ] **Phase 6 — LLM layer + Claude Code skills (`llm/`, `.claude/skills/`)**
 - [ ] **Phase 7 — Jobs + workflows (`jobs/`)**
 - [ ] **Phase 8 — Ops + CLI + UI (`ops/`, `cli.py`, `ui/`)**

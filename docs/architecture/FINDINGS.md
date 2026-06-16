@@ -59,6 +59,11 @@
 | F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | Open |
 | F-019 | VULN | High | 4 | 4 of 10 Layer-A rules (regime, fno_banned, t2t, critical_event) are unconditional passes — `pre_open`/`scan` build `ScanContext` with all defaults; risk vetoes + regime gate are dead despite the data being available | Open |
 | F-020 | INACC | Med | 4 | Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate, unused) — different thresholds/inputs | Open |
+| F-021 | INACC | Med | 5 | `BacktestResult.total_costs` omits buy-side charges (only sell-side accumulated); aggregate cost-drag understated (per-trade `costs_paid` is correct) | Open |
+| F-022 | VULN | Med | 5 | Health scorer structurally TRIM-biased: fundamentals never fetched (always None) + docstring claims vote-count-scaled thresholds but code uses fixed ±3 | Open |
+| F-023 | VULN | High | 5 | Paper equity curve never compounds realised P&L — cash is a constant; closing a winner drops its gain from `portfolio_snapshots.equity`. Equity/drawdown are not a true track record | Open |
+| F-024 | VULN | Med | 5 | `days_held` bumped per MTM call, so mid-day + post-close double-count → 25-day time stop fires at ~12 calendar days | Open |
+| F-025 | INACC | Med | 5 | Cost asymmetry: backtest applies full Zerodha costs but live paper MTM applies none (raw-price fills) → paper results flatter than backtest | Open |
 
 ---
 
@@ -242,4 +247,43 @@ sizing multiplier) vs `strategy.rules.passes_regime` (gate: VIX<25 AND Nifty-200
 
 ---
 
-_Counts: 19 open · 1 superseded · 0 fixed. Updated through Phase 4._
+### F-021 — Backtest total_costs omits buy side (`INACC`, Med, Phase 5)
+`engine._evaluate_exits` returns only sell-side charges; `run_backtest` adds just
+that to `total_costs`. Buy-side charges (in `_OpenPosition.buy_costs_paid`) reach
+`Trade.costs_paid` but not the aggregate.
+- **Fix idea:** Return/accumulate buy charges from `_execute_pending`; or compute
+  `total_costs = sum(t.costs_paid)` at the end. Optionally report slippage drag.
+
+### F-022 — Health scorer TRIM-biased (`VULN`, Med, Phase 5)
+Two compounding issues: (a) no fundamentals fetcher, so `HoldingContext.fundamentals`
+is always empty in production; (b) docstring claims thresholds scale by votes_cast
+but `score_holding` uses fixed `net ≥ 3 / ≤ −3`. Result: almost all holdings →
+TRIM / "insufficient evidence". Also starves the SIP TOPUP bucket (needs HOLD).
+- **Fix idea:** Wire a fundamentals source (yfinance `Ticker.info` or a static
+  CSV), and/or implement the documented votes_cast scaling. Add tests for a clear
+  HOLD and a clear EXIT with technicals-only evidence.
+
+### F-023 — Paper equity never compounds realised P&L (`VULN`, High, Phase 5)
+`reconcile.compute_portfolio_snapshot` uses a caller-constant `cash`; opens don't
+debit, closes don't credit. `portfolio_snapshots.equity` = constant cash +
+unrealised MTM of open positions only. Realised gains/losses disappear from the
+equity curve and drawdown — the headline track record is wrong (closed-trade
+table stats are still fine).
+- **Fix idea:** Maintain a paper-cash ledger: debit `qty×entry + buy_costs` on
+  open, credit `qty×exit − sell_costs` on close (mirror the backtest engine's cash
+  handling). Snapshot equity = cash + open MTM.
+
+### F-024 — `days_held` double-counts (`VULN`, Med, Phase 5)
+`mtm.mtm_open_trades` bumps `days_held` per call; mid-day + post-close = 2/day.
+- **Fix idea:** Derive `days_held` from `ts_entry` to `as_of` (calendar/trading
+  days), or only bump on the post-close pass.
+
+### F-025 — Backtest/paper cost asymmetry (`INACC`, Med, Phase 5)
+Backtest applies full Zerodha costs + slippage; live paper MTM applies none.
+Paper P&L is systematically rosier than the backtest that justifies the strategy.
+- **Fix idea:** Apply `apply_slippage` + buy/sell charges in `mtm`/`ledger` close
+  (tie to the F-023 cash ledger so both land together).
+
+---
+
+_Counts: 24 open · 1 superseded · 0 fixed. Updated through Phase 5._
