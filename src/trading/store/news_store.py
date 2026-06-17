@@ -161,15 +161,7 @@ def list_critical_symbols(conn: sqlite3.Connection, date_iso: str) -> set[str]:
     return {r["symbol"] for r in rows}
 
 
-def get_sentiment_daily(
-    conn: sqlite3.Connection, date_iso: str, symbol: str
-) -> SentimentDailyRow | None:
-    row = conn.execute(
-        "SELECT * FROM sentiment_daily WHERE date = ? AND symbol = ?",
-        (date_iso, symbol),
-    ).fetchone()
-    if row is None:
-        return None
+def _row_to_sentiment_daily(row: sqlite3.Row) -> SentimentDailyRow:
     return SentimentDailyRow(
         date=row["date"],
         symbol=row["symbol"],
@@ -179,3 +171,30 @@ def get_sentiment_daily(
         negative_news_count=row["negative_news_count"],
         has_critical=bool(row["has_critical"]),
     )
+
+
+def get_sentiment_daily(
+    conn: sqlite3.Connection, date_iso: str, symbol: str
+) -> SentimentDailyRow | None:
+    row = conn.execute(
+        "SELECT * FROM sentiment_daily WHERE date = ? AND symbol = ?",
+        (date_iso, symbol),
+    ).fetchone()
+    return _row_to_sentiment_daily(row) if row is not None else None
+
+
+def get_latest_sentiment_daily(
+    conn: sqlite3.Connection, symbol: str, *, on_or_before: str
+) -> SentimentDailyRow | None:
+    """Most recent `sentiment_daily` rollup for `symbol` dated ≤ `on_or_before`.
+
+    Rollups are written per-day only when news flows, so the as-of date often
+    has no row (weekends, quiet days). The health scorer wants the freshest
+    available 30d view — including its `has_critical` flag — so it reads the
+    latest row at or before the run date rather than requiring an exact match.
+    """
+    row = conn.execute(
+        "SELECT * FROM sentiment_daily WHERE symbol = ? AND date <= ? ORDER BY date DESC LIMIT 1",
+        (symbol, on_or_before),
+    ).fetchone()
+    return _row_to_sentiment_daily(row) if row is not None else None

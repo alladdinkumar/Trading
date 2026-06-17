@@ -100,11 +100,12 @@ This single job is where four findings from earlier phases concretely originate:
   snapshot) and the critical-news veto (from `sentiment_daily.has_critical`)
   computed earlier in the *same* run. Ban-list/T2T stay no-ops pending NSE feeds
   (F-010).
-- **F-022 (extended):** `_step_portfolio` builds each `HoldingContext` with
-  `FundamentalsSnapshot()` **and** `SentimentSnapshot()` empty — so holdings
-  health is technicals-only *and the `has_critical` EXIT veto can never fire*,
-  despite `sentiment_daily.has_critical` being available in the DB. → F-022 now
-  covers "sentiment not wired into health" too.
+- **F-022 (✅ fixed 2026-06-16):** `_step_portfolio` ~~built each `HoldingContext`
+  with empty Fundamentals/Sentiment, so health was technicals-only and the
+  `has_critical` EXIT veto could never fire~~ now routes through
+  `build_holding_context`, which pulls the latest `sentiment_daily` rollup
+  (veto live) + static-CSV fundamentals; and `score_holding` scales the ±3 cut by
+  `votes_cast` so a technicals-only ballot still reaches HOLD/EXIT.
 - **F-029 (✅ fixed 2026-06-16):** `_step_auto_open` ~~hardcoded
   `predicted_return_pct=20.0` and `target = close × 1.20` for **every** signal~~
   now sets `signal.target = target_price(cand.close, stop_price)` — the exit
@@ -177,14 +178,16 @@ pickle, appends a registry row, and applies the soft-promotion gate; then
 ## 7. `monthly_sip` — 1st-of-month plan
 
 `run_monthly_sip` reads holdings (Kite snapshot; `MonthlySipAborted` if absent),
-scores each holding (`_score_holdings` — again fundamentals/sentiment empty),
+scores each holding (`_score_holdings` — fundamentals + latest sentiment now wired
+via `build_holding_context`, F-022),
 gathers candidates from `signals` in the trailing 10-trading-day window
 (priority = max `ml_score`, dedup by symbol), runs `allocate_sip`, and writes
 `sip_plan.md` + Slack. `gate_holidays=False` on its reminder slot so it fires on
 the 1st even if a holiday.
 
-> Because health is TRIM-biased (F-022), the **TOPUP bucket rarely fires** (it
-> needs a HOLD verdict), so SIP structurally skews to NEW/CASH. With the ranker in
+> With the F-022 votes_cast scaling fixed (2026-06-16), a technicals-strong
+> holding can earn HOLD, so the **TOPUP bucket can fire** rather than SIP always
+> skewing to NEW/CASH. With the ranker in
 > cold-start, candidate `priority` is 0 for all (ml_score NULL→0), so ordering is
 > arbitrary-but-stable.
 
@@ -219,9 +222,10 @@ the 1st even if a holiday.
   `ledger.buy_side_cost`/`sell_side_cost` (reuse of `backtest.costs`) net Zerodha
   charges + slippage into both `compute_trade_pnl` and `compute_paper_cash`, so the
   equity curve and OOS Sharpe aren't inflated by cost-free paper fills.
-- **Health veto + sentiment unwired (F-022 extended).** Both `pre_open` and
-  `monthly_sip` pass empty sentiment into health, disabling the critical-news EXIT
-  veto on holdings.
+- **✅ Health veto + sentiment wired (F-022, 2026-06-16).** Both `pre_open` and
+  `monthly_sip` now feed the latest `sentiment_daily` rollup + static-CSV
+  fundamentals into health via `build_holding_context`, so the critical-news EXIT
+  veto fires on holdings and the votes_cast-scaled verdict isn't TRIM-pinned.
 - **Visibility-only signals duplicate on re-run (F-030).**
 - **Training feature gap (F-031):** `negative_news_count_7d` is empty during
   training but populated at inference — a train/serve skew.

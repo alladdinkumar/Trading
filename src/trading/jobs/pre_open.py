@@ -31,14 +31,12 @@ from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.llm.context import ContextInputs, assemble_context
 from trading.ops.logging_setup import configure_logging
 from trading.paper.ledger import log_signal_and_open_trade
+from trading.portfolio.fundamentals import load_fundamentals_map
 from trading.portfolio.health import (
-    FundamentalsSnapshot,
     HealthScore,
-    HoldingContext,
-    SentimentSnapshot,
     score_holding,
-    technicals_from_history,
 )
+from trading.portfolio.holding_context import build_holding_context
 from trading.store.db import get_conn
 from trading.store.macro_store import get_macro_snapshot, upsert_macro_snapshot
 from trading.store.migrations import run_migrations
@@ -321,23 +319,27 @@ def _step_portfolio(
     except (KiteSnapshotMissingError, KiteSnapshotStaleError) as e:
         raise PreOpenAborted(str(e)) from e
 
+    fundamentals_map = load_fundamentals_map(paths)
     results: list[HealthScore] = []
-    for h in holdings:
-        try:
-            history = read_ohlcv(h.tradingsymbol, paths)
-        except FileNotFoundError:
-            warnings.append(f"no parquet for holding {h.tradingsymbol} — skipped")
-            continue
-        ctx = HoldingContext(
-            symbol=h.tradingsymbol,
-            qty=h.quantity,
-            avg_price=h.average_price,
-            last_price=h.last_price,
-            technicals=technicals_from_history(history),
-            fundamentals=FundamentalsSnapshot(),
-            sentiment=SentimentSnapshot(),
-        )
-        results.append(score_holding(ctx))
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        for h in holdings:
+            try:
+                history = read_ohlcv(h.tradingsymbol, paths)
+            except FileNotFoundError:
+                warnings.append(f"no parquet for holding {h.tradingsymbol} — skipped")
+                continue
+            ctx = build_holding_context(
+                conn,
+                symbol=h.tradingsymbol,
+                qty=h.quantity,
+                avg_price=h.average_price,
+                last_price=h.last_price,
+                history=history,
+                as_of=as_of,
+                fundamentals_map=fundamentals_map,
+            )
+            results.append(score_holding(ctx))
     return results
 
 

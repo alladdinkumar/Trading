@@ -440,6 +440,41 @@ def test_step_portfolio_reads_snapshot_and_scores(paths) -> None:
     assert any("no parquet" in w.lower() for w in warnings)
 
 
+def test_step_portfolio_critical_sentiment_forces_exit(paths) -> None:
+    """F-022: with sentiment now wired, a holding flagged critical → EXIT verdict.
+
+    Locks the revived critical-news EXIT veto at the job boundary (previously
+    dead because `_step_portfolio` passed an empty SentimentSnapshot)."""
+    from tests.conftest import seed_kite_snapshot
+    from trading.store.db import get_conn
+    from trading.store.news_store import SentimentDailyRow, upsert_sentiment_daily
+
+    seed_kite_snapshot(paths, date(2026, 5, 15), holdings=[_PRE_OPEN_HOLDING])
+    write_ohlcv(_all_pass_frame(), "RVNL", paths)
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        upsert_sentiment_daily(
+            conn,
+            SentimentDailyRow(
+                date="2026-05-13",
+                symbol="RVNL",
+                score_7d=-0.5,
+                score_30d=-0.4,
+                news_count=4,
+                negative_news_count=3,
+                has_critical=True,
+            ),
+        )
+        conn.commit()
+
+    warnings: list[str] = []
+    out = _step_portfolio(paths, _settings(), warnings, as_of=date(2026, 5, 15))
+    assert len(out) == 1
+    assert out[0].symbol == "RVNL"
+    assert out[0].verdict == "EXIT"
+    assert any("critical" in r.lower() for r in out[0].reasons)
+
+
 def test_step_portfolio_raises_pre_open_aborted_when_snapshot_missing(
     paths,
 ) -> None:

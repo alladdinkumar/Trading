@@ -136,7 +136,7 @@ def test_score_holdings_skips_missing_parquet(paths) -> None:
         Holding(**_holding_row("GHOST")),
     ]
     warnings: list[str] = []
-    verdicts = _score_holdings(paths, holdings, warnings)
+    verdicts = _score_holdings(paths, holdings, warnings, as_of=AS_OF)
     assert set(verdicts) == {"COALINDIA"}
     assert verdicts["COALINDIA"] in ("HOLD", "TRIM", "EXIT")
     assert any("GHOST" in w for w in warnings)

@@ -66,8 +66,11 @@ def test_critical_event_short_circuits_to_exit() -> None:
             dist_to_52w_high_pct=3.0,
         ),
         fundamentals=FundamentalsSnapshot(
-            profit_growth_yoy=0.5, roe=0.30, debt_to_equity=0.1,
-            pe_percentile_5y=0.10, profit_cagr_3y=0.30,
+            profit_growth_yoy=0.5,
+            roe=0.30,
+            debt_to_equity=0.1,
+            pe_percentile_5y=0.10,
+            profit_cagr_3y=0.30,
         ),
         sentiment=SentimentSnapshot(score_30d=0.4, has_critical=True),
     )
@@ -93,14 +96,16 @@ def test_above_200dma_votes_positive() -> None:
 
 
 def test_drawdown_mild_votes_positive() -> None:
-    r = score_holding(_ctx(
-        technicals=TechnicalsSnapshot(drawdown_from_ath_pct=ATH_DRAWDOWN_MILD - 1)))
+    r = score_holding(
+        _ctx(technicals=TechnicalsSnapshot(drawdown_from_ath_pct=ATH_DRAWDOWN_MILD - 1))
+    )
     assert r.net_votes == 1
 
 
 def test_drawdown_deep_votes_negative() -> None:
-    r = score_holding(_ctx(
-        technicals=TechnicalsSnapshot(drawdown_from_ath_pct=ATH_DRAWDOWN_DEEP + 1)))
+    r = score_holding(
+        _ctx(technicals=TechnicalsSnapshot(drawdown_from_ath_pct=ATH_DRAWDOWN_DEEP + 1))
+    )
     assert r.net_votes == -1
 
 
@@ -124,14 +129,16 @@ def test_rsi_overbought_borderline_is_neutral() -> None:
 
 
 def test_near_52w_high_votes_positive() -> None:
-    r = score_holding(_ctx(
-        technicals=TechnicalsSnapshot(dist_to_52w_high_pct=DIST_FROM_52W_HIGH_BULLISH - 1)))
+    r = score_holding(
+        _ctx(technicals=TechnicalsSnapshot(dist_to_52w_high_pct=DIST_FROM_52W_HIGH_BULLISH - 1))
+    )
     assert r.net_votes == 1
 
 
 def test_far_from_52w_high_votes_negative() -> None:
-    r = score_holding(_ctx(
-        technicals=TechnicalsSnapshot(dist_to_52w_high_pct=DIST_FROM_52W_HIGH_BEARISH + 1)))
+    r = score_holding(
+        _ctx(technicals=TechnicalsSnapshot(dist_to_52w_high_pct=DIST_FROM_52W_HIGH_BEARISH + 1))
+    )
     assert r.net_votes == -1
 
 
@@ -141,26 +148,30 @@ def test_far_from_52w_high_votes_negative() -> None:
 
 
 def test_profit_growth_good_votes_positive() -> None:
-    r = score_holding(_ctx(
-        fundamentals=FundamentalsSnapshot(profit_growth_yoy=FUND_PROFIT_GROWTH_GOOD + 0.01)))
+    r = score_holding(
+        _ctx(fundamentals=FundamentalsSnapshot(profit_growth_yoy=FUND_PROFIT_GROWTH_GOOD + 0.01))
+    )
     assert r.net_votes == 1
 
 
 def test_profit_growth_bad_votes_negative() -> None:
-    r = score_holding(_ctx(
-        fundamentals=FundamentalsSnapshot(profit_growth_yoy=FUND_PROFIT_GROWTH_BAD - 0.01)))
+    r = score_holding(
+        _ctx(fundamentals=FundamentalsSnapshot(profit_growth_yoy=FUND_PROFIT_GROWTH_BAD - 0.01))
+    )
     assert r.net_votes == -1
 
 
 def test_low_debt_votes_positive() -> None:
-    r = score_holding(_ctx(
-        fundamentals=FundamentalsSnapshot(debt_to_equity=FUND_DEBT_EQUITY_LOW - 0.05)))
+    r = score_holding(
+        _ctx(fundamentals=FundamentalsSnapshot(debt_to_equity=FUND_DEBT_EQUITY_LOW - 0.05))
+    )
     assert r.net_votes == 1
 
 
 def test_high_debt_votes_negative() -> None:
-    r = score_holding(_ctx(
-        fundamentals=FundamentalsSnapshot(debt_to_equity=FUND_DEBT_EQUITY_HIGH + 0.05)))
+    r = score_holding(
+        _ctx(fundamentals=FundamentalsSnapshot(debt_to_equity=FUND_DEBT_EQUITY_HIGH + 0.05))
+    )
     assert r.net_votes == -1
 
 
@@ -204,7 +215,10 @@ def test_all_strong_inputs_classify_hold() -> None:
             dist_to_52w_high_pct=5.0,
         ),
         fundamentals=FundamentalsSnapshot(
-            profit_growth_yoy=0.25, roe=0.20, debt_to_equity=0.30, profit_cagr_3y=0.15,
+            profit_growth_yoy=0.25,
+            roe=0.20,
+            debt_to_equity=0.30,
+            profit_cagr_3y=0.15,
         ),
         sentiment=SentimentSnapshot(score_30d=0.30),
     )
@@ -222,7 +236,9 @@ def test_all_weak_inputs_classify_exit() -> None:
             dist_to_52w_high_pct=DIST_FROM_52W_HIGH_BEARISH + 5,
         ),
         fundamentals=FundamentalsSnapshot(
-            profit_growth_yoy=-0.20, roe=0.02, debt_to_equity=2.5,
+            profit_growth_yoy=-0.20,
+            roe=0.02,
+            debt_to_equity=2.5,
         ),
         sentiment=SentimentSnapshot(score_30d=-0.40),
     )
@@ -240,18 +256,21 @@ def test_low_evidence_defaults_to_trim() -> None:
 
 
 def test_score_is_50_at_zero_net_votes() -> None:
-    ctx = _ctx(technicals=TechnicalsSnapshot(
-        above_200dma=True, drawdown_from_ath_pct=25.0, rsi_14=50.0,
-        dist_to_52w_high_pct=20.0,
-    ))
+    ctx = _ctx(
+        technicals=TechnicalsSnapshot(
+            above_200dma=True,
+            drawdown_from_ath_pct=25.0,
+            rsi_14=50.0,
+            dist_to_52w_high_pct=20.0,
+        )
+    )
     # above_200dma = +1, drawdown 25% = 0, rsi healthy = +1, dist 20% = 0 → net +2/4
     r = score_holding(ctx)
     assert r.score == 75  # 50 + (2/4)*50
 
 
 def test_pnl_pct_is_computed() -> None:
-    ctx = _ctx(avg=100.0, last=120.0,
-               technicals=TechnicalsSnapshot(above_200dma=True))
+    ctx = _ctx(avg=100.0, last=120.0, technicals=TechnicalsSnapshot(above_200dma=True))
     r = score_holding(ctx)
     assert r.pnl_pct == pytest.approx(20.0)
 
@@ -260,8 +279,9 @@ def test_hold_threshold_is_three() -> None:
     """Net of HOLD_NET_THRESHOLD must classify HOLD; one less stays TRIM."""
     # Use 4 axes with +3 net = HOLD
     ctx_hold = _ctx(
-        technicals=TechnicalsSnapshot(above_200dma=True, drawdown_from_ath_pct=8.0,
-                                       rsi_14=50.0, dist_to_52w_high_pct=5.0),
+        technicals=TechnicalsSnapshot(
+            above_200dma=True, drawdown_from_ath_pct=8.0, rsi_14=50.0, dist_to_52w_high_pct=5.0
+        ),
     )
     r = score_holding(ctx_hold)
     assert r.net_votes == 4
@@ -269,8 +289,9 @@ def test_hold_threshold_is_three() -> None:
 
     # Same minus one of the positives
     ctx_trim = _ctx(
-        technicals=TechnicalsSnapshot(above_200dma=True, drawdown_from_ath_pct=8.0,
-                                       rsi_14=50.0),  # drop the 52w
+        technicals=TechnicalsSnapshot(
+            above_200dma=True, drawdown_from_ath_pct=8.0, rsi_14=50.0
+        ),  # drop the 52w
     )
     r2 = score_holding(ctx_trim)
     assert r2.net_votes == HOLD_NET_THRESHOLD
@@ -280,6 +301,71 @@ def test_hold_threshold_is_three() -> None:
 def test_exit_threshold_constant_matches_implementation() -> None:
     assert EXIT_NET_THRESHOLD == -3
     assert HOLD_NET_THRESHOLD == 3
+
+
+# ---------------------------------------------------------------------------
+# F-022: votes_cast scaling — a technicals-only ballot can reach HOLD / EXIT
+# ---------------------------------------------------------------------------
+
+
+def test_technicals_only_net_two_of_four_now_holds() -> None:
+    """4 axes, net +2 → frac 0.5 ≥ 0.375 → HOLD (was TRIM under the fixed ±3).
+
+    This is the TRIM-bias fix: with fundamentals/sentiment unpopulated a
+    holding clearly trending up should still classify HOLD.
+    """
+    ctx = _ctx(
+        technicals=TechnicalsSnapshot(
+            above_200dma=True,  # +1
+            drawdown_from_ath_pct=8.0,  # +1 (mild)
+            rsi_14=RSI_OVERBOUGHT + 1,  # 0 (borderline band)
+            dist_to_52w_high_pct=20.0,  # 0 (neutral band)
+        ),
+    )
+    r = score_holding(ctx)
+    assert r.votes_cast == 4
+    assert r.net_votes == 2
+    assert r.verdict == "HOLD"
+
+
+def test_technicals_only_net_minus_two_of_four_now_exits() -> None:
+    """4 axes, net −2 → frac −0.5 ≤ −0.375 → EXIT (was TRIM under fixed ±3)."""
+    ctx = _ctx(
+        technicals=TechnicalsSnapshot(
+            above_200dma=False,  # -1
+            drawdown_from_ath_pct=ATH_DRAWDOWN_DEEP + 5,  # -1
+            rsi_14=RSI_OVERBOUGHT + 1,  # 0
+            dist_to_52w_high_pct=20.0,  # 0
+        ),
+    )
+    r = score_holding(ctx)
+    assert r.votes_cast == 4
+    assert r.net_votes == -2
+    assert r.verdict == "EXIT"
+
+
+def test_full_ballot_low_fraction_still_trims() -> None:
+    """Scaling is backward-compatible: a full ballot with net +3 of 9 votes
+    (frac 0.33 < 0.375) stays TRIM, exactly as the fixed ±3 cut intended."""
+    ctx = _ctx(
+        technicals=TechnicalsSnapshot(
+            above_200dma=True,  # +1
+            drawdown_from_ath_pct=8.0,  # +1
+            rsi_14=RSI_OVERBOUGHT + 1,  # 0
+            dist_to_52w_high_pct=20.0,  # 0
+        ),
+        fundamentals=FundamentalsSnapshot(
+            profit_growth_yoy=FUND_PROFIT_GROWTH_GOOD + 0.01,  # +1
+            roe=0.10,  # 0 (between bad/good)
+            debt_to_equity=1.0,  # 0 (between low/high)
+            pe_percentile_5y=0.60,  # 0 (between cheap/rich)
+        ),
+        sentiment=SentimentSnapshot(score_30d=0.0),  # 0
+    )
+    r = score_holding(ctx)
+    assert r.votes_cast == 9
+    assert r.net_votes == 3
+    assert r.verdict == "TRIM"
 
 
 # ---------------------------------------------------------------------------

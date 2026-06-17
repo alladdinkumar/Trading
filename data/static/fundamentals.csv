@@ -1,0 +1,18 @@
+# Static per-symbol fundamentals for the health scorer (F-022).
+# Offline + hand-maintained — the project has no live fundamentals fetcher.
+# Loaded by src/trading/portfolio/fundamentals.py::load_fundamentals_map and
+# fed into HoldingContext.fundamentals in pre_open / monthly_sip.
+#
+# Columns (all decimals; 0.15 = 15%). Leave a cell blank for "unknown" — a
+# blank contributes 0 votes rather than penalising the holding:
+#   symbol            NSE tradingsymbol (matches holdings + signals)
+#   profit_growth_yoy latest YoY net-profit growth     (good ≥ 0.10, bad ≤ -0.05)
+#   profit_cagr_3y    3-year net-profit CAGR           (good ≥ 0.10, bad ≤ 0.0)
+#   debt_to_equity    total debt / equity              (good ≤ 0.50, bad ≥ 1.50)
+#   roe               return on equity                 (good ≥ 0.15, bad ≤ 0.05)
+#   pe_percentile_5y  P/E rank in its own 5y range 0..1 (cheap ≤ 0.40, rich ≥ 0.85)
+#
+# Example (delete and replace with real, sourced values):
+# symbol,profit_growth_yoy,profit_cagr_3y,debt_to_equity,roe,pe_percentile_5y
+# RELIANCE,0.11,0.09,0.42,0.09,0.55
+symbol,profit_growth_yoy,profit_cagr_3y,debt_to_equity,roe,pe_percentile_5y

@@ -10,6 +10,7 @@ from trading.data.news import NewsItem
 from trading.store.migrations import run_migrations
 from trading.store.news_store import (
     SentimentDailyRow,
+    get_latest_sentiment_daily,
     get_sentiment_daily,
     insert_news_items,
     list_critical_for_symbol,
@@ -197,3 +198,37 @@ def test_upsert_sentiment_daily_inserts_then_replaces(conn: sqlite3.Connection) 
 
 def test_get_sentiment_daily_missing_returns_none(conn: sqlite3.Connection) -> None:
     assert get_sentiment_daily(conn, "2026-05-13", "NOPE") is None
+
+
+def _sentiment(date_iso: str, symbol: str, *, score_30d=0.0, has_critical=False):
+    return SentimentDailyRow(
+        date=date_iso,
+        symbol=symbol,
+        score_7d=0.0,
+        score_30d=score_30d,
+        news_count=1,
+        negative_news_count=0,
+        has_critical=has_critical,
+    )
+
+
+def test_get_latest_sentiment_picks_most_recent_on_or_before(conn: sqlite3.Connection) -> None:
+    upsert_sentiment_daily(conn, _sentiment("2026-05-10", "RVNL", score_30d=0.1))
+    upsert_sentiment_daily(conn, _sentiment("2026-05-14", "RVNL", score_30d=0.3))
+    upsert_sentiment_daily(conn, _sentiment("2026-05-20", "RVNL", score_30d=0.9))  # future
+
+    row = get_latest_sentiment_daily(conn, "RVNL", on_or_before="2026-05-16")
+    assert row is not None
+    assert row.date == "2026-05-14"  # newest ≤ as_of, not the future row
+    assert row.score_30d == pytest.approx(0.3)
+
+
+def test_get_latest_sentiment_carries_critical_flag(conn: sqlite3.Connection) -> None:
+    upsert_sentiment_daily(conn, _sentiment("2026-05-12", "RVNL", has_critical=True))
+    row = get_latest_sentiment_daily(conn, "RVNL", on_or_before="2026-05-16")
+    assert row is not None and row.has_critical is True
+
+
+def test_get_latest_sentiment_none_when_only_future_rows(conn: sqlite3.Connection) -> None:
+    upsert_sentiment_daily(conn, _sentiment("2026-05-20", "RVNL"))
+    assert get_latest_sentiment_daily(conn, "RVNL", on_or_before="2026-05-16") is None

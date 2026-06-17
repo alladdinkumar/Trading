@@ -94,19 +94,22 @@ flowchart LR
 Pure vote classifier over three axis groups — technicals (above-200DMA, ATH
 drawdown, RSI band, dist-to-52w-high), fundamentals (profit growth/CAGR, D/E,
 ROE, P/E percentile), sentiment (30d score). Each available axis votes ±1/0;
-`has_critical` is an **immediate EXIT veto**. Verdict from net votes: ≥ +3 HOLD,
-≤ −3 EXIT, else TRIM; `votes_cast < 3` → TRIM ("insufficient evidence"). Score is
-`50 + (net/votes_cast)×50` clamped to 0–100.
+`has_critical` is an **immediate EXIT veto**. Verdict scales the cut by the ballot
+cast: `net/votes_cast ≥ +0.375` HOLD, `≤ −0.375` EXIT, else TRIM; `votes_cast < 3`
+→ TRIM ("insufficient evidence"). Score is `50 + (net/votes_cast)×50` clamped to
+0–100 (same ratio, so verdict and score never disagree).
 
-> **TRIM bias (F-022):** the module docstring says thresholds are *"divided by the
-> number of available votes so the verdict scales gracefully"* — but
-> `score_holding` uses **fixed** `±3`. In production **fundamentals are never
-> fetched** (no fundamentals fetcher is wired; `HoldingContext.fundamentals` is
-> always default/None), so only ≤4 technical + 1 sentiment axes vote. Reaching
-> net +3 on ~4 noisy axes is hard, so nearly every holding lands on TRIM or
-> "insufficient evidence" — exactly what today's bundle shows (all 10 holdings
-> TRIM). The scorer is effectively technicals-only and structurally TRIM-biased.
-> → F-022.
+> **✅ TRIM bias fixed (F-022, 2026-06-16):** two fixes. (1) `score_holding` now
+> scales the ±3 cut by `votes_cast` against `REFERENCE_BALLOT_SIZE=8`
+> (±3/8 = ±0.375), so a technicals-only ballot (≈4 axes) with net ±2 reaches
+> HOLD/EXIT instead of always TRIM; a full 8-axis ballot still reduces to net ≥ 3
+> / ≤ −3 (backward-compatible). (2) Fundamentals + sentiment are now wired into
+> both `pre_open` and `monthly_sip` via `portfolio.holding_context.build_holding_context`:
+> the latest `sentiment_daily` rollup (reviving the `has_critical` EXIT veto) and
+> a static `data/static/fundamentals.csv` (`portfolio.fundamentals.load_fundamentals_map`
+> — offline, no network in the hot path; ships empty so populate it or swap a
+> fetcher behind the same seam). The scorer itself stays pure policy over a
+> `HoldingContext`.
 
 ### 3.2 GTT viability (`gtt.py`)
 For each Good-Till-Triggered order, an n-path GBM Monte Carlo over the remaining
@@ -127,8 +130,9 @@ existing holdings that re-signal), **NEW** (non-holdings), and **CASH**. Caps:
 50% topup, 50% new, 60% deployed total, 25%/stock, 30%/sector, 5 concurrent.
 Greedy priority-ordered fill; rounds to whole rupees; emits a `skipped` list with
 reasons. Caps are taken against the *post-investment* baseline (portfolio +
-deployable). Note the dependency on health: since health is TRIM-biased (F-022),
-the **TOPUP bucket rarely fires** (needs a HOLD verdict), so SIP skews to NEW/CASH.
+deployable). Note the dependency on health: with the F-022 votes_cast scaling
+(2026-06-16), a technicals-strong holding can now earn HOLD, so the **TOPUP
+bucket fires** instead of SIP always skewing to NEW/CASH.
 
 ## 4. `paper/` — simulated live trading
 
@@ -199,10 +203,10 @@ equity row (cash + open-position MTM, peak-relative drawdown).
   so the twice-daily passes no longer double-count.
 - **Backtest `total_costs` understates friction (F-021).** Add buy-side charges
   to the accumulator; consider also reporting slippage drag separately.
-- **Health is structurally TRIM-biased (F-022)** because fundamentals are never
-  fetched and the threshold-scaling described in the docstring isn't implemented.
-  Either wire a fundamentals source or scale thresholds by `votes_cast` as
-  documented.
+- **✅ Health TRIM-bias fixed (F-022, 2026-06-16).** `score_holding` scales the
+  ±3 cut by `votes_cast` (`REFERENCE_BALLOT_SIZE`), and both jobs now wire the
+  latest `sentiment_daily` rollup (critical-news EXIT veto live) + a static
+  `data/static/fundamentals.csv` via `build_holding_context`.
 - **✅ Cost model asymmetry fixed (F-025, 2026-06-16):** paper closes now net
   the same Zerodha charges + slippage as the backtest (`ledger.buy_side_cost` /
   `sell_side_cost` over `backtest.costs`), applied in both `compute_trade_pnl` and

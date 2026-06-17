@@ -6,11 +6,12 @@ score. Inputs arrive as a `HoldingContext` (fundamentals / technicals /
 sentiment); the function never touches Kite or yfinance, so the policy is
 testable against synthetic data and the data side stays swappable.
 
-The fundamentals snapshot fields are all Optional — yfinance's `Ticker.info`
-is notoriously sparse for Indian equities, so a missing value contributes
-nothing to the vote rather than penalising the holding. The scorer
-divides the verdict thresholds by the number of *available* votes so the
-verdict scales gracefully when half the fields are None.
+The fundamentals snapshot fields are all Optional — a missing value
+contributes nothing to the vote rather than penalising the holding. The
+scorer scales the verdict thresholds by the number of *available* votes
+(`REFERENCE_BALLOT_SIZE`) so the verdict scales gracefully when half the
+fields are None — a technicals-only holding can still reach HOLD/EXIT
+instead of always defaulting to TRIM (F-022).
 """
 
 from __future__ import annotations
@@ -30,11 +31,11 @@ Verdict = Literal["HOLD", "TRIM", "EXIT"]
 class FundamentalsSnapshot:
     """Per-holding fundamentals. All Optional — None contributes 0 votes."""
 
-    profit_growth_yoy: float | None = None   # decimal: 0.15 = +15% YoY
-    profit_cagr_3y: float | None = None      # decimal: 0.10 = 10%/yr
+    profit_growth_yoy: float | None = None  # decimal: 0.15 = +15% YoY
+    profit_cagr_3y: float | None = None  # decimal: 0.10 = 10%/yr
     debt_to_equity: float | None = None
-    roe: float | None = None                 # decimal: 0.18 = 18% ROE
-    pe_percentile_5y: float | None = None    # 0..1 (rank in 5yr P/E history)
+    roe: float | None = None  # decimal: 0.18 = 18% ROE
+    pe_percentile_5y: float | None = None  # 0..1 (rank in 5yr P/E history)
 
 
 @dataclass(frozen=True)
@@ -91,27 +92,27 @@ class HealthScore:
 # ---------------------------------------------------------------------------
 
 # Drawdown from ATH
-ATH_DRAWDOWN_MILD = 15.0    # ≤ → +1 (mild correction)
-ATH_DRAWDOWN_DEEP = 35.0    # ≥ → -1 (real damage)
+ATH_DRAWDOWN_MILD = 15.0  # ≤ → +1 (mild correction)
+ATH_DRAWDOWN_DEEP = 35.0  # ≥ → -1 (real damage)
 
 # RSI bands
 RSI_OVERSOLD = 25.0
 RSI_OVERBOUGHT = 80.0
 RSI_DEEP_OVERBOUGHT = 85.0
 
-DIST_FROM_52W_HIGH_BULLISH = 10.0   # ≤ → +1 (near highs)
-DIST_FROM_52W_HIGH_BEARISH = 30.0   # ≥ → -1 (well below highs)
+DIST_FROM_52W_HIGH_BULLISH = 10.0  # ≤ → +1 (near highs)
+DIST_FROM_52W_HIGH_BEARISH = 30.0  # ≥ → -1 (well below highs)
 
-FUND_PROFIT_GROWTH_GOOD = 0.10   # YoY ≥ → +1
-FUND_PROFIT_GROWTH_BAD = -0.05   # YoY ≤ → -1
+FUND_PROFIT_GROWTH_GOOD = 0.10  # YoY ≥ → +1
+FUND_PROFIT_GROWTH_BAD = -0.05  # YoY ≤ → -1
 FUND_CAGR_3Y_GOOD = 0.10
 FUND_CAGR_3Y_BAD = 0.0
-FUND_DEBT_EQUITY_LOW = 0.50      # ≤ → +1
-FUND_DEBT_EQUITY_HIGH = 1.50     # ≥ → -1
+FUND_DEBT_EQUITY_LOW = 0.50  # ≤ → +1
+FUND_DEBT_EQUITY_HIGH = 1.50  # ≥ → -1
 FUND_ROE_GOOD = 0.15
 FUND_ROE_BAD = 0.05
-FUND_PE_PCTILE_CHEAP = 0.40      # ≤ → +1 (bottom 40% of 5yr range)
-FUND_PE_PCTILE_RICH = 0.85       # ≥ → -1 (top 15%)
+FUND_PE_PCTILE_CHEAP = 0.40  # ≤ → +1 (bottom 40% of 5yr range)
+FUND_PE_PCTILE_RICH = 0.85  # ≥ → -1 (top 15%)
 
 SENTIMENT_GOOD = 0.10
 SENTIMENT_BAD = -0.20
@@ -119,6 +120,16 @@ SENTIMENT_BAD = -0.20
 # Verdict thresholds — net votes (HOLD)/(EXIT) on a typical 8-axis ballot
 HOLD_NET_THRESHOLD = 3
 EXIT_NET_THRESHOLD = -3
+
+# F-022: the ±3 cut above was tuned for a full ballot. The reference size lets
+# `score_holding` scale the cut by the ballot *actually* cast, so a
+# technicals-only holding (≈4 axes when fundamentals/sentiment are unpopulated)
+# can still reach HOLD/EXIT instead of always defaulting to TRIM. On a full
+# 8-axis ballot the scaled cut reduces to the original net ≥ 3 / ≤ −3.
+REFERENCE_BALLOT_SIZE = 8
+MIN_VOTES_FOR_VERDICT = 3
+_HOLD_FRACTION = HOLD_NET_THRESHOLD / REFERENCE_BALLOT_SIZE  # +0.375
+_EXIT_FRACTION = EXIT_NET_THRESHOLD / REFERENCE_BALLOT_SIZE  # −0.375
 
 
 # ---------------------------------------------------------------------------
@@ -197,10 +208,14 @@ def _vote_technicals(t: TechnicalsSnapshot) -> list[tuple[int, str]]:
 def _vote_fundamentals(f: FundamentalsSnapshot) -> list[tuple[int, str]]:
     out: list[tuple[int, str]] = []
     for value, good, bad, label, fmt in (
-        (f.profit_growth_yoy, FUND_PROFIT_GROWTH_GOOD, FUND_PROFIT_GROWTH_BAD,
-         "profit growth (YoY)", "{:+.1%}"),
-        (f.profit_cagr_3y, FUND_CAGR_3Y_GOOD, FUND_CAGR_3Y_BAD,
-         "profit CAGR (3y)", "{:+.1%}"),
+        (
+            f.profit_growth_yoy,
+            FUND_PROFIT_GROWTH_GOOD,
+            FUND_PROFIT_GROWTH_BAD,
+            "profit growth (YoY)",
+            "{:+.1%}",
+        ),
+        (f.profit_cagr_3y, FUND_CAGR_3Y_GOOD, FUND_CAGR_3Y_BAD, "profit CAGR (3y)", "{:+.1%}"),
         (f.roe, FUND_ROE_GOOD, FUND_ROE_BAD, "ROE", "{:.1%}"),
     ):
         res = _band_vote(
@@ -266,8 +281,9 @@ def score_holding(ctx: HoldingContext) -> HealthScore:
     (`votes_cast < 3`) we return TRIM by default rather than misclassify
     a thinly-evidenced position.
     """
-    pnl_pct = ((ctx.last_price - ctx.avg_price) / ctx.avg_price * 100.0
-               if ctx.avg_price > 0 else None)
+    pnl_pct = (
+        (ctx.last_price - ctx.avg_price) / ctx.avg_price * 100.0 if ctx.avg_price > 0 else None
+    )
 
     if ctx.sentiment.has_critical:
         return HealthScore(
@@ -289,15 +305,20 @@ def score_holding(ctx: HoldingContext) -> HealthScore:
     net = sum(v for v, _ in votes)
     reasons = [r for _, r in votes]
 
-    if votes_cast < 3:
+    if votes_cast < MIN_VOTES_FOR_VERDICT:
         verdict: Verdict = "TRIM"
         reasons.append("insufficient evidence — defaulting to TRIM")
-    elif net >= HOLD_NET_THRESHOLD:
-        verdict = "HOLD"
-    elif net <= EXIT_NET_THRESHOLD:
-        verdict = "EXIT"
     else:
-        verdict = "TRIM"
+        # Scale the ±3 cut by the ballot actually cast (F-022). `frac` is the
+        # same net/votes_cast ratio the 0..100 score uses below, so verdict and
+        # score never disagree. On 8 axes this is exactly net ≥ 3 / ≤ −3.
+        frac = net / votes_cast
+        if frac >= _HOLD_FRACTION:
+            verdict = "HOLD"
+        elif frac <= _EXIT_FRACTION:
+            verdict = "EXIT"
+        else:
+            verdict = "TRIM"
 
     # 0..100 score: 50 at neutral, scaled by net / votes_cast.
     if votes_cast > 0:
@@ -343,13 +364,21 @@ def technicals_from_history(history: object) -> TechnicalsSnapshot:
     last = valid.iloc[-1]
     close = float(last["close"])
 
-    sma_200 = float(last["sma_200"]) if "sma_200" in valid.columns and last["sma_200"] == last["sma_200"] else None
+    sma_200 = (
+        float(last["sma_200"])
+        if "sma_200" in valid.columns and last["sma_200"] == last["sma_200"]
+        else None
+    )
     above = (close > sma_200) if sma_200 is not None else None
 
     ath = float(valid["high"].max()) if "high" in valid.columns else None
     dd = ((ath - close) / ath * 100.0) if ath and ath > 0 else None
 
-    rsi = float(last["rsi_14"]) if "rsi_14" in valid.columns and last["rsi_14"] == last["rsi_14"] else None
+    rsi = (
+        float(last["rsi_14"])
+        if "rsi_14" in valid.columns and last["rsi_14"] == last["rsi_14"]
+        else None
+    )
 
     # 52w high: last 252 valid trading bars
     if "high" in valid.columns and len(valid) >= 1:

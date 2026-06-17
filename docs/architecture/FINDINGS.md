@@ -38,16 +38,16 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 2 | F-002, F-005† |
-| Med | 13 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-022, F-026, F-032 |
+| Med | 12 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-026, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 8 | F-012, F-014, F-018, F-019, F-023, F-024, F-025, F-029 |
+| ✅ Fixed | 9 | F-012, F-014, F-018, F-019, F-022, F-023, F-024, F-025, F-029 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
 
 | Category | Count |
 |---|---:|
-| VULN (correctness/data-integrity) | 5 (F-019 ✅, F-023 ✅, F-024 ✅, F-029 ✅, F-022) |
+| VULN (correctness/data-integrity) | 5 (F-019 ✅, F-022 ✅, F-023 ✅, F-024 ✅, F-029 ✅) |
 | GAP (missing functionality/guardrail) | 11 |
 | INACC (code ≠ spec/docstring) | 7 |
 | DEBT (cleanup) | 8 |
@@ -73,7 +73,7 @@ The highest-leverage cluster; everything else is noise until these land.
 |---|---|---|
 | ~~F-024~~ ✅ | Med | **Done (2026-06-16).** `mtm._days_held` derives `days_held = np.busday_count(ts_entry, as_of)` instead of `+1` per MTM call, so the twice-daily mid-day + post-close passes no longer double-count; mirrors the backtest's per-trading-day count (weekends excluded; holidays ignored to avoid a network call) |
 | ~~F-025~~ ✅ | Med | **Done (2026-06-16).** `ledger.buy_side_cost`/`sell_side_cost` reuse `backtest.costs`; `compute_trade_pnl` returns gross−round-trip costs (mirrors backtest `net_pnl`) and `reconcile.compute_paper_cash` debits `entry+buy_cost` / credits `exit−sell_cost`, so paper P&L + the F-023 equity curve carry the backtest's friction. Entry/exit price columns kept clean |
-| F-022 | Med | Wire fundamentals + sentiment into health; implement vote-count threshold scaling |
+| ~~F-022~~ ✅ | Med | **Done (2026-06-16).** `score_holding` scales the ±3 cut by votes_cast (`REFERENCE_BALLOT_SIZE=8`) so a technicals-only ballot reaches HOLD/EXIT not just TRIM; new `holding_context.build_holding_context` wires the latest `sentiment_daily` rollup (reviving the critical-news EXIT veto) + a static `data/static/fundamentals.csv` (`load_fundamentals_map`) into both `pre_open` and `monthly_sip` |
 | F-015 | Med | Alias map for all 50 names |
 | F-016 | Med | DB-level news dedup (unique index / insert-or-ignore) |
 | F-002 | High | Validate broker/quote JSON at the read boundary |
@@ -98,7 +98,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > 2026-06-16.** F-018 (OHLCV freshness guard), F-019 (ScanContext wiring),
 > F-023 (paper-cash ledger) and F-029 (real predictions) also shipped
 > 2026-06-16 — **Wave 1 complete.** Wave 2 in progress: F-024 (days_held) +
-> F-025 (paper costs) done 2026-06-16. Next up: F-022, …
+> F-025 (paper costs) + F-022 (health TRIM-bias) done 2026-06-16. Next up: F-021, …
 
 ## How to use this file
 
@@ -154,7 +154,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-019 | VULN | High | 4 | 4 of 10 Layer-A rules (regime, fno_banned, t2t, critical_event) are unconditional passes — `pre_open`/`scan` build `ScanContext` with all defaults; risk vetoes + regime gate are dead despite the data being available | ✅ Fixed (2026-06-16) — `build_scan_context` wires regime/VIX + critical-news gates; `fno_banned`/`t2t` still await NSE feeds ([[F-010]]) |
 | F-020 | INACC | Med | 4 | Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate) — different thresholds/inputs (the rule is now live as of F-019, sharpening the naming-collision risk) | Open |
 | F-021 | INACC | Med | 5 | `BacktestResult.total_costs` omits buy-side charges (only sell-side accumulated); aggregate cost-drag understated (per-trade `costs_paid` is correct) | Open |
-| F-022 | VULN | Med | 5 | Health scorer structurally TRIM-biased: fundamentals AND sentiment never wired (pre_open/monthly_sip pass empty snapshots) → technicals-only + critical-news EXIT veto dead; docstring claims vote-count scaling not implemented (fixed ±3) | Open |
+| ~~F-022~~ | VULN | Med | 5 | ~~Health scorer structurally TRIM-biased: fundamentals AND sentiment never wired (pre_open/monthly_sip pass empty snapshots) → technicals-only + critical-news EXIT veto dead; docstring claims vote-count scaling not implemented (fixed ±3)~~ | ✅ Fixed 2026-06-16 — votes_cast scaling in `score_holding`; sentiment + static-CSV fundamentals wired into both jobs via `build_holding_context`; critical-news EXIT veto live |
 | ~~F-023~~ | VULN | High | 5 | ~~Paper equity curve never compounds realised P&L — cash is a constant; closing a winner drops its gain from `portfolio_snapshots.equity`. Equity/drawdown are not a true track record~~ | ✅ Fixed 2026-06-16 — `compute_paper_cash` derives cash from the ledger; equity = derived cash + open MTM, so realised P&L compounds |
 | ~~F-024~~ | VULN | Med | 5 | ~~`days_held` bumped per MTM call, so mid-day + post-close double-count → 25-day time stop fires at ~12 calendar days~~ | ✅ Fixed 2026-06-16 — `days_held = np.busday_count(ts_entry, as_of)`, derived not incremented, so same-day passes don't double-count |
 | ~~F-025~~ | INACC | Med | 5 | ~~Cost asymmetry: backtest applies full Zerodha costs but live paper MTM applies none (raw-price fills) → paper results flatter than backtest~~ | ✅ Fixed 2026-06-16 — `ledger.buy_side_cost`/`sell_side_cost` reuse the backtest cost model; `compute_trade_pnl` nets round-trip costs into pnl and `compute_paper_cash` debits/credits them, so paper P&L + equity carry the same friction as the backtest |
@@ -405,14 +405,33 @@ that to `total_costs`. Buy-side charges (in `_OpenPosition.buy_costs_paid`) reac
 - **Fix idea:** Return/accumulate buy charges from `_execute_pending`; or compute
   `total_costs = sum(t.costs_paid)` at the end. Optionally report slippage drag.
 
-### F-022 — Health scorer TRIM-biased (`VULN`, Med, Phase 5)
-Two compounding issues: (a) no fundamentals fetcher, so `HoldingContext.fundamentals`
-is always empty in production; (b) docstring claims thresholds scale by votes_cast
-but `score_holding` uses fixed `net ≥ 3 / ≤ −3`. Result: almost all holdings →
-TRIM / "insufficient evidence". Also starves the SIP TOPUP bucket (needs HOLD).
-- **Fix idea:** Wire a fundamentals source (yfinance `Ticker.info` or a static
-  CSV), and/or implement the documented votes_cast scaling. Add tests for a clear
-  HOLD and a clear EXIT with technicals-only evidence.
+### F-022 — Health scorer TRIM-biased (`VULN`, Med, Phase 5) — ✅ Fixed 2026-06-16
+Two compounding issues: (a) fundamentals AND sentiment were never wired —
+`pre_open`/`monthly_sip` built `HoldingContext` with empty Fundamentals/Sentiment,
+so the 30d-sentiment vote and the critical-news EXIT veto were dead; (b) the
+docstring claimed thresholds scale by votes_cast but `score_holding` used a fixed
+`net ≥ 3 / ≤ −3`. Result: a technicals-only ballot (≈4 axes) could almost never
+reach ±3 → almost everything → TRIM / "insufficient evidence", starving the SIP
+TOPUP bucket (which needs HOLD).
+- **Fixed (b) — votes_cast scaling:** `score_holding` now compares
+  `net/votes_cast` against `±HOLD_NET_THRESHOLD/REFERENCE_BALLOT_SIZE` (±3/8 =
+  ±0.375). On a full 8-axis ballot this reduces to the original net ≥ 3 / ≤ −3
+  (backward-compatible), but a 4-axis technicals-only ballot with net ±2 now
+  classifies HOLD/EXIT. The `votes_cast < 3` "insufficient evidence" guard stays.
+- **Fixed (a) — sentiment wired:** new `store.news_store.get_latest_sentiment_daily`
+  (freshest rollup ≤ as_of) feeds `SentimentSnapshot(score_30d, has_critical)` via
+  the new `portfolio.holding_context.build_holding_context`, used by *both* jobs —
+  so the critical-news EXIT veto is live on holdings, not just the scan gate.
+- **Fixed (a) — fundamentals seam:** new `portfolio.fundamentals.load_fundamentals_map`
+  reads an offline `data/static/fundamentals.csv` (mirrors `sector_map.csv`;
+  blank/absent → empty snapshot, no network in the hot path) into the same builder.
+  Ships empty (header + format docs) — populate it, or later swap a fetcher behind
+  the same seam, with no scorer change.
+- **Tests:** technicals-only net ±2 → HOLD/EXIT + full-ballot backward-compat
+  (test_health); latest-sentiment selection + critical flag (test_news_store);
+  CSV parse/blank/missing (test_portfolio_fundamentals); context wiring + veto
+  (test_portfolio_holding_context); and a `pre_open` job-level critical→EXIT
+  integration test.
 
 ### F-023 — Paper equity never compounds realised P&L (`VULN`, High, Phase 5) — ✅ Fixed 2026-06-16
 ~~`reconcile.compute_portfolio_snapshot` uses a caller-constant `cash`; opens don't

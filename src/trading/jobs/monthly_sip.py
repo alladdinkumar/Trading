@@ -29,14 +29,12 @@ from trading.portfolio.allocator import (
     SipPlan,
     allocate_sip,
 )
+from trading.portfolio.fundamentals import load_fundamentals_map
 from trading.portfolio.health import (
-    FundamentalsSnapshot,
-    HoldingContext,
-    SentimentSnapshot,
     Verdict,
     score_holding,
-    technicals_from_history,
 )
+from trading.portfolio.holding_context import build_holding_context
 from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
 from trading.store.ohlcv import read_ohlcv
@@ -82,27 +80,31 @@ def trailing_trading_window(
 
 
 def _score_holdings(
-    paths: Paths, holdings: list[Holding], warnings: list[str]
+    paths: Paths, holdings: list[Holding], warnings: list[str], *, as_of: date
 ) -> dict[str, Verdict]:
     """HOLD/TRIM/EXIT per holding — same scoring path pre_open uses
-    (enriched parquet technicals; fundamentals/sentiment default-empty)."""
+    (enriched parquet technicals + static fundamentals + latest sentiment)."""
+    fundamentals_map = load_fundamentals_map(paths)
     verdicts: dict[str, Verdict] = {}
-    for h in holdings:
-        try:
-            history = read_ohlcv(h.tradingsymbol, paths)
-        except FileNotFoundError:
-            warnings.append(f"no parquet for holding {h.tradingsymbol} — health unknown")
-            continue
-        ctx = HoldingContext(
-            symbol=h.tradingsymbol,
-            qty=h.quantity,
-            avg_price=h.average_price,
-            last_price=h.last_price,
-            technicals=technicals_from_history(history),
-            fundamentals=FundamentalsSnapshot(),
-            sentiment=SentimentSnapshot(),
-        )
-        verdicts[h.tradingsymbol] = score_holding(ctx).verdict
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        for h in holdings:
+            try:
+                history = read_ohlcv(h.tradingsymbol, paths)
+            except FileNotFoundError:
+                warnings.append(f"no parquet for holding {h.tradingsymbol} — health unknown")
+                continue
+            ctx = build_holding_context(
+                conn,
+                symbol=h.tradingsymbol,
+                qty=h.quantity,
+                avg_price=h.average_price,
+                last_price=h.last_price,
+                history=history,
+                as_of=as_of,
+                fundamentals_map=fundamentals_map,
+            )
+            verdicts[h.tradingsymbol] = score_holding(ctx).verdict
     return verdicts
 
 
@@ -260,7 +262,7 @@ def run_monthly_sip(
 
     sector_map = load_sector_map(p)
     held = {h.tradingsymbol for h in holdings}
-    verdicts = _score_holdings(p, holdings, warnings)
+    verdicts = _score_holdings(p, holdings, warnings, as_of=as_of)
     holding_snaps = [
         HoldingSnapshot(
             symbol=h.tradingsymbol,
