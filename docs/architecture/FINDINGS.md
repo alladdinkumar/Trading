@@ -9,8 +9,8 @@
 ## Executive summary
 
 The architecture review (docs 00–08) produced **32 active findings** (1 earlier
-finding superseded). **11 are now fixed** (F-012, F-014, F-018, F-019, F-021,
-F-022, F-023, F-024, F-025, F-029, F-033), leaving **21 open**. The system is **well-engineered at the
+finding superseded). **12 are now fixed** (F-012, F-014, F-015, F-018, F-019,
+F-021, F-022, F-023, F-024, F-025, F-029, F-033), leaving **20 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -18,8 +18,9 @@ in a live paper-trade run:
 1. **Data coverage.** ~~It trades **12 stocks, not the intended Nifty 50**~~
    (✅ fixed — now scans all 50 Nifty constituents) and ~~never refreshes
    prices~~ (✅ fixed — F-018: `pre_open` refreshes OHLCV + a staleness guard
-   skips stale symbols). News attribution still covers only 12 symbols (F-015),
-   so the sentiment signals remain partly starved.
+   skips stale symbols). ~~News attribution still covers only 12 symbols~~
+   (✅ fixed — F-015: `data/static/aliases.csv` now spans all 58 ingest symbols,
+   so the sentiment signals are no longer starved).
 2. **Measurement integrity.** ~~Four of ten risk rules are silently disabled~~
    (✅ fixed — F-019: the regime/VIX + critical-news gates are now wired from
    live macro/sentiment data), and the paper ~~equity curve never compounds
@@ -38,9 +39,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 2 | F-002, F-005† |
-| Med | 11 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-026, F-032 |
+| Med | 10 | F-001, F-003, F-006, F-007, F-008, F-010, F-016, F-020, F-026, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 11 | F-012, F-014, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033 |
+| ✅ Fixed | 12 | F-012, F-014, F-015, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -48,7 +49,7 @@ future Phase 19 — out of scope for hardening the paper run.
 | Category | Count |
 |---|---:|
 | VULN (correctness/data-integrity) | 6 (F-019 ✅, F-022 ✅, F-023 ✅, F-024 ✅, F-029 ✅, F-033 ✅) |
-| GAP (missing functionality/guardrail) | 11 |
+| GAP (missing functionality/guardrail) | 11 (F-015 ✅) |
 | INACC (code ≠ spec/docstring) | 7 (F-021 ✅) |
 | DEBT (cleanup) | 8 |
 
@@ -74,7 +75,7 @@ The highest-leverage cluster; everything else is noise until these land.
 | ~~F-024~~ ✅ | Med | **Done (2026-06-16).** `mtm._days_held` derives `days_held = np.busday_count(ts_entry, as_of)` instead of `+1` per MTM call, so the twice-daily mid-day + post-close passes no longer double-count; mirrors the backtest's per-trading-day count (weekends excluded; holidays ignored to avoid a network call) |
 | ~~F-025~~ ✅ | Med | **Done (2026-06-16).** `ledger.buy_side_cost`/`sell_side_cost` reuse `backtest.costs`; `compute_trade_pnl` returns gross−round-trip costs (mirrors backtest `net_pnl`) and `reconcile.compute_paper_cash` debits `entry+buy_cost` / credits `exit−sell_cost`, so paper P&L + the F-023 equity curve carry the backtest's friction. Entry/exit price columns kept clean |
 | ~~F-022~~ ✅ | Med | **Done (2026-06-16).** `score_holding` scales the ±3 cut by votes_cast (`REFERENCE_BALLOT_SIZE=8`) so a technicals-only ballot reaches HOLD/EXIT not just TRIM; new `holding_context.build_holding_context` wires the latest `sentiment_daily` rollup (reviving the critical-news EXIT veto) + a static `data/static/fundamentals.csv` (`load_fundamentals_map`) into both `pre_open` and `monthly_sip` |
-| F-015 | Med | Alias map for all 50 names |
+| ~~F-015~~ ✅ | Med | **Done (2026-06-17).** `data/static/aliases.csv` (58 symbols = Nifty 50 + 8 holdings) + `load_aliases_map`/`default_aliases`; `fetch_all_news` + rollup watch-list read it; bare-token disambiguation (`SBILIFE` before `SBIN`) |
 | F-016 | Med | DB-level news dedup (unique index / insert-or-ignore) |
 | F-002 | High | Validate broker/quote JSON at the read boundary |
 | ~~F-021~~ ✅ | Med | **Done (2026-06-17).** `run_backtest` returns `total_costs = sum(t.costs_paid)`, so the aggregate carries buy + sell (was sell-only); accumulator + `_evaluate_exits` cost return removed |
@@ -99,7 +100,8 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > F-023 (paper-cash ledger) and F-029 (real predictions) also shipped
 > 2026-06-16 — **Wave 1 complete.** Wave 2 in progress: F-024 (days_held) +
 > F-025 (paper costs) + F-022 (health TRIM-bias) done 2026-06-16; F-021 (backtest
-> `total_costs` buy side) done 2026-06-17. Next up: F-015, F-016, F-002, …
+> `total_costs` buy side) + F-015 (50-name alias map) done 2026-06-17. Next up:
+> F-016, F-002, …
 
 ## How to use this file
 
@@ -148,7 +150,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-012 | INACC | Med | 2 | Universe scope: paper-trading candidate set should be **Nifty 50 (50 stocks)** per user req; currently ~57 (Nifty 50 + holdings) under a `nifty200/` subdir | ✅ Fixed (2026-06-16) — candidate set pinned to Nifty 50; subdir rename deferred (cosmetic) |
 | F-013 | GAP | Low | 2 | No retention/compaction policy for `news_items` (append-only) or `data/raw/<date>/` JSON — unbounded growth | Open |
 | F-014 | GAP | High | 3 | Only 12 symbols have parquet OHLCV on disk → live candidate universe is 12, not the configured ~57 nor the required Nifty 50 | ✅ Fixed (2026-06-16) — all 50 Nifty + 8 holdings ingested; `candidates_total` 12→50 |
-| F-015 | GAP | Med | 3 | News symbol-attribution alias map covers only 12 symbols → sparse `sentiment_daily`, near-empty per-symbol sentiment/critical inputs | Open |
+| ~~F-015~~ | GAP | Med | 3 | ~~News symbol-attribution alias map covers only 12 symbols → sparse `sentiment_daily`, near-empty per-symbol sentiment/critical inputs~~ | ✅ Fixed 2026-06-17 — `data/static/aliases.csv` covers all 58 ingest symbols; attribution + rollup watch-list both read it |
 | F-016 | DEBT | Med | 3 | News dedup is URL-only and single-run; daily event/headline re-fetch creates duplicate `news_items` rows (no DB-level uniqueness) | Open |
 | F-017 | INACC | Low | 3 | `macro_snapshot.dow_fut`/`nasdaq_fut` store spot index closes not futures; `sgx_nifty` always NULL | Open |
 | F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | ✅ Fixed (2026-06-16) — refresh step + scan staleness guard + Kite close cross-check; IST-clock centralisation ([[F-004]]) still open |
@@ -309,12 +311,29 @@ enough labelled symbols to train/promote.
 `sector_map.csv` 57. The scanner iterates the parquet dir, so the candidate
 universe is 12. Blocks the Nifty-50 paper-trade requirement ([[F-012]]).
 
-### F-015 — Sentiment attribution covers 12 symbols (`GAP`, Med, Phase 3)
-`news.DEFAULT_ALIASES` has 12 entries. Most Nifty-50 names' news is never
-attributed → `sentiment_daily` sparse → sentiment + critical-news inputs empty
-for most candidates (compounds [[F-011]]).
-- **Fix idea:** Build an alias map for all 50 (ticker + common names); consider
-  fuzzy/company-name matching from a maintained CSV.
+### F-015 — Sentiment attribution covers 12 symbols (`GAP`, Med, Phase 3) — ✅ Fixed 2026-06-17
+`news.DEFAULT_ALIASES` had 12 entries (holdings + smoke universe). Most Nifty-50
+names' news was never attributed → `sentiment_daily` sparse → sentiment +
+critical-news inputs empty for most candidates (compounded [[F-011]]/[[F-019]]).
+- **Fixed:** new maintained `data/static/aliases.csv` (mirrors the `sector_map`/
+  `fundamentals` static-CSV convention) covers the **full 58-symbol ingest
+  universe** — all 50 Nifty constituents + 8 holdings — with `|`-separated
+  company-name variants. New `news.load_aliases_map()` parses it and
+  `news.default_aliases()` prefers it (falling back to the built-in
+  `DEFAULT_ALIASES` only on a fresh checkout without the CSV). `fetch_all_news`
+  defaults to it, and `pre_open._step_news` / `cli news-pull` now derive the
+  sentiment-rollup watch-list from `default_aliases().keys()` too — so both
+  attribution **and** the rollup span all 58.
+- **Disambiguation:** ambiguous bare tokens ("Bajaj", "Adani", "Tata", "HDFC")
+  are deliberately excluded in favour of full distinguishing names; more-specific
+  symbols precede the generic ticker they share a prefix with (`SBILIFE` before
+  `SBIN`, so "SBI Life" doesn't fall through to `SBIN`). Hyphen/ampersand tickers
+  (`BAJAJ-AUTO`, `M&M`) attribute via both ticker and name.
+- **Tests:** `test_news_aliases.py` — loader (pipe-split, blank cell, comments,
+  missing-file → `{}`), `default_aliases` CSV-preferred + built-in fallback, the
+  shipped CSV covering all of `universe.txt`, hyphen/ampersand attribution, and
+  the SBI/SBI-Life disambiguation. Watched the import fail first (RED), then green
+  (9 tests); news + pre_open suites green, ruff + mypy clean.
 
 ### F-016 — Duplicate news rows across runs (`DEBT`, Med, Phase 3)
 `fetch_all_news` dedups by URL within one call only; daily re-fetch of RSS + NSE
@@ -592,6 +611,6 @@ This is the concrete data-integrity instance of the coupling flagged in [[F-027]
 
 ---
 
-_Counts: 21 open · 1 superseded · 11 fixed (F-012, F-014, F-018, F-019, F-021,
-F-022, F-023, F-024, F-025, F-029, F-033). Updated 2026-06-17 (F-021 — backtest
-`total_costs` now sums per-trade buy+sell charges)._
+_Counts: 20 open · 1 superseded · 12 fixed (F-012, F-014, F-015, F-018, F-019,
+F-021, F-022, F-023, F-024, F-025, F-029, F-033). Updated 2026-06-17 (F-015 —
+`data/static/aliases.csv` covers all 58 ingest symbols for news attribution)._

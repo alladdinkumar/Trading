@@ -1,0 +1,81 @@
+# News symbol-attribution alias map (F-015).
+# Loaded by src/trading/data/news.py::load_aliases_map and used for both
+# headline attribution (attribute_symbol) and the sentiment-rollup watch-list
+# (jobs/pre_open._step_news, cli news-pull).
+#
+# Format:
+#   symbol   NSE tradingsymbol (matches universe.txt / nifty50.txt + holdings)
+#   aliases  `|`-separated company-name variants. The bare ticker is ALWAYS
+#            matched too, so leave the cell blank for names that only ever
+#            appear as their ticker (e.g. ITC, NTPC).
+#
+# Matching is whole-word + case-insensitive and returns the FIRST symbol whose
+# ticker or any alias appears. So:
+#   - Avoid bare ambiguous tokens ("Bajaj", "Adani", "Tata", "HDFC") — use the
+#     full distinguishing name ("Bajaj Auto", "Adani Ports", "Tata Steel").
+#   - More-specific entries are listed before the generic ticker they share a
+#     prefix with (SBILIFE before SBIN, so "SBI Life" doesn't fall to SBIN).
+#
+# Covers the full ingest universe: Nifty 50 (candidates) + non-Nifty holdings.
+# Refresh alongside universe.txt when the index rebalances.
+symbol,aliases
+# --- Nifty 50 (candidate universe) ---
+ADANIENT,Adani Enterprises
+ADANIPORTS,Adani Ports|APSEZ
+APOLLOHOSP,Apollo Hospitals
+ASIANPAINT,Asian Paints
+AXISBANK,Axis Bank
+BAJAJ-AUTO,Bajaj Auto
+BAJAJFINSV,Bajaj Finserv
+BAJFINANCE,Bajaj Finance
+BEL,Bharat Electronics
+BHARTIARTL,Bharti Airtel|Airtel
+CIPLA,Cipla
+COALINDIA,Coal India
+DRREDDY,Dr Reddy|Dr. Reddy's|Dr Reddys|Dr Reddy's Laboratories
+EICHERMOT,Eicher Motors|Royal Enfield
+ETERNAL,Eternal|Zomato
+GRASIM,Grasim|Grasim Industries
+HCLTECH,HCL Technologies|HCL Tech
+HDFCBANK,HDFC Bank
+HDFCLIFE,HDFC Life
+HINDALCO,Hindalco
+HINDUNILVR,Hindustan Unilever|HUL
+ICICIBANK,ICICI Bank
+INDIGO,IndiGo|InterGlobe Aviation
+INFY,Infosys
+ITC,
+JIOFIN,Jio Financial|Jio Finance
+JSWSTEEL,JSW Steel
+KOTAKBANK,Kotak Mahindra Bank|Kotak Bank|Kotak Mahindra
+LT,Larsen & Toubro|Larsen and Toubro|L&T
+M&M,Mahindra & Mahindra|Mahindra and Mahindra|Mahindra
+MARUTI,Maruti Suzuki|Maruti
+MAXHEALTH,Max Healthcare
+NESTLEIND,Nestle India|Nestle
+NTPC,
+ONGC,Oil and Natural Gas|Oil & Natural Gas
+POWERGRID,Power Grid|Powergrid
+RELIANCE,Reliance|RIL|Reliance Industries
+SBILIFE,SBI Life
+SBIN,State Bank of India|SBI
+SHRIRAMFIN,Shriram Finance
+SUNPHARMA,Sun Pharma|Sun Pharmaceutical
+TATACONSUM,Tata Consumer
+TATASTEEL,Tata Steel
+TCS,Tata Consultancy
+TECHM,Tech Mahindra
+TITAN,Titan
+TMPV,Tata Motors
+TRENT,Trent
+ULTRACEMCO,UltraTech Cement|UltraTech
+WIPRO,Wipro
+# --- User holdings (non-Nifty-50; attributed for portfolio-health sentiment) ---
+RVNL,Rail Vikas
+TATAPOWER,Tata Power
+IRB,IRB Infra|IRB Infrastructure
+PFC,Power Finance|PFC Ltd
+RECLTD,REC Ltd|REC Limited
+IDFCFIRSTB,IDFC First Bank|IDFC First
+IREDA,
+MAZDOCK,Mazagon Dock|MDL

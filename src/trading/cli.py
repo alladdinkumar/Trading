@@ -50,7 +50,7 @@ from trading.data.kite_snapshot import (
     read_holdings as _snapshot_read_holdings,
 )
 from trading.data.macro import snapshot_and_classify
-from trading.data.news import DEFAULT_ALIASES, fetch_all_news
+from trading.data.news import default_aliases, fetch_all_news
 from trading.data.ohlcv_refresh import refresh_ohlcv
 from trading.data.sector import fetch_all_sectors
 from trading.data.universe import load_universe
@@ -642,7 +642,7 @@ def ingest_news(
             console.print("[yellow]Skipping daily aggregation (--skip-aggregate).[/yellow]")
             return
 
-        watched = sorted(DEFAULT_ALIASES.keys())
+        watched = sorted(default_aliases().keys())
         rollups = aggregate_daily(conn, watched, target_date)
         console.print(
             f"[green]Wrote sentiment_daily for {len(rollups)} symbol(s) "

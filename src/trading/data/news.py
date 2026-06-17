@@ -11,15 +11,17 @@ table. `sentiment` / `category` / `is_critical` are populated later by
 
 from __future__ import annotations
 
+import csv
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Protocol
 
 import feedparser
 
-from trading.config import get_settings
+from trading.config import Paths, get_paths, get_settings
 from trading.data.cache import get_cached_session
 
 # ---------------------------------------------------------------------------
@@ -191,8 +193,9 @@ def _parse_event_date(s: str) -> datetime | None:
 # Symbol attribution
 # ---------------------------------------------------------------------------
 
-# Holdings + the smoke-test universe. Extend freely — the matcher is whole-word
-# and case-insensitive, so adding "TCS": ["Tata Consultancy"] is enough.
+# Built-in fallback used only when `data/static/aliases.csv` is absent (fresh
+# checkout) — the shipped CSV (F-015) covers the full Nifty-50 + holdings ingest
+# universe. The matcher is whole-word and case-insensitive.
 DEFAULT_ALIASES: dict[str, list[str]] = {
     "RELIANCE": ["Reliance", "RIL", "Reliance Industries"],
     "TATAPOWER": ["Tata Power"],
@@ -207,6 +210,51 @@ DEFAULT_ALIASES: dict[str, list[str]] = {
     "JIOFIN": ["Jio Financial", "Jio Fin"],
     "MAZDOCK": ["Mazagon Dock", "MDL"],
 }
+
+
+def _default_aliases_path(paths: Paths | None = None) -> Path:
+    p = paths if paths is not None else get_paths()
+    return p.project_root / "data" / "static" / "aliases.csv"
+
+
+def load_aliases_map(paths: Paths | None = None) -> dict[str, list[str]]:
+    """Read `data/static/aliases.csv` → `{symbol: [aliases]}`.
+
+    Header: `symbol,aliases` where `aliases` is a `|`-separated list of
+    company-name variants (the bare ticker is always matched too, so the cell
+    may be blank). Blank lines and `#` comments are skipped. Returns `{}` when
+    the file is absent so callers can fall back to `DEFAULT_ALIASES`.
+    """
+    path = _default_aliases_path(paths)
+    if not path.is_file():
+        return {}
+    cleaned: list[str] = []
+    with path.open(encoding="utf-8") as f:
+        for raw in f:
+            line = raw.rstrip("\n")
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            cleaned.append(line)
+    if not cleaned:
+        return {}
+    reader = csv.DictReader(cleaned)
+    out: dict[str, list[str]] = {}
+    for row in reader:
+        sym = (row.get("symbol") or "").strip()
+        if not sym:
+            continue
+        raw_aliases = (row.get("aliases") or "").strip()
+        out[sym] = [a.strip() for a in raw_aliases.split("|") if a.strip()]
+    return out
+
+
+def default_aliases(paths: Paths | None = None) -> dict[str, list[str]]:
+    """The alias map for attribution + the rollup watch-list.
+
+    Prefers the maintained `data/static/aliases.csv`; falls back to the built-in
+    `DEFAULT_ALIASES` on a fresh checkout that hasn't shipped the CSV.
+    """
+    return load_aliases_map(paths) or DEFAULT_ALIASES
 
 
 def attribute_symbol(headline: str, aliases: dict[str, list[str]]) -> str | None:
@@ -245,7 +293,7 @@ def fetch_all_news(
     matches — those rows still feed sector/macro narrative downstream.
     """
     src_list = list(sources) if sources is not None else default_sources()
-    alias_map = aliases if aliases is not None else DEFAULT_ALIASES
+    alias_map = aliases if aliases is not None else default_aliases()
 
     seen: set[str] = set()
     out: list[NewsItem] = []

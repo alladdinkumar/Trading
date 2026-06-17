@@ -22,7 +22,7 @@ from trading.data.kite_snapshot import (
     read_holdings,
 )
 from trading.data.macro import snapshot_and_classify
-from trading.data.news import DEFAULT_ALIASES, fetch_all_news
+from trading.data.news import default_aliases, fetch_all_news
 from trading.data.ohlcv_refresh import cross_check_closes, refresh_ohlcv
 from trading.data.sector import fetch_all_sectors
 from trading.data.universe import load_candidate_universe
@@ -224,7 +224,7 @@ def _step_news(conn: sqlite3.Connection, as_of: date, warnings: list[str]) -> tu
         return 0, 0
 
     inserted = insert_news_items(conn, scored)
-    watched = sorted(DEFAULT_ALIASES.keys())
+    watched = sorted(default_aliases().keys())
     rollups = aggregate_daily(conn, watched, as_of)
     return inserted, len(rollups)
 

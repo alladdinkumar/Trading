@@ -155,14 +155,19 @@ invalid hours/minutes.
 - **`fetch_all_news`** pulls every source with **per-source isolation** (a
   raising adapter contributes nothing, doesn't abort), **dedups by URL**, and
   attributes a symbol via `attribute_symbol` (whole-word, case-insensitive match
-  against `DEFAULT_ALIASES`). Unmatched → `symbol=None` (still useful for
+  against the alias map). Unmatched → `symbol=None` (still useful for
   macro/sector narrative).
+- **Alias map** comes from `default_aliases()` → the maintained
+  `data/static/aliases.csv` (`load_aliases_map`), falling back to the built-in
+  `DEFAULT_ALIASES` only on a fresh checkout without the CSV. The same map's keys
+  drive the sentiment-rollup watch-list in `pre_open._step_news` / `cli news-pull`.
 
-> Two real gaps here, both relevant to the Nifty-50 goal:
-> - **`DEFAULT_ALIASES` covers only 12 symbols** (holdings + smoke universe).
->   Candidate/holdings news for the other ~45 Nifty-50 names is never attributed,
->   so `sentiment_daily` stays sparse and the per-symbol sentiment/critical
->   inputs are mostly empty. → **F-015**.
+> One real gap remains here for the Nifty-50 goal:
+> - **✅ Alias coverage fixed (F-015, 2026-06-17).** `data/static/aliases.csv`
+>   now covers the full ingest universe — all 50 Nifty constituents + 8 holdings
+>   (58 symbols, `|`-separated company-name variants, ambiguous bare tokens
+>   avoided, `SBILIFE` ordered ahead of `SBIN`). Attribution + the rollup
+>   watch-list both read it, so `sentiment_daily` is no longer starved to 12 names.
 > - **Dedup is URL-only and within a single run.** NSE events re-fetched each day
 >   (and re-pulled headlines) create duplicate `news_items` rows across runs —
 >   there's no DB-level uniqueness on `url`/`headline`. → **F-016**.
@@ -235,9 +240,10 @@ session; the batch Python reads files. See [00-overview §1](./00-overview.md).
   bars older than `MAX_BAR_AGE_DAYS` (5) with a warning, and a Kite close
   cross-check flags >0.5% divergence on holdings. Manual `trading refresh-ohlcv`
   also available. → F-018.
-- **Sentiment is mostly blind** because attribution covers 12 symbols. The
-  critical-news veto (F-011) and per-symbol sentiment features are therefore
-  near-empty for most candidates. → F-015.
+- **✅ (Fixed 2026-06-17) Sentiment attribution covered only 12 symbols.**
+  `data/static/aliases.csv` now spans the full 58-symbol ingest universe, so the
+  critical-news veto (F-019) and per-symbol sentiment features get real coverage
+  across candidates + holdings. → F-015.
 - **News table grows with duplicates.** URL-only, single-run dedup + daily event
   re-fetch ⇒ duplicate rows accumulate. → F-016 (and F-013 retention).
 - **Snapshot readers trust the skill.** Structural validation is just
