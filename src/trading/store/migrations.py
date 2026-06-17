@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-CURRENT_VERSION = 2
+CURRENT_VERSION = 3
 
 
 SCHEMA_V1 = """
@@ -221,6 +221,24 @@ ALTER TABLE paper_trades ADD COLUMN atr_at_entry  REAL;
 """
 
 
+# v3 (F-016): enforce DB-level news_items uniqueness so daily re-fetch of RSS +
+# NSE events can't accrete duplicate rows. The dedup key is
+# (source, headline, COALESCE(url,'')) — url alone is insufficient because NSE
+# events used to share a per-symbol URL, and null urls (macro/general headlines)
+# must still dedupe on (source, headline) rather than collapsing into one row.
+# Any pre-existing duplicates are collapsed (keep lowest id) before the index is
+# created, or the CREATE UNIQUE INDEX would fail on a populated DB.
+SCHEMA_V3 = """
+DELETE FROM news_items
+WHERE id NOT IN (
+  SELECT MIN(id) FROM news_items
+  GROUP BY source, headline, COALESCE(url, '')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_news_dedup
+  ON news_items(source, headline, COALESCE(url, ''));
+"""
+
+
 def _current_db_version(conn: sqlite3.Connection) -> int:
     """Return the highest applied version, or 0 if schema_version doesn't exist yet."""
     row = conn.execute(
@@ -251,5 +269,11 @@ def run_migrations(conn: sqlite3.Connection) -> int:
         conn.execute(
             "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
             (2, datetime.now(UTC).isoformat()),
+        )
+    if current < 3:
+        conn.executescript(SCHEMA_V3)
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (3, datetime.now(UTC).isoformat()),
         )
     return CURRENT_VERSION

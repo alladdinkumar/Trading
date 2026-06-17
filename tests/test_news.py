@@ -12,6 +12,7 @@ from trading.data.news import (
     NseEventsSource,
     RawHeadline,
     attribute_symbol,
+    event_url,
     fetch_all_news,
     parse_rss,
 )
@@ -113,6 +114,17 @@ class BoomSource:
         raise RuntimeError("simulated source failure")
 
 
+@dataclass
+class InlineSource:
+    """Stub NewsSource that replays a fixed list of RawHeadlines."""
+
+    name: str
+    headlines: list[RawHeadline]
+
+    def fetch(self) -> list[RawHeadline]:
+        return list(self.headlines)
+
+
 def test_fetch_all_news_dedupes_by_url() -> None:
     """MC & BS fixtures share one URL — orchestrator must keep only the first."""
     sources: list[NewsSource] = [
@@ -151,6 +163,46 @@ def test_fetch_all_news_isolates_failing_source() -> None:
     items = fetch_all_news(sources=sources)
     # MC still yields 3 items even though BoomSource raised
     assert len(items) == 3
+
+
+def test_event_url_is_unique_per_event() -> None:
+    """F-016: NSE events for one symbol used to share a symbol landing-page URL,
+    so per-URL dedup collapsed distinct events into one row. Each event must now
+    carry its own URL (same identity → same URL for cross-run idempotency)."""
+    board = event_url("RVNL", "Board Meeting", "2026-05-20")
+    dividend = event_url("RVNL", "Dividend", "2026-05-25")
+    board_again = event_url("RVNL", "Board Meeting", "2026-05-20")
+    assert board != dividend  # distinct events → distinct URLs
+    assert board == board_again  # same event → stable URL
+    assert "symbol=RVNL" in board  # still points at the symbol's calendar page
+
+
+def test_fetch_all_news_keeps_distinct_nse_events_for_one_symbol() -> None:
+    """Two distinct corporate events for the same symbol must both survive the
+    orchestrator's URL dedup (F-016) — they no longer share a URL."""
+    ts = datetime(2026, 5, 13, 10, 0, tzinfo=UTC)
+    src = InlineSource(
+        name="nse_events",
+        headlines=[
+            RawHeadline(
+                ts=ts,
+                source="nse_events",
+                headline="RVNL: Board Meeting on 2026-05-20",
+                url=event_url("RVNL", "Board Meeting", "2026-05-20"),
+            ),
+            RawHeadline(
+                ts=ts,
+                source="nse_events",
+                headline="RVNL: Dividend on 2026-05-25",
+                url=event_url("RVNL", "Dividend", "2026-05-25"),
+            ),
+        ],
+    )
+    items = fetch_all_news(sources=[src], aliases=DEFAULT_ALIASES)
+    assert sorted(i.headline for i in items) == [
+        "RVNL: Board Meeting on 2026-05-20",
+        "RVNL: Dividend on 2026-05-25",
+    ]
 
 
 def test_fetch_all_news_returns_iso_timestamps() -> None:

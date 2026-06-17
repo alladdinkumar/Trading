@@ -8,7 +8,12 @@ from pathlib import Path
 import pytest
 
 from trading.store.db import get_conn
-from trading.store.migrations import CURRENT_VERSION, run_migrations
+from trading.store.migrations import (
+    CURRENT_VERSION,
+    SCHEMA_V1,
+    SCHEMA_V2,
+    run_migrations,
+)
 
 EXPECTED_TABLES = {
     "schema_version",
@@ -108,6 +113,44 @@ def test_macro_regime_check(tmp_path: Path) -> None:
         run_migrations(conn)
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("INSERT INTO macro_snapshot (date, regime) VALUES ('2026-05-11', 'BAD')")
+
+
+def test_news_items_unique_index_rejects_duplicate(tmp_path: Path) -> None:
+    """F-016: a UNIQUE index on (source, headline, COALESCE(url,'')) blocks a raw
+    duplicate insert (the store uses INSERT OR IGNORE to lean on it)."""
+    with get_conn(tmp_path / "n.db") as conn:
+        run_migrations(conn)
+        conn.execute(
+            "INSERT INTO news_items (ts, source, headline, url) "
+            "VALUES ('t', 'mc', 'Reliance Q4 beat', 'https://x/1')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO news_items (ts, source, headline, url) "
+                "VALUES ('t', 'mc', 'Reliance Q4 beat', 'https://x/1')"
+            )
+
+
+def test_v3_collapses_preexisting_duplicate_news_rows(tmp_path: Path) -> None:
+    """Upgrading a v2 DB that already holds duplicate news rows collapses them to
+    one before installing the unique index (F-016)."""
+    db = tmp_path / "dup.db"
+    with get_conn(db) as conn:
+        # Stand the DB up at v2 (no dedup index yet) and seed duplicate rows.
+        conn.executescript(SCHEMA_V1)
+        conn.executescript(SCHEMA_V2)
+        conn.executemany(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, 'x')",
+            [(1,), (2,)],
+        )
+        dup = ("2026-05-13T10:00:00+00:00", "nse_events", "RVNL: Board Meeting", "https://nse?s=RVNL")
+        conn.executemany(
+            "INSERT INTO news_items (ts, source, headline, url) VALUES (?, ?, ?, ?)",
+            [dup, dup, dup],
+        )
+        run_migrations(conn)  # applies v3 → dedup + unique index
+        count = conn.execute("SELECT COUNT(*) AS c FROM news_items").fetchone()["c"]
+    assert count == 1
 
 
 def test_pk_composite_sentiment_daily(tmp_path: Path) -> None:

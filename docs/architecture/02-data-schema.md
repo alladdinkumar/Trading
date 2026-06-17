@@ -26,13 +26,16 @@ All of `data/` and `models/*.pkl` are gitignored runtime state.
   `row_factory = sqlite3.Row` (so callers index columns by name).
 - **Migrations** — `store/migrations.py::run_migrations(conn)` is idempotent and
   version-stamped. `schema_version` records each applied version with a UTC
-  timestamp. Current version is **2**:
+  timestamp. Current version is **3**:
   - **v1** — all 16 domain tables.
   - **v2** — adds `current_stop` + `atr_at_entry` to `paper_trades` so the
     trailing stop ratchets across daily MTM runs without re-deriving from
     history. Both nullable for legacy rows.
-- **Upgrade path** — future changes add a `SCHEMA_V3` constant + a `if current
-  < 3:` branch. Migrations only ever move forward; there is no down-migration.
+  - **v3** (F-016) — collapses any pre-existing duplicate `news_items` rows, then
+    adds the `idx_news_dedup` UNIQUE index on `(source, headline, COALESCE(url,''))`
+    so daily re-fetch (with `INSERT OR IGNORE`) is idempotent at the DB level.
+- **Upgrade path** — future changes add a `SCHEMA_V4` constant + a `if current
+  < 4:` branch. Migrations only ever move forward; there is no down-migration.
 
 ## 3. Entity-relationship view (active tables)
 

@@ -156,21 +156,24 @@ invalid hours/minutes.
   raising adapter contributes nothing, doesn't abort), **dedups by URL**, and
   attributes a symbol via `attribute_symbol` (whole-word, case-insensitive match
   against the alias map). Unmatched → `symbol=None` (still useful for
-  macro/sector narrative).
+  macro/sector narrative). NSE events carry a **per-event URL** (`event_url`,
+  pinning `(purpose, date)` into a fragment) so distinct events for one symbol no
+  longer share a landing-page URL and collapse (F-016).
 - **Alias map** comes from `default_aliases()` → the maintained
   `data/static/aliases.csv` (`load_aliases_map`), falling back to the built-in
   `DEFAULT_ALIASES` only on a fresh checkout without the CSV. The same map's keys
   drive the sentiment-rollup watch-list in `pre_open._step_news` / `cli news-pull`.
 
-> One real gap remains here for the Nifty-50 goal:
+> Both gaps here for the Nifty-50 goal are now closed:
 > - **✅ Alias coverage fixed (F-015, 2026-06-17).** `data/static/aliases.csv`
 >   now covers the full ingest universe — all 50 Nifty constituents + 8 holdings
 >   (58 symbols, `|`-separated company-name variants, ambiguous bare tokens
 >   avoided, `SBILIFE` ordered ahead of `SBIN`). Attribution + the rollup
 >   watch-list both read it, so `sentiment_daily` is no longer starved to 12 names.
-> - **Dedup is URL-only and within a single run.** NSE events re-fetched each day
->   (and re-pulled headlines) create duplicate `news_items` rows across runs —
->   there's no DB-level uniqueness on `url`/`headline`. → **F-016**.
+> - **✅ Dedup hardened (F-016, 2026-06-17).** Per-event URLs (`event_url`) stop
+>   distinct NSE events colliding within a run; the v3 `idx_news_dedup` UNIQUE
+>   index (`source, headline, COALESCE(url,'')`) + `INSERT OR IGNORE` make daily
+>   re-fetch idempotent at the DB level.
 
 ### 3.8 `sector.py` — sectoral relative strength
 - **11 NSE sector indices** (`SECTOR_TICKERS`) benchmarked against `^NSEI`
@@ -244,8 +247,10 @@ session; the batch Python reads files. See [00-overview §1](./00-overview.md).
   `data/static/aliases.csv` now spans the full 58-symbol ingest universe, so the
   critical-news veto (F-019) and per-symbol sentiment features get real coverage
   across candidates + holdings. → F-015.
-- **News table grows with duplicates.** URL-only, single-run dedup + daily event
-  re-fetch ⇒ duplicate rows accumulate. → F-016 (and F-013 retention).
+- **✅ (Fixed 2026-06-17) News duplicate rows.** Per-event NSE URLs (`event_url`)
+  + the v3 `idx_news_dedup` UNIQUE index and `INSERT OR IGNORE` make daily
+  re-fetch idempotent, so the table no longer accretes duplicates. → F-016.
+  (Unbounded *retention* of unique rows is still F-013.)
 - **Snapshot readers trust the skill.** Structural validation is just
   `Dataclass(**row)`; no schema/type enforcement at the boundary. → F-002.
 - **Naive local clock** in quote staleness assumes host == IST. → F-004/F-018.

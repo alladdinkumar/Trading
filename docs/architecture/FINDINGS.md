@@ -9,8 +9,8 @@
 ## Executive summary
 
 The architecture review (docs 00–08) produced **32 active findings** (1 earlier
-finding superseded). **12 are now fixed** (F-012, F-014, F-015, F-018, F-019,
-F-021, F-022, F-023, F-024, F-025, F-029, F-033), leaving **20 open**. The system is **well-engineered at the
+finding superseded). **13 are now fixed** (F-012, F-014, F-015, F-016, F-018, F-019,
+F-021, F-022, F-023, F-024, F-025, F-029, F-033), leaving **19 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -39,9 +39,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 2 | F-002, F-005† |
-| Med | 10 | F-001, F-003, F-006, F-007, F-008, F-010, F-016, F-020, F-026, F-032 |
+| Med | 9 | F-001, F-003, F-006, F-007, F-008, F-010, F-020, F-026, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 12 | F-012, F-014, F-015, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033 |
+| ✅ Fixed | 13 | F-012, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -76,7 +76,7 @@ The highest-leverage cluster; everything else is noise until these land.
 | ~~F-025~~ ✅ | Med | **Done (2026-06-16).** `ledger.buy_side_cost`/`sell_side_cost` reuse `backtest.costs`; `compute_trade_pnl` returns gross−round-trip costs (mirrors backtest `net_pnl`) and `reconcile.compute_paper_cash` debits `entry+buy_cost` / credits `exit−sell_cost`, so paper P&L + the F-023 equity curve carry the backtest's friction. Entry/exit price columns kept clean |
 | ~~F-022~~ ✅ | Med | **Done (2026-06-16).** `score_holding` scales the ±3 cut by votes_cast (`REFERENCE_BALLOT_SIZE=8`) so a technicals-only ballot reaches HOLD/EXIT not just TRIM; new `holding_context.build_holding_context` wires the latest `sentiment_daily` rollup (reviving the critical-news EXIT veto) + a static `data/static/fundamentals.csv` (`load_fundamentals_map`) into both `pre_open` and `monthly_sip` |
 | ~~F-015~~ ✅ | Med | **Done (2026-06-17).** `data/static/aliases.csv` (58 symbols = Nifty 50 + 8 holdings) + `load_aliases_map`/`default_aliases`; `fetch_all_news` + rollup watch-list read it; bare-token disambiguation (`SBILIFE` before `SBIN`) |
-| F-016 | Med | DB-level news dedup (unique index / insert-or-ignore) |
+| ~~F-016~~ ✅ | Med | **Done (2026-06-17).** v3 migration: `idx_news_dedup` UNIQUE(`source, headline, COALESCE(url,'')`) + `INSERT OR IGNORE`; NSE events get per-event URLs (`event_url`) so distinct events no longer collapse |
 | F-002 | High | Validate broker/quote JSON at the read boundary |
 | ~~F-021~~ ✅ | Med | **Done (2026-06-17).** `run_backtest` returns `total_costs = sum(t.costs_paid)`, so the aggregate carries buy + sell (was sell-only); accumulator + `_evaluate_exits` cost return removed |
 
@@ -100,8 +100,8 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > F-023 (paper-cash ledger) and F-029 (real predictions) also shipped
 > 2026-06-16 — **Wave 1 complete.** Wave 2 in progress: F-024 (days_held) +
 > F-025 (paper costs) + F-022 (health TRIM-bias) done 2026-06-16; F-021 (backtest
-> `total_costs` buy side) + F-015 (50-name alias map) done 2026-06-17. Next up:
-> F-016, F-002, …
+> `total_costs` buy side) + F-015 (50-name alias map) + F-016 (news dedup) done
+> 2026-06-17. Next up: F-002, …
 
 ## How to use this file
 
@@ -151,7 +151,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-013 | GAP | Low | 2 | No retention/compaction policy for `news_items` (append-only) or `data/raw/<date>/` JSON — unbounded growth | Open |
 | F-014 | GAP | High | 3 | Only 12 symbols have parquet OHLCV on disk → live candidate universe is 12, not the configured ~57 nor the required Nifty 50 | ✅ Fixed (2026-06-16) — all 50 Nifty + 8 holdings ingested; `candidates_total` 12→50 |
 | ~~F-015~~ | GAP | Med | 3 | ~~News symbol-attribution alias map covers only 12 symbols → sparse `sentiment_daily`, near-empty per-symbol sentiment/critical inputs~~ | ✅ Fixed 2026-06-17 — `data/static/aliases.csv` covers all 58 ingest symbols; attribution + rollup watch-list both read it |
-| F-016 | DEBT | Med | 3 | News dedup is URL-only and single-run; daily event/headline re-fetch creates duplicate `news_items` rows (no DB-level uniqueness) | Open |
+| ~~F-016~~ | DEBT | Med | 3 | ~~News dedup is URL-only and single-run; daily event/headline re-fetch creates duplicate `news_items` rows (no DB-level uniqueness)~~ | ✅ Fixed 2026-06-17 — v3 `idx_news_dedup` UNIQUE + `INSERT OR IGNORE`; NSE events get per-event URLs so distinct events stop colliding |
 | F-017 | INACC | Low | 3 | `macro_snapshot.dow_fut`/`nasdaq_fut` store spot index closes not futures; `sgx_nifty` always NULL | Open |
 | F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | ✅ Fixed (2026-06-16) — refresh step + scan staleness guard + Kite close cross-check; IST-clock centralisation ([[F-004]]) still open |
 | F-019 | VULN | High | 4 | 4 of 10 Layer-A rules (regime, fno_banned, t2t, critical_event) are unconditional passes — `pre_open`/`scan` build `ScanContext` with all defaults; risk vetoes + regime gate are dead despite the data being available | ✅ Fixed (2026-06-16) — `build_scan_context` wires regime/VIX + critical-news gates; `fno_banned`/`t2t` still await NSE feeds ([[F-010]]) |
@@ -335,11 +335,28 @@ critical-news inputs empty for most candidates (compounded [[F-011]]/[[F-019]]).
   the SBI/SBI-Life disambiguation. Watched the import fail first (RED), then green
   (9 tests); news + pre_open suites green, ruff + mypy clean.
 
-### F-016 — Duplicate news rows across runs (`DEBT`, Med, Phase 3)
-`fetch_all_news` dedups by URL within one call only; daily re-fetch of RSS + NSE
-events re-inserts the same headlines/events. No DB uniqueness constraint.
-- **Fix idea:** Unique index on `news_items(url)` (or `(date,url)`), or
-  insert-or-ignore; dedupe NSE events by `(symbol, purpose, event_date)`.
+### F-016 — Duplicate news rows across runs (`DEBT`, Med, Phase 3) — ✅ Fixed 2026-06-17
+**Was:** `fetch_all_news` deduped by URL within one call only; daily re-fetch of
+RSS + NSE events re-inserted the same rows with no DB uniqueness constraint. Worse,
+every NSE event for a symbol shared one landing-page URL, so even *within* a run
+distinct events (Board Meeting vs. Dividend) collapsed to a single row.
+
+**Resolution:**
+- `news.event_url(symbol, purpose, date_str)` pins each NSE event's identity into
+  a deterministic URL fragment, so distinct events get distinct URLs (and the same
+  event re-fetched later yields the same URL → dedupes cleanly).
+- Migration **v3** (`SCHEMA_V3`): `idx_news_dedup` UNIQUE on
+  `(source, headline, COALESCE(url,''))`. The `COALESCE` keeps null-URL macro
+  headlines deduping on `(source, headline)` instead of collapsing into one row.
+  Any pre-existing duplicate rows are collapsed (keep lowest `id`) before the
+  index is created.
+- `news_store.insert_news_items` now uses `INSERT OR IGNORE` and returns the count
+  *actually written* (via `conn.total_changes`), so a re-run of an identical batch
+  is a no-op returning 0.
+- TDD: 3 store tests (cross-run ignore, distinct-headlines-sharing-URL, null-URL
+  dedup) + 2 migration tests (unique-index rejects raw dup, v3 collapses
+  pre-existing dups) + 2 news tests (`event_url` uniqueness, orchestrator keeps
+  distinct NSE events). Full suite green, ruff + mypy clean.
 
 ### F-017 — Macro column labels misleading (`INACC`, Low, Phase 3)
 `dow_fut`/`nasdaq_fut` hold spot index closes (`^DJI`/`^IXIC`); `sgx_nifty`

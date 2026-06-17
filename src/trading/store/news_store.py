@@ -35,11 +35,13 @@ class SentimentDailyRow:
 
 
 def insert_news_items(conn: sqlite3.Connection, items: Iterable[NewsItem]) -> int:
-    """Insert a batch of news rows. Returns how many were inserted.
+    """Insert a batch of news rows. Returns how many were *newly* inserted.
 
-    No `INSERT OR IGNORE` here — callers dedupe by URL before this point
-    (see `news.fetch_all_news`). If we ever pull from overlapping batches,
-    add a UNIQUE(url) index in a v2 migration first.
+    `INSERT OR IGNORE` leans on the v3 `idx_news_dedup` unique index
+    (`source, headline, COALESCE(url,'')`) so a daily re-fetch of the same RSS
+    article or NSE event is a no-op rather than a duplicate row (F-016). The
+    return value is the count actually written (re-runs of identical batches
+    return 0), measured via `conn.total_changes`.
     """
     rows = [
         (
@@ -56,15 +58,16 @@ def insert_news_items(conn: sqlite3.Connection, items: Iterable[NewsItem]) -> in
     ]
     if not rows:
         return 0
+    before = conn.total_changes
     conn.executemany(
         """
-        INSERT INTO news_items (
+        INSERT OR IGNORE INTO news_items (
           ts, symbol, source, headline, url, sentiment, category, is_critical
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
         rows,
     )
-    return len(rows)
+    return conn.total_changes - before
 
 
 def _row_to_news_item(row: sqlite3.Row) -> NewsItem:

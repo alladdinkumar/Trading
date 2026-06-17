@@ -171,10 +171,28 @@ class NseEventsSource:
                     ts=ts,
                     source=self.name,
                     headline=headline,
-                    url=f"https://www.nseindia.com/companies-listing/corporate-filings-event-calendar?symbol={symbol}",
+                    url=event_url(symbol, purpose, date_str),
                 )
             )
         return out
+
+
+def event_url(symbol: str, purpose: str, date_str: str) -> str:
+    """Per-event URL for an NSE corporate event.
+
+    The NSE event-calendar page is the same per symbol, so keying dedup on the
+    bare symbol URL collapsed distinct events into one row (F-016). We pin the
+    event identity — `(purpose, date)` — into the URL fragment so each event is
+    unique while still linking to the symbol's calendar page. The fragment is
+    deterministic, so the same event re-fetched on a later run yields the same
+    URL and dedupes cleanly (in-run and via the DB unique index).
+    """
+    base = (
+        "https://www.nseindia.com/companies-listing/corporate-filings-event-calendar"
+        f"?symbol={symbol}"
+    )
+    fingerprint = re.sub(r"[^a-z0-9]+", "-", f"{purpose} {date_str}".lower()).strip("-")
+    return f"{base}#{fingerprint}" if fingerprint else base
 
 
 def _parse_event_date(s: str) -> datetime | None:

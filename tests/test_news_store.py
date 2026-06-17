@@ -57,6 +57,52 @@ def test_insert_news_items_empty_is_noop(conn: sqlite3.Connection) -> None:
     assert insert_news_items(conn, []) == 0
 
 
+def _news(headline: str, *, source: str = "mc", url: str | None = "https://x/1") -> NewsItem:
+    return NewsItem(
+        ts="2026-05-13T10:00:00+00:00",
+        symbol=None,
+        source=source,
+        headline=headline,
+        url=url,
+    )
+
+
+def test_insert_news_items_ignores_duplicate_across_runs(conn: sqlite3.Connection) -> None:
+    """F-016: re-inserting an identical row (same source/headline/url) is a DB
+    no-op, and the returned count reflects only the rows actually written."""
+    item = _news("Reliance Q4 beat")
+    assert insert_news_items(conn, [item]) == 1
+    assert insert_news_items(conn, [item]) == 0  # second run: nothing new
+    assert conn.execute("SELECT COUNT(*) AS c FROM news_items").fetchone()["c"] == 1
+
+
+def test_insert_news_items_keeps_distinct_headlines_sharing_url(
+    conn: sqlite3.Connection,
+) -> None:
+    """Dedup key includes the headline, so two events that share a URL both
+    persist (F-016 — NSE-style rows)."""
+    url = "https://nse?symbol=RVNL"
+    n = insert_news_items(
+        conn,
+        [
+            _news("RVNL: Board Meeting", source="nse_events", url=url),
+            _news("RVNL: Dividend", source="nse_events", url=url),
+        ],
+    )
+    assert n == 2
+    assert conn.execute("SELECT COUNT(*) AS c FROM news_items").fetchone()["c"] == 2
+
+
+def test_insert_news_items_dedups_null_url_by_headline(conn: sqlite3.Connection) -> None:
+    """Null-URL rows dedupe on (source, headline) rather than collapsing every
+    null-URL row into one (F-016)."""
+    macro = _news("Macro: Nifty closes higher", url=None)
+    other = _news("Macro: rupee weakens", url=None)
+    assert insert_news_items(conn, [macro, other]) == 2  # distinct headlines kept
+    assert insert_news_items(conn, [macro]) == 0  # exact repeat ignored
+    assert conn.execute("SELECT COUNT(*) AS c FROM news_items").fetchone()["c"] == 2
+
+
 def test_list_news_for_symbol_filters_by_symbol(conn: sqlite3.Connection) -> None:
     items = [
         NewsItem(
