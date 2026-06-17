@@ -214,8 +214,11 @@ the 1st even if a holiday.
   measures error against a real, per-signal target.
 - **✅ (Fixed 2026-06-16) The Phase 18.5 decision metric is now off a sound equity
   curve (F-023).** Paper cash is derived from the trade ledger and compounds
-  realised P&L (`compute_paper_cash`), so "OOS Sharpe > 1.0" can be trusted. Costs
-  still pending under F-025 (same debit/credit seam).
+  realised P&L (`compute_paper_cash`), so "OOS Sharpe > 1.0" can be trusted.
+- **✅ (Fixed 2026-06-16) Paper closes now carry the backtest's costs (F-025).**
+  `ledger.buy_side_cost`/`sell_side_cost` (reuse of `backtest.costs`) net Zerodha
+  charges + slippage into both `compute_trade_pnl` and `compute_paper_cash`, so the
+  equity curve and OOS Sharpe aren't inflated by cost-free paper fills.
 - **Health veto + sentiment unwired (F-022 extended).** Both `pre_open` and
   `monthly_sip` pass empty sentiment into health, disabling the critical-news EXIT
   veto on holdings.

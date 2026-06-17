@@ -8,7 +8,12 @@ from datetime import date
 
 import pytest
 
-from trading.paper.ledger import close_with_exit, log_signal_and_open_trade
+from trading.paper.ledger import (
+    buy_side_cost,
+    close_with_exit,
+    log_signal_and_open_trade,
+    sell_side_cost,
+)
 from trading.paper.reconcile import (
     compute_paper_cash,
     compute_portfolio_snapshot,
@@ -195,11 +200,12 @@ def test_snapshot_uses_bar_close_for_open_positions(conn: sqlite3.Connection) ->
         bars=bars,
         initial_capital=50_000,
     )
-    # Cash debited by the two opens: 50_000 - (100*10 + 200*5) = 48_000.
+    # Cash debited by the two opens incl. F-025 buy-side cost on each fill:
+    #   50_000 - (1000 + buy_side_cost(1000)) - (1000 + buy_side_cost(1000)).
     # Open mark value: 10*110 + 5*198 = 1100 + 990 = 2090.
-    # Equity = 48_000 + 2090 = 50_090 (an unrealised gain vs cost of 2000).
-    assert snap.cash == pytest.approx(48_000)
-    assert snap.equity == pytest.approx(48_000 + 1100 + 990)
+    expected_cash = 50_000 - (1000 + buy_side_cost(1000)) - (1000 + buy_side_cost(1000))
+    assert snap.cash == pytest.approx(expected_cash)
+    assert snap.equity == pytest.approx(expected_cash + 1100 + 990)
     holdings = json.loads(snap.holdings_json)
     assert holdings["A"]["value"] == pytest.approx(1100.0)
     assert holdings["B"]["value"] == pytest.approx(990.0)
@@ -220,10 +226,10 @@ def test_snapshot_falls_back_to_entry_price_when_bar_missing(conn: sqlite3.Conne
         bars={},
         initial_capital=50_000,
     )
-    # Cash debited 1000 (50_000 → 49_000); open value falls back to
-    # entry_price * qty = 1000 → equity nets back to the starting 50_000.
-    assert snap.cash == pytest.approx(49_000)
-    assert snap.equity == pytest.approx(50_000)
+    # Cash debited 1000 + buy_side_cost(1000) (F-025); open value falls back to
+    # entry_price * qty = 1000 → equity = 50_000 minus the buy-side cost only.
+    assert snap.cash == pytest.approx(49_000 - buy_side_cost(1000))
+    assert snap.equity == pytest.approx(50_000 - buy_side_cost(1000))
 
 
 def test_drawdown_computed_against_peak(conn: sqlite3.Connection) -> None:
@@ -290,7 +296,8 @@ def test_upsert_portfolio_snapshot_replaces_existing(conn: sqlite3.Connection) -
         "SELECT * FROM portfolio_snapshots WHERE date = ?", ("2026-05-15",)
     ).fetchall()
     assert len(rows) == 1
-    assert rows[0]["cash"] == pytest.approx(99_000)
+    # F-025: debit also carries the buy-side cost.
+    assert rows[0]["cash"] == pytest.approx(99_000 - buy_side_cost(1000))
 
 
 # ---------------------------------------------------------------------------
@@ -314,11 +321,12 @@ def test_paper_cash_debits_open_and_credits_close(conn: sqlite3.Connection) -> N
         qty=10,
         atr_at_entry=2.0,
     )
-    # While open: cash = 100_000 - 1000 = 99_000.
+    # While open: cash = 100_000 - 1000 - buy_side_cost(1000) (F-025).
+    open_cash = 100_000 - 1000 - buy_side_cost(1000)
     assert compute_paper_cash(
         conn, as_of=date(2026, 5, 5), initial_capital=100_000
-    ) == pytest.approx(99_000)
-    # Close at 115: credit 1150 → cash = 99_000 + 1150 = 100_150 (+150 realised).
+    ) == pytest.approx(open_cash)
+    # Close at 115: credit 1150 net of sell-side cost → +150 gross realised, less costs.
     close_with_exit(
         conn,
         won.paper_trade_id,
@@ -329,7 +337,7 @@ def test_paper_cash_debits_open_and_credits_close(conn: sqlite3.Connection) -> N
     )
     assert compute_paper_cash(
         conn, as_of=date(2026, 5, 11), initial_capital=100_000
-    ) == pytest.approx(100_150)
+    ) == pytest.approx(open_cash + 1150 - sell_side_cost(1150))
 
 
 def test_paper_cash_filters_future_trades_by_date(conn: sqlite3.Connection) -> None:
@@ -369,8 +377,10 @@ def test_equity_compounds_realised_pnl(conn: sqlite3.Connection) -> None:
     snap_win = compute_portfolio_snapshot(
         conn, as_of=date(2026, 5, 6), bars={}, initial_capital=100_000
     )
-    # +200 realised (20 * 10), no open positions → equity = 100_200.
-    assert snap_win.equity == pytest.approx(100_200)
+    # +200 gross realised (20 * 10), less round-trip costs (F-025); no open positions.
+    win_equity = 100_000 - 1000 - buy_side_cost(1000) + 1200 - sell_side_cost(1200)
+    assert snap_win.equity == pytest.approx(win_equity)
+    assert snap_win.equity < 100_200  # costs shave the gross gain
 
     loss = log_signal_and_open_trade(
         conn,
@@ -391,8 +401,10 @@ def test_equity_compounds_realised_pnl(conn: sqlite3.Connection) -> None:
     snap_loss = compute_portfolio_snapshot(
         conn, as_of=date(2026, 5, 9), bars={}, initial_capital=100_000
     )
-    # Net realised = +200 - 100 = +100 → equity = 100_100.
-    assert snap_loss.equity == pytest.approx(100_100)
+    # Net realised = +200 - 100 gross, less both round-trips' costs (F-025).
+    loss_equity = win_equity - 1000 - buy_side_cost(1000) + 900 - sell_side_cost(900)
+    assert snap_loss.equity == pytest.approx(loss_equity)
+    assert snap_loss.equity < 100_100  # costs below the gross net of +100
 
 
 # ---------------------------------------------------------------------------
@@ -427,10 +439,11 @@ def test_reconcile_day_writes_snapshot_and_returns_updates(conn: sqlite3.Connect
     assert len(result.prediction_updates) == 1
     assert result.prediction_updates[0].symbol == "A"
 
-    # Snapshot persisted. Closed A at 115 (entry 100, qty 10) → +150 realised,
-    # which now compounds into equity (F-023); no open positions remain.
+    # Snapshot persisted. Closed A at 115 (entry 100, qty 10) → +150 gross realised
+    # less round-trip costs (F-025), compounded into equity (F-023); no opens remain.
     row = conn.execute(
         "SELECT * FROM portfolio_snapshots WHERE date = ?", ("2026-05-11",)
     ).fetchone()
     assert row is not None
-    assert row["equity"] == pytest.approx(100_150)
+    expected_equity = 100_000 - 1000 - buy_side_cost(1000) + 1150 - sell_side_cost(1150)
+    assert row["equity"] == pytest.approx(expected_equity)

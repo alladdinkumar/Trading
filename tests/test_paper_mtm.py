@@ -9,7 +9,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from trading.paper.ledger import log_signal_and_open_trade, open_trades
+from trading.paper.ledger import (
+    buy_side_cost,
+    log_signal_and_open_trade,
+    open_trades,
+    sell_side_cost,
+)
 from trading.paper.mtm import (
     MtmResult,
     build_bars_from_history,
@@ -80,8 +85,11 @@ def test_mtm_stop_hit_closes_trade(conn: sqlite3.Connection) -> None:
     assert trade is not None
     assert trade.exit_reason == "STOP"
     assert trade.exit_price == pytest.approx(90.0)
-    assert trade.pnl == pytest.approx(-100.0)  # (90-100) * 10
-    assert trade.pnl_pct == pytest.approx(-10.0)
+    # F-025: net of round-trip costs. gross (90-100)*10 = -100, minus costs.
+    gross = (90.0 - 100.0) * 10
+    costs = buy_side_cost(100.0 * 10) + sell_side_cost(90.0 * 10)
+    assert trade.pnl == pytest.approx(gross - costs)
+    assert trade.pnl_pct == pytest.approx((gross - costs) / (100.0 * 10) * 100.0)
 
 
 def test_mtm_target_hit_closes_trade(conn: sqlite3.Connection) -> None:
@@ -95,7 +103,10 @@ def test_mtm_target_hit_closes_trade(conn: sqlite3.Connection) -> None:
     assert trade is not None
     assert trade.exit_reason == "TARGET"
     assert trade.exit_price == pytest.approx(120.0)
-    assert trade.pnl == pytest.approx(200.0)
+    # F-025: net of round-trip costs. gross (120-100)*10 = 200, minus costs.
+    gross = (120.0 - 100.0) * 10
+    costs = buy_side_cost(100.0 * 10) + sell_side_cost(120.0 * 10)
+    assert trade.pnl == pytest.approx(gross - costs)
 
 
 def test_mtm_time_stop_closes_at_close(conn: sqlite3.Connection) -> None:

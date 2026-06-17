@@ -38,9 +38,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 2 | F-002, F-005† |
-| Med | 14 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-022, F-025, F-026, F-032 |
+| Med | 13 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-022, F-026, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 7 | F-012, F-014, F-018, F-019, F-023, F-024, F-029 |
+| ✅ Fixed | 8 | F-012, F-014, F-018, F-019, F-023, F-024, F-025, F-029 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -65,14 +65,14 @@ The highest-leverage cluster; everything else is noise until these land.
 | ~~**F-014 + F-012**~~ ✅ | High/Med | **Done (2026-06-16).** Ingested OHLCV for all 50 Nifty constituents + 8 holdings; pinned `nifty50.txt` (candidate set) and rebuilt `universe.txt` (ingest set); added `load_candidate_universe()`; `_step_scan` now scans the 50; aligned `sector_map.csv`. Verified: `pre-open` `candidates_total` 12→50. *(`nifty200/` subdir rename deferred — cosmetic.)* | Unblocks the real universe **and** gives the ranker enough labels to ever promote |
 | ~~**F-018**~~ ✅ | High | **Done (2026-06-16).** New `data/ohlcv_refresh.py` (`refresh_ohlcv` + `cross_check_closes`); `pre_open._step_ohlcv` runs before the scan; `scan()` skips symbols whose last bar is >5 days stale (warns); `Candidate.bar_date` rendered in the brief; new `trading refresh-ohlcv` CLI | Prevents the scan running on stale prices |
 | ~~**F-019**~~ ✅ | High | **Done (2026-06-16).** `build_scan_context` populates `india_vix` (from `macro_snapshot`) + `critical_event_symbols` (from `sentiment_daily.has_critical`); `_step_scan`/CLI `scan` use it. Re-enables the regime/VIX gate + critical-news veto. `fno_ban`/`t2t` still need NSE feeds (F-010) | Re-enables 3 risk vetoes + the regime gate |
-| ~~**F-023**~~ ✅ | High | **Done (2026-06-16).** New `reconcile.compute_paper_cash` derives cash from the trade ledger (debit `entry×qty` on open, credit `exit×qty` on close); `compute_portfolio_snapshot`/`reconcile_day`/`run_post_close` now take `initial_capital` (not a constant `cash`); CLI `--cash` → `--capital`. Equity = derived cash + open MTM, so realised P&L compounds. Costs still excluded (F-025) | Makes the Phase-18.5 Sharpe metric trustworthy |
+| ~~**F-023**~~ ✅ | High | **Done (2026-06-16).** New `reconcile.compute_paper_cash` derives cash from the trade ledger (debit `entry×qty` on open, credit `exit×qty` on close); `compute_portfolio_snapshot`/`reconcile_day`/`run_post_close` now take `initial_capital` (not a constant `cash`); CLI `--cash` → `--capital`. Equity = derived cash + open MTM, so realised P&L compounds. Round-trip costs now netted in too (F-025) | Makes the Phase-18.5 Sharpe metric trustworthy |
 | ~~**F-029**~~ ✅ | Med | **Done (2026-06-16).** `strategy.exits.target_price` made public; `pre_open._step_auto_open` sets `signal.target = target_price(close, stop)` (the exit engine's `min(+20%, 2.5R)`) and drops the hardcoded `predicted_return_pct=20.0`, so the prediction defaults to the signal's implied target % and varies per signal | Makes calibration meaningful |
 
 ### Wave 2 — Correctness & accounting hygiene
 | ID | Sev | Fix |
 |---|---|---|
 | ~~F-024~~ ✅ | Med | **Done (2026-06-16).** `mtm._days_held` derives `days_held = np.busday_count(ts_entry, as_of)` instead of `+1` per MTM call, so the twice-daily mid-day + post-close passes no longer double-count; mirrors the backtest's per-trading-day count (weekends excluded; holidays ignored to avoid a network call) |
-| F-025 | Med | Apply slippage + charges in paper MTM (with the F-023 ledger) |
+| ~~F-025~~ ✅ | Med | **Done (2026-06-16).** `ledger.buy_side_cost`/`sell_side_cost` reuse `backtest.costs`; `compute_trade_pnl` returns gross−round-trip costs (mirrors backtest `net_pnl`) and `reconcile.compute_paper_cash` debits `entry+buy_cost` / credits `exit−sell_cost`, so paper P&L + the F-023 equity curve carry the backtest's friction. Entry/exit price columns kept clean |
 | F-022 | Med | Wire fundamentals + sentiment into health; implement vote-count threshold scaling |
 | F-015 | Med | Alias map for all 50 names |
 | F-016 | Med | DB-level news dedup (unique index / insert-or-ignore) |
@@ -97,8 +97,8 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > **Suggested first PR:** ~~F-014 + F-012 (Nifty-50 ingest).~~ ✅ **Shipped
 > 2026-06-16.** F-018 (OHLCV freshness guard), F-019 (ScanContext wiring),
 > F-023 (paper-cash ledger) and F-029 (real predictions) also shipped
-> 2026-06-16 — **Wave 1 complete.** Wave 2 started: F-024 (days_held) done
-> 2026-06-16. Next up: F-025 (paper costs), F-022, …
+> 2026-06-16 — **Wave 1 complete.** Wave 2 in progress: F-024 (days_held) +
+> F-025 (paper costs) done 2026-06-16. Next up: F-022, …
 
 ## How to use this file
 
@@ -157,7 +157,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-022 | VULN | Med | 5 | Health scorer structurally TRIM-biased: fundamentals AND sentiment never wired (pre_open/monthly_sip pass empty snapshots) → technicals-only + critical-news EXIT veto dead; docstring claims vote-count scaling not implemented (fixed ±3) | Open |
 | ~~F-023~~ | VULN | High | 5 | ~~Paper equity curve never compounds realised P&L — cash is a constant; closing a winner drops its gain from `portfolio_snapshots.equity`. Equity/drawdown are not a true track record~~ | ✅ Fixed 2026-06-16 — `compute_paper_cash` derives cash from the ledger; equity = derived cash + open MTM, so realised P&L compounds |
 | ~~F-024~~ | VULN | Med | 5 | ~~`days_held` bumped per MTM call, so mid-day + post-close double-count → 25-day time stop fires at ~12 calendar days~~ | ✅ Fixed 2026-06-16 — `days_held = np.busday_count(ts_entry, as_of)`, derived not incremented, so same-day passes don't double-count |
-| F-025 | INACC | Med | 5 | Cost asymmetry: backtest applies full Zerodha costs but live paper MTM applies none (raw-price fills) → paper results flatter than backtest | Open |
+| ~~F-025~~ | INACC | Med | 5 | ~~Cost asymmetry: backtest applies full Zerodha costs but live paper MTM applies none (raw-price fills) → paper results flatter than backtest~~ | ✅ Fixed 2026-06-16 — `ledger.buy_side_cost`/`sell_side_cost` reuse the backtest cost model; `compute_trade_pnl` nets round-trip costs into pnl and `compute_paper_cash` debits/credits them, so paper P&L + equity carry the same friction as the backtest |
 | F-026 | GAP | Med | 6 | Analyst narrative is unvalidated against the bundle — "evidence-first" is an LLM instruction, not a code check; wrong/invented numbers in brief.md pass through. Refuse-stale (12h) is also advisory-only | Open |
 | F-027 | DEBT | Low | 6 | Brittle 3-way coupling on the `### SYM — passes N/M rules` heading (context renderer / pre_open_iep rewrite / briefing regex), no spanning test | Open |
 | F-028 | INACC | Low | 6 | `assemble_context` docstring omits the sector + Layer-B ranker sections (added Phases 12.6/16) | Open |
@@ -429,8 +429,9 @@ table stats are still fine).~~
   cash + open MTM, so closing a winner raises the curve and a loser lowers it.
   CLI option `--cash` renamed to `--capital`. Tests assert a closed winner lifts
   equity above seed and a loser drops it below.
-- **Still open (F-025):** buy/sell costs are not yet applied — they plug into the
-  same debit/credit seam (`qty×entry + buy_costs` / `qty×exit − sell_costs`).
+- **✅ Costs now applied (F-025, 2026-06-16):** buy/sell costs plug into the same
+  debit/credit seam (`qty×entry + buy_side_cost` / `qty×exit − sell_side_cost`) and
+  net into `compute_trade_pnl`, so the equity curve carries the backtest's friction.
 
 ### F-024 — `days_held` double-counts (`VULN`, Med, Phase 5) — ✅ Fixed 2026-06-16
 `mtm.mtm_open_trades` bumped `days_held` per call; mid-day + post-close = 2/day,
@@ -445,11 +446,21 @@ so the 25-day time stop fired at ~12 calendar days.
   fetch). Tests: same-day double-count regression + updated time-stop fixture
   (entry 2026-04-13 → 25 business days at 2026-05-16).
 
-### F-025 — Backtest/paper cost asymmetry (`INACC`, Med, Phase 5)
-Backtest applies full Zerodha costs + slippage; live paper MTM applies none.
-Paper P&L is systematically rosier than the backtest that justifies the strategy.
-- **Fix idea:** Apply `apply_slippage` + buy/sell charges in `mtm`/`ledger` close
-  (tie to the F-023 cash ledger so both land together).
+### F-025 — Backtest/paper cost asymmetry (`INACC`, Med, Phase 5) — ✅ Fixed 2026-06-16
+Backtest applies full Zerodha costs + slippage; live paper MTM applied none.
+Paper P&L was systematically rosier than the backtest that justifies the strategy.
+- **Fixed:** new `ledger.buy_side_cost` / `ledger.sell_side_cost` reuse the backtest
+  cost model (`backtest.costs.buy_charges`/`sell_charges` + per-side slippage as a
+  cash drag) — no import cycle (`backtest.costs` is stdlib-only). Both close paths
+  now net these in: `compute_trade_pnl` returns `pnl_abs = gross − (buy_side_cost +
+  sell_side_cost)` (and `pnl_pct` on that net), mirroring the backtest's `net_pnl`;
+  and `reconcile.compute_paper_cash` debits `entry_value + buy_side_cost` on open and
+  credits `exit_value − sell_side_cost` on close, so the F-023 equity curve carries
+  the same friction. Entry/exit price columns stay clean (decision prices) so
+  predictions/targets/display are unaffected. Costs are per-row (₹20 brokerage cap +
+  GST make them non-linear), so cash iterates rows rather than SUMming in SQL.
+  Tests: ledger pnl (win/loss/zero-entry), mtm stop/target pnl, reconcile cash/equity
+  + reconcile_day, post_close summary — all assert gross-minus-cost expecteds.
 
 ---
 

@@ -8,11 +8,13 @@ from datetime import datetime
 import pytest
 
 from trading.paper.ledger import (
+    buy_side_cost,
     close_with_exit,
     compute_trade_pnl,
     days_between,
     log_signal_and_open_trade,
     open_trades,
+    sell_side_cost,
 )
 from trading.store.migrations import run_migrations
 from trading.store.repo import (
@@ -128,20 +130,29 @@ def test_log_and_open_accepts_datetime_entry_ts(conn: sqlite3.Connection) -> Non
 
 
 def test_compute_trade_pnl_positive() -> None:
+    """F-025: pnl is gross minus round-trip costs (charges + slippage)."""
     pnl, pct = compute_trade_pnl(entry_price=100.0, exit_price=120.0, qty=10)
-    assert pnl == pytest.approx(200.0)
-    assert pct == pytest.approx(20.0)
+    gross = (120.0 - 100.0) * 10
+    costs = buy_side_cost(100.0 * 10) + sell_side_cost(120.0 * 10)
+    assert pnl == pytest.approx(gross - costs)
+    assert pnl < gross  # costs strictly reduce a winner
+    assert pct == pytest.approx(pnl / (100.0 * 10) * 100.0)
 
 
 def test_compute_trade_pnl_negative() -> None:
+    """Costs make a loser slightly worse than the gross price move."""
     pnl, pct = compute_trade_pnl(entry_price=100.0, exit_price=90.0, qty=10)
-    assert pnl == pytest.approx(-100.0)
-    assert pct == pytest.approx(-10.0)
+    gross = (90.0 - 100.0) * 10
+    costs = buy_side_cost(100.0 * 10) + sell_side_cost(90.0 * 10)
+    assert pnl == pytest.approx(gross - costs)
+    assert pnl < gross  # -100 minus costs
+    assert pct == pytest.approx(pnl / (100.0 * 10) * 100.0)
 
 
 def test_compute_trade_pnl_zero_entry_returns_zero_pct() -> None:
     pnl, pct = compute_trade_pnl(entry_price=0.0, exit_price=10.0, qty=5)
-    assert pnl == pytest.approx(50.0)
+    # entry_value == 0 → no buy cost; only the sell-side cost applies.
+    assert pnl == pytest.approx(50.0 - sell_side_cost(10.0 * 5))
     assert pct == 0.0
 
 
@@ -170,8 +181,10 @@ def test_close_with_exit_persists_pnl_and_reason(conn: sqlite3.Connection) -> No
         days_held=5,
     )
     assert closed.exit_reason == "TARGET"
-    assert closed.pnl == pytest.approx(600.0)
-    assert closed.pnl_pct == pytest.approx(20.0)
+    gross = (360.0 - 300.0) * 10
+    costs = buy_side_cost(300.0 * 10) + sell_side_cost(360.0 * 10)
+    assert closed.pnl == pytest.approx(gross - costs)
+    assert closed.pnl_pct == pytest.approx((gross - costs) / (300.0 * 10) * 100.0)
     assert closed.days_held == 5
     assert closed.ts_exit == "2026-05-20T15:30:00"
 

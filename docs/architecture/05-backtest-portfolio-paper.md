@@ -175,8 +175,15 @@ equity row (cash + open-position MTM, peak-relative drawdown).
 > reproduces that day's balance. `compute_portfolio_snapshot` calls it, so
 > `equity` = derived cash + open-position MTM and a closed winner's gain stays in
 > the curve. `reconcile_day`/`run_post_close` and the CLI now take
-> `initial_capital` (was the constant `cash`; `--cash` → `--capital`). Costs are
-> still excluded — that plugs into the same debit/credit seam under F-025.
+> `initial_capital` (was the constant `cash`; `--cash` → `--capital`).
+>
+> **✅ Round-trip costs now netted in (F-025, fixed 2026-06-16):** the same
+> debit/credit seam carries Zerodha charges + slippage via `ledger.buy_side_cost` /
+> `sell_side_cost` (reuse of `backtest.costs`). Open debits `entry_value +
+> buy_side_cost`, close credits `exit_value − sell_side_cost`, and
+> `compute_trade_pnl` nets both into `pnl` (mirrors the backtest's `net_pnl`).
+> Entry/exit price columns stay clean (decision prices); costs are per-row (₹20 cap
+> + GST are non-linear), so cash iterates rows rather than SUMming in SQL.
 
 ---
 
@@ -185,8 +192,8 @@ equity row (cash + open-position MTM, peak-relative drawdown).
 - **✅ Equity curve reflects realised P&L (F-023, fixed 2026-06-16).** Cash is
   derived from the trade ledger (`compute_paper_cash`: debit on open, credit on
   close) and equity = derived cash + open MTM, mirroring the backtest engine. The
-  headline performance artifact is now a true track record. Costs/slippage still
-  pending under F-025 (same debit/credit seam).
+  headline performance artifact is now a true track record. Costs/slippage now
+  netted in too (F-025, 2026-06-16) via the same debit/credit seam.
 - **✅ `days_held` double-count fixed (F-024, 2026-06-16).** Derived from
   `ts_entry`→`as_of` via `np.busday_count` instead of incremented per MTM call,
   so the twice-daily passes no longer double-count.
@@ -196,9 +203,11 @@ equity row (cash + open-position MTM, peak-relative drawdown).
   fetched and the threshold-scaling described in the docstring isn't implemented.
   Either wire a fundamentals source or scale thresholds by `votes_cast` as
   documented.
-- **Cost model asymmetry:** the backtest applies full Zerodha costs, but paper
-  MTM applies **none** — paper "fills" are at the raw bar/quote price with no
-  slippage or charges. Paper results will look better than the backtest predicts.
-  → F-025.
+- **✅ Cost model asymmetry fixed (F-025, 2026-06-16):** paper closes now net
+  the same Zerodha charges + slippage as the backtest (`ledger.buy_side_cost` /
+  `sell_side_cost` over `backtest.costs`), applied in both `compute_trade_pnl` and
+  `compute_paper_cash`. Paper P&L and the equity curve no longer read rosier than
+  the backtest. Fills still mark at the raw bar/quote price (slippage enters as a
+  cash drag, not a price shift on the stored fill — keeps entry/exit columns clean).
 - **GTT/health depend on parquet that mostly doesn't exist** (F-014) — many
   holdings/GTTs can't be projected until the universe is ingested.

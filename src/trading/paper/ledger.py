@@ -19,6 +19,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from trading.backtest.costs import CostConfig, buy_charges, sell_charges
 from trading.store.repo import (
     ExitReason,
     PaperTrade,
@@ -31,6 +32,24 @@ from trading.store.repo import (
     insert_signal,
     list_open_paper_trades,
 )
+
+
+def buy_side_cost(value: float, cfg: CostConfig | None = None) -> float:
+    """Total buy-side cost on a ₹`value` fill: explicit Zerodha charges + slippage.
+
+    Reuses the backtest cost model so paper trading carries the same friction as
+    the backtest that justifies the strategy — otherwise paper P&L and the equity
+    curve read systematically rosier than the backtest (F-025). Slippage is the
+    backtest's per-side price shift expressed as a cash drag (`value × slippage`).
+    """
+    c = cfg or CostConfig()
+    return buy_charges(value, c).total + value * c.slippage_pct
+
+
+def sell_side_cost(value: float, cfg: CostConfig | None = None) -> float:
+    """Total sell-side cost on a ₹`value` fill: explicit charges + slippage (F-025)."""
+    c = cfg or CostConfig()
+    return sell_charges(value, c).total + value * c.slippage_pct
 
 
 @dataclass(frozen=True)
@@ -105,9 +124,19 @@ def compute_trade_pnl(
     exit_price: float,
     qty: int,
 ) -> tuple[float, float]:
-    """Return `(pnl_abs, pnl_pct)`. `pnl_pct` is in percent units."""
-    pnl_abs = (exit_price - entry_price) * qty
-    pnl_pct = (exit_price - entry_price) / entry_price * 100.0 if entry_price > 0 else 0.0
+    """Return `(pnl_abs, pnl_pct)` net of round-trip costs.
+
+    `pnl_abs` is gross P&L minus buy-side + sell-side costs (charges + slippage),
+    mirroring the backtest's `net_pnl` so paper closes aren't rosier than the
+    backtest (F-025). `pnl_pct` is the net return on deployed capital
+    (net / entry_value), in percent units.
+    """
+    entry_value = entry_price * qty
+    exit_value = exit_price * qty
+    gross = exit_value - entry_value
+    costs = buy_side_cost(entry_value) + sell_side_cost(exit_value)
+    pnl_abs = gross - costs
+    pnl_pct = pnl_abs / entry_value * 100.0 if entry_value > 0 else 0.0
     return pnl_abs, pnl_pct
 
 

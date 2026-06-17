@@ -36,7 +36,7 @@ tech debt) are logged in [`FINDINGS.md`](./FINDINGS.md) for a dedicated fix pass
 | 8 | `08-ops-cli-ui.md` | `[x]` |
 
 **Currently working on:** _Fix pass — Wave 1. Shipped 2026-06-16: **F-014 + F-012** (Nifty-50 ingest; `candidates_total` 12→50), **F-018** (OHLCV freshness — `refresh_ohlcv` + scan staleness guard + Kite close cross-check + `trading refresh-ohlcv` CLI + `Candidate.bar_date`), **F-019** (`build_scan_context` wires the regime/VIX gate + critical-news veto from live macro/sentiment data; 8 of 10 Layer-A rules now filter), **F-023** (paper-cash ledger — `compute_paper_cash` derives cash from the trade history; equity now compounds realised P&L; CLI `--cash`→`--capital`), and **F-029** (predictions — `signal.target` now uses the exit engine's `min(+20%, 2.5R)` via the new public `target_price`; `predicted_return_pct` derives from that target, so calibration buckets vary per signal)._
-**Next up:** _Wave 1 complete (F-014/F-012, F-018, F-019, F-023, F-029). Wave 2 started: **F-024** done 2026-06-16 (`days_held = np.busday_count(ts_entry, as_of)`, no longer per-call → no double-count). Next: F-025 (paper costs, plugs into the F-023 cash seam), then F-022._
+**Next up:** _Wave 1 complete (F-014/F-012, F-018, F-019, F-023, F-029). Wave 2 in progress: **F-024** done 2026-06-16 (`days_held = np.busday_count(ts_entry, as_of)`, no longer per-call → no double-count) and **F-025** done 2026-06-16 (`ledger.buy_side_cost`/`sell_side_cost` net Zerodha charges + slippage into `compute_trade_pnl` + `compute_paper_cash`, so paper P&L + the F-023 equity curve carry the backtest's friction). Next: F-022._
 
 ---
 
@@ -75,7 +75,7 @@ and update any docs the fixes invalidate.
 - [x] **Phase 5 — Backtest + portfolio + paper (`backtest/`, `portfolio/`, `paper/`)**
   - [x] backtest: cost model, event-loop engine (+F-021 cost bug), walk-forward, metrics
   - [x] portfolio: health (+F-022 TRIM bias), GTT Monte-Carlo, SIP allocator
-  - [x] paper: ledger, MTM (+F-024 days_held), reconcile (+F-023 equity not compounded), +F-025 cost asymmetry
+  - [x] paper: ledger (+F-025 round-trip costs), MTM (+F-024 days_held), reconcile (+F-023 equity compounds, +F-025 cost-adjusted cash)
 - [x] **Phase 6 — LLM layer + Claude Code skills (`llm/`, `.claude/skills/`)**
   - [x] human/LLM-in-the-loop contract; context.py bundle; briefing.py compile
   - [x] the 3 skills (kite-snapshot, kite-quotes-snapshot, analyst); trust-boundary table

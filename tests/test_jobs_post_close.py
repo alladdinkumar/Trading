@@ -18,6 +18,7 @@ from trading.jobs.post_close import (
     PostCloseResult,
     run_post_close,
 )
+from trading.paper.ledger import buy_side_cost, sell_side_cost
 from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
 
@@ -133,9 +134,17 @@ def test_run_post_close_apply_closes_time_stop_and_writes_summary(paths) -> None
             ("2026-05-16",),
         ).fetchone()
     assert snap is not None
-    # F-023: cash now reflects the closed trade — debit 305*32, credit 290*32
-    # → 100_000 - 9760 + 9280 = 99_520 (a -480 realised loss compounded in).
-    assert snap["cash"] == pytest.approx(99_520.0)
+    # F-023 + F-025: cash reflects the closed trade net of round-trip costs —
+    # debit 305*32 + buy_side_cost, credit 290*32 - sell_side_cost.
+    entry_value, exit_value = 305.0 * 32, 290.0 * 32
+    expected_cash = (
+        100_000.0
+        - entry_value
+        - buy_side_cost(entry_value)
+        + exit_value
+        - sell_side_cost(exit_value)
+    )
+    assert snap["cash"] == pytest.approx(expected_cash)
     assert result.equity == snap["equity"]
     # markdown written
     assert result.summary_path is not None

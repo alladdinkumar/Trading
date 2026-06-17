@@ -20,7 +20,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from trading.paper.ledger import open_trades
+from trading.paper.ledger import buy_side_cost, open_trades, sell_side_cost
 from trading.strategy.exits import Bar
 
 # Starting paper capital. The *live* cash balance is not this constant — it is
@@ -157,24 +157,35 @@ def compute_paper_cash(
     Trades are filtered by date so re-running an *old* `as_of` reproduces
     the balance as it stood that day (future opens/closes are excluded).
 
-    Costs/slippage are intentionally not applied here yet — that is F-025,
-    which plugs the buy/sell charges into this same debit/credit seam.
+    Buy/sell costs (Zerodha charges + slippage) are applied per fill via the
+    backtest cost model (F-025): opening debits `entry_value + buy_side_cost`,
+    closing credits `exit_value − sell_side_cost`, so the equity curve carries
+    the same friction as the backtest. Costs are per-row (the ₹20 brokerage cap
+    and GST make them non-linear), so we iterate rather than SUM in SQL.
     """
     as_of_iso = as_of.isoformat()
-    debit = conn.execute(
-        """SELECT COALESCE(SUM(entry_price * qty), 0.0) AS d
-           FROM paper_trades
+    cash = initial_capital
+
+    open_rows = conn.execute(
+        """SELECT entry_price, qty FROM paper_trades
            WHERE date(ts_entry) <= ?""",
         (as_of_iso,),
-    ).fetchone()["d"]
-    credit = conn.execute(
-        """SELECT COALESCE(SUM(exit_price * qty), 0.0) AS c
-           FROM paper_trades
+    ).fetchall()
+    for row in open_rows:
+        entry_value = float(row["entry_price"]) * row["qty"]
+        cash -= entry_value + buy_side_cost(entry_value)
+
+    closed_rows = conn.execute(
+        """SELECT exit_price, qty FROM paper_trades
            WHERE ts_exit IS NOT NULL AND exit_price IS NOT NULL
              AND date(ts_exit) <= ?""",
         (as_of_iso,),
-    ).fetchone()["c"]
-    return initial_capital - float(debit) + float(credit)
+    ).fetchall()
+    for row in closed_rows:
+        exit_value = float(row["exit_price"]) * row["qty"]
+        cash += exit_value - sell_side_cost(exit_value)
+
+    return cash
 
 
 # ---------------------------------------------------------------------------
