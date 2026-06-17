@@ -8,9 +8,9 @@
 
 ## Executive summary
 
-The architecture review (docs 00–08) produced **31 active findings** (1 earlier
-finding superseded). **2 are now fixed** (F-014, F-012 — Nifty-50 ingest,
-shipped 2026-06-16), leaving **29 open**. The system is **well-engineered at the
+The architecture review (docs 00–08) produced **32 active findings** (1 earlier
+finding superseded). **11 are now fixed** (F-012, F-014, F-018, F-019, F-021,
+F-022, F-023, F-024, F-025, F-029, F-033), leaving **21 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -38,9 +38,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 2 | F-002, F-005† |
-| Med | 12 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-026, F-032 |
+| Med | 11 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-026, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 10 | F-012, F-014, F-018, F-019, F-022, F-023, F-024, F-025, F-029, F-033 |
+| ✅ Fixed | 11 | F-012, F-014, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -49,7 +49,7 @@ future Phase 19 — out of scope for hardening the paper run.
 |---|---:|
 | VULN (correctness/data-integrity) | 6 (F-019 ✅, F-022 ✅, F-023 ✅, F-024 ✅, F-029 ✅, F-033 ✅) |
 | GAP (missing functionality/guardrail) | 11 |
-| INACC (code ≠ spec/docstring) | 7 |
+| INACC (code ≠ spec/docstring) | 7 (F-021 ✅) |
 | DEBT (cleanup) | 8 |
 
 ## Remediation roadmap
@@ -77,7 +77,7 @@ The highest-leverage cluster; everything else is noise until these land.
 | F-015 | Med | Alias map for all 50 names |
 | F-016 | Med | DB-level news dedup (unique index / insert-or-ignore) |
 | F-002 | High | Validate broker/quote JSON at the read boundary |
-| F-021 | Med | Add buy-side charges to backtest `total_costs` |
+| ~~F-021~~ ✅ | Med | **Done (2026-06-17).** `run_backtest` returns `total_costs = sum(t.costs_paid)`, so the aggregate carries buy + sell (was sell-only); accumulator + `_evaluate_exits` cost return removed |
 
 ### Wave 3 — Robustness & ops
 F-003 (half-run/run-state detection), F-032 (run broker-free steps unattended),
@@ -98,7 +98,8 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > 2026-06-16.** F-018 (OHLCV freshness guard), F-019 (ScanContext wiring),
 > F-023 (paper-cash ledger) and F-029 (real predictions) also shipped
 > 2026-06-16 — **Wave 1 complete.** Wave 2 in progress: F-024 (days_held) +
-> F-025 (paper costs) + F-022 (health TRIM-bias) done 2026-06-16. Next up: F-021, …
+> F-025 (paper costs) + F-022 (health TRIM-bias) done 2026-06-16; F-021 (backtest
+> `total_costs` buy side) done 2026-06-17. Next up: F-015, F-016, F-002, …
 
 ## How to use this file
 
@@ -153,7 +154,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | ✅ Fixed (2026-06-16) — refresh step + scan staleness guard + Kite close cross-check; IST-clock centralisation ([[F-004]]) still open |
 | F-019 | VULN | High | 4 | 4 of 10 Layer-A rules (regime, fno_banned, t2t, critical_event) are unconditional passes — `pre_open`/`scan` build `ScanContext` with all defaults; risk vetoes + regime gate are dead despite the data being available | ✅ Fixed (2026-06-16) — `build_scan_context` wires regime/VIX + critical-news gates; `fno_banned`/`t2t` still await NSE feeds ([[F-010]]) |
 | F-020 | INACC | Med | 4 | Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate) — different thresholds/inputs (the rule is now live as of F-019, sharpening the naming-collision risk) | Open |
-| F-021 | INACC | Med | 5 | `BacktestResult.total_costs` omits buy-side charges (only sell-side accumulated); aggregate cost-drag understated (per-trade `costs_paid` is correct) | Open |
+| ~~F-021~~ | INACC | Med | 5 | ~~`BacktestResult.total_costs` omits buy-side charges (only sell-side accumulated); aggregate cost-drag understated (per-trade `costs_paid` is correct)~~ | ✅ Fixed 2026-06-17 — `total_costs = sum(t.costs_paid)` (buy + sell) |
 | ~~F-022~~ | VULN | Med | 5 | ~~Health scorer structurally TRIM-biased: fundamentals AND sentiment never wired (pre_open/monthly_sip pass empty snapshots) → technicals-only + critical-news EXIT veto dead; docstring claims vote-count scaling not implemented (fixed ±3)~~ | ✅ Fixed 2026-06-16 — votes_cast scaling in `score_holding`; sentiment + static-CSV fundamentals wired into both jobs via `build_holding_context`; critical-news EXIT veto live |
 | ~~F-023~~ | VULN | High | 5 | ~~Paper equity curve never compounds realised P&L — cash is a constant; closing a winner drops its gain from `portfolio_snapshots.equity`. Equity/drawdown are not a true track record~~ | ✅ Fixed 2026-06-16 — `compute_paper_cash` derives cash from the ledger; equity = derived cash + open MTM, so realised P&L compounds |
 | ~~F-024~~ | VULN | Med | 5 | ~~`days_held` bumped per MTM call, so mid-day + post-close double-count → 25-day time stop fires at ~12 calendar days~~ | ✅ Fixed 2026-06-16 — `days_held = np.busday_count(ts_entry, as_of)`, derived not incremented, so same-day passes don't double-count |
@@ -399,12 +400,20 @@ sizing multiplier) vs `strategy.rules.passes_regime` (gate: VIX<25 AND Nifty-200
 
 ---
 
-### F-021 — Backtest total_costs omits buy side (`INACC`, Med, Phase 5)
-`engine._evaluate_exits` returns only sell-side charges; `run_backtest` adds just
-that to `total_costs`. Buy-side charges (in `_OpenPosition.buy_costs_paid`) reach
-`Trade.costs_paid` but not the aggregate.
-- **Fix idea:** Return/accumulate buy charges from `_execute_pending`; or compute
-  `total_costs = sum(t.costs_paid)` at the end. Optionally report slippage drag.
+### F-021 — Backtest total_costs omits buy side (`INACC`, Med, Phase 5) — ✅ Fixed 2026-06-17
+`engine._evaluate_exits` returned only sell-side charges; `run_backtest` added
+just that to `total_costs`. Buy-side charges (in `_OpenPosition.buy_costs_paid`)
+reached `Trade.costs_paid` but not the aggregate, so the headline cost-drag
+understated friction by ~the buy-side half (per-trade `costs_paid` was correct).
+- **Fixed:** `run_backtest` now computes `total_costs = sum(t.costs_paid for t in
+  completed_trades)` after the loop — each `Trade.costs_paid` already carries buy
+  + sell (and buy-only for `OPEN_AT_END`), so the aggregate is exact. The running
+  accumulator + `_evaluate_exits`' separate `costs_total` return (and the stale
+  "clean approach below" comment) were removed. Slippage stays out of `costs` (a
+  price shift captured in gross P&L). Test:
+  `test_total_costs_includes_buy_and_sell_side` asserts
+  `total_costs == sum(costs_paid)` (watched fail at sell-only 34.03 vs 65.48, then
+  pass); full engine + walkforward suites green, ruff + mypy clean.
 
 ### F-022 — Health scorer TRIM-biased (`VULN`, Med, Phase 5) — ✅ Fixed 2026-06-16
 Two compounding issues: (a) fundamentals AND sentiment were never wired —
@@ -583,6 +592,6 @@ This is the concrete data-integrity instance of the coupling flagged in [[F-027]
 
 ---
 
-_Counts: 22 open · 1 superseded · 10 fixed (F-012, F-014, F-018, F-019, F-022,
-F-023, F-024, F-025, F-029, F-033). Updated 2026-06-17 (F-033 — symbol-regex fix,
-found during the daily run)._
+_Counts: 21 open · 1 superseded · 11 fixed (F-012, F-014, F-018, F-019, F-021,
+F-022, F-023, F-024, F-025, F-029, F-033). Updated 2026-06-17 (F-021 — backtest
+`total_costs` now sums per-trade buy+sell charges)._

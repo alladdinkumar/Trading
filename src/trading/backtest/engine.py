@@ -178,7 +178,6 @@ def run_backtest(
     all_dates = _trading_dates(enriched, start, end)
 
     cash = config.initial_capital
-    total_costs = 0.0
     completed_trades: list[Trade] = []
     open_positions: dict[str, _OpenPosition] = {}
     pending: list[_PendingOrder] = []
@@ -189,13 +188,10 @@ def run_backtest(
         cash, pending = _execute_pending(
             d, pending, enriched, config, open_positions, cash_ref=cash
         )
-        # _execute_pending mutates open_positions and accumulates costs via closure-side-effect.
-        # Re-pull total_costs increment by re-summing — clean approach below.
 
         # 2. Evaluate exits on currently-open positions.
-        cash, exits_costs, exits = _evaluate_exits(d, open_positions, enriched, config, cash)
+        cash, exits = _evaluate_exits(d, open_positions, enriched, config, cash)
         completed_trades.extend(exits)
-        total_costs += exits_costs
 
         # 3. Mark-to-market today's close.
         equity_records.append((d, _mark_to_market(d, cash, open_positions, enriched)))
@@ -220,6 +216,10 @@ def run_backtest(
 
     equity_curve = pd.Series(dict(equity_records), name="equity", dtype=float).sort_index()
     daily_returns = equity_curve.pct_change().fillna(0.0)
+
+    # Aggregate cost drag = sum of per-trade charges, which already carry both
+    # buy- and sell-side (and buy-only for OPEN_AT_END) — see F-021.
+    total_costs = sum(t.costs_paid for t in completed_trades)
 
     return BacktestResult(
         config=config,
@@ -293,9 +293,8 @@ def _evaluate_exits(
     enriched: Mapping[str, pd.DataFrame],
     config: BacktestConfig,
     cash: float,
-) -> tuple[float, float, list[Trade]]:
+) -> tuple[float, list[Trade]]:
     exits: list[Trade] = []
-    costs_total = 0.0
     for sym in list(open_positions.keys()):
         pos = open_positions[sym]
         df = enriched[sym]
@@ -327,7 +326,6 @@ def _evaluate_exits(
         sell_value = exit_slipped * pos.qty
         sell_breakdown = sell_charges(sell_value, config.costs)
         cash += sell_value - sell_breakdown.total
-        costs_total += sell_breakdown.total
 
         gross = (exit_slipped - pos.entry_price) * pos.qty
         costs_paid = pos.buy_costs_paid + sell_breakdown.total
@@ -347,7 +345,7 @@ def _evaluate_exits(
             )
         )
         del open_positions[sym]
-    return cash, costs_total, exits
+    return cash, exits
 
 
 def _mark_to_market(

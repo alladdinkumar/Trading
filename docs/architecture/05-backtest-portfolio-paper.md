@@ -69,14 +69,14 @@ flowchart LR
   injects `RankerSignalProvider` through the same seam.
 - **Force-close** any still-open positions at the last in-window close.
 
-> **🔴 Cost-accounting bug (F-021):** `_evaluate_exits` adds only the **sell-side**
-> charges to the returned `costs_total` (line 330); the engine's `total_costs`
-> accumulator never adds the **buy-side** charges (the awkward comment at lines
-> 192–194 admits the "clean approach" was never finished). Per-trade
-> `Trade.costs_paid` *is* correct (buy + sell), but `BacktestResult.total_costs`
-> understates total friction by roughly the buy-side half. Slippage is never in
-> `costs` at all (it's a price shift) — fine, but worth stating when reporting
-> "cost drag." → F-021.
+> **✅ Cost-accounting (F-021, fixed 2026-06-17):** `BacktestResult.total_costs`
+> is now computed as `sum(t.costs_paid for t in completed_trades)` at the end of
+> `run_backtest`, so it carries both **buy-** and **sell-side** charges (and
+> buy-only for `OPEN_AT_END` force-closes) — matching the per-trade
+> `Trade.costs_paid`. The previous running accumulator added only the sell side
+> and understated friction by roughly the buy-side half; `_evaluate_exits` no
+> longer returns a separate cost total. Slippage is still not in `costs` (it's a
+> price shift, captured in gross P&L) — worth stating when reporting "cost drag."
 
 ### 2.3 Walk-forward (`walkforward.py`) & metrics (`metrics.py`)
 - `windows()` enumerates rolling **3y train / 6mo test / 3mo step** folds;
@@ -201,8 +201,9 @@ equity row (cash + open-position MTM, peak-relative drawdown).
 - **✅ `days_held` double-count fixed (F-024, 2026-06-16).** Derived from
   `ts_entry`→`as_of` via `np.busday_count` instead of incremented per MTM call,
   so the twice-daily passes no longer double-count.
-- **Backtest `total_costs` understates friction (F-021).** Add buy-side charges
-  to the accumulator; consider also reporting slippage drag separately.
+- **✅ Backtest `total_costs` now includes buy side (F-021, 2026-06-17).**
+  `run_backtest` returns `sum(t.costs_paid)`, so the aggregate carries both buy-
+  and sell-side charges instead of sell-only.
 - **✅ Health TRIM-bias fixed (F-022, 2026-06-16).** `score_holding` scales the
   ±3 cut by `votes_cast` (`REFERENCE_BALLOT_SIZE`), and both jobs now wire the
   latest `sentiment_daily` rollup (critical-news EXIT veto live) + a static

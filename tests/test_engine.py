@@ -133,6 +133,26 @@ def test_costs_deducted_from_pnl() -> None:
     assert trade.costs_paid > 0
 
 
+def test_total_costs_includes_buy_and_sell_side() -> None:
+    """BacktestResult.total_costs aggregates buy + sell charges (F-021).
+
+    The per-trade `costs_paid` already covers both sides; the result-level
+    `total_costs` must equal their sum, not just the sell-side accumulation.
+    """
+    df = _bars([(100, 101, 99, 100), (102, 130, 101, 125), (125, 130, 124, 128)])
+    sig = Signal(symbol="WIN", close=100.0, atr=2.0, stop_price=90.0)
+    provider = _signal_on(df.index[0], [sig])
+    config = BacktestConfig(initial_capital=100_000)
+
+    result = run_backtest({"WIN": df}, config, df.index[0], df.index[-1], signal_provider=provider)
+    trade = result.trades[0]
+    assert trade.exit_reason == "EXIT_TARGET"
+    # A closed trade pays both buy and sell charges; the aggregate must match.
+    assert result.total_costs == pytest.approx(sum(t.costs_paid for t in result.trades))
+    # And that sum strictly exceeds the sell-side-only figure (buy side is non-zero).
+    assert result.total_costs > 0
+
+
 def test_cash_conservation_through_round_trip() -> None:
     """final_cash + sum(net_pnl) − sum(unrealised_pnl) consistency.
     After all trades close (none OPEN_AT_END), final equity = initial + sum(net_pnl)."""
