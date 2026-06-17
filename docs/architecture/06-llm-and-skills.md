@@ -125,7 +125,7 @@ old, it must refuse and tell the user to re-assemble.
 
 | Boundary | Enforced by | Risk |
 |---|---|---|
-| Broker JSON shape | skill convention only | malformed write → `Dataclass(**row)` error (F-002) |
+| Broker JSON shape | `snapshot_schema` validation at the read boundary | code-enforced ✅ (F-002) — malformed write → `SnapshotSchemaError` with remediation |
 | Quote freshness | `quotes_snapshot` code (30 min) | code-enforced ✅ |
 | Bundle freshness (analyst) | **the LLM following SKILL.md** | advisory only — a compliant model refuses, but nothing in code blocks a stale narrative |
 | Narrative accuracy | **the LLM following "evidence-first"** | no code checks the prose against the bundle numbers — interpretation can drift or hallucinate |

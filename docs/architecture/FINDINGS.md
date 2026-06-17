@@ -9,8 +9,8 @@
 ## Executive summary
 
 The architecture review (docs 00–08) produced **32 active findings** (1 earlier
-finding superseded). **13 are now fixed** (F-012, F-014, F-015, F-016, F-018, F-019,
-F-021, F-022, F-023, F-024, F-025, F-029, F-033), leaving **19 open**. The system is **well-engineered at the
+finding superseded). **14 are now fixed** (F-002, F-012, F-014, F-015, F-016, F-018,
+F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033), leaving **18 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -38,10 +38,10 @@ and *how its results are measured*. Both are fixable with localized changes.
 
 | Severity | Count | IDs |
 |---|---:|---|
-| **High** | 2 | F-002, F-005† |
+| **High** | 1 | F-005† |
 | Med | 9 | F-001, F-003, F-006, F-007, F-008, F-010, F-020, F-026, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 13 | F-012, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033 |
+| ✅ Fixed | 14 | F-002, F-012, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -77,7 +77,7 @@ The highest-leverage cluster; everything else is noise until these land.
 | ~~F-022~~ ✅ | Med | **Done (2026-06-16).** `score_holding` scales the ±3 cut by votes_cast (`REFERENCE_BALLOT_SIZE=8`) so a technicals-only ballot reaches HOLD/EXIT not just TRIM; new `holding_context.build_holding_context` wires the latest `sentiment_daily` rollup (reviving the critical-news EXIT veto) + a static `data/static/fundamentals.csv` (`load_fundamentals_map`) into both `pre_open` and `monthly_sip` |
 | ~~F-015~~ ✅ | Med | **Done (2026-06-17).** `data/static/aliases.csv` (58 symbols = Nifty 50 + 8 holdings) + `load_aliases_map`/`default_aliases`; `fetch_all_news` + rollup watch-list read it; bare-token disambiguation (`SBILIFE` before `SBIN`) |
 | ~~F-016~~ ✅ | Med | **Done (2026-06-17).** v3 migration: `idx_news_dedup` UNIQUE(`source, headline, COALESCE(url,'')`) + `INSERT OR IGNORE`; NSE events get per-event URLs (`event_url`) so distinct events no longer collapse |
-| F-002 | High | Validate broker/quote JSON at the read boundary |
+| ~~F-002~~ ✅ | High | **Done (2026-06-17).** `data/snapshot_schema.py` validates each broker/quote row against its dataclass at the read boundary (missing/extra field, wrong type, null-in-non-optional, invalid `exchange`); `kite_snapshot` + `quotes_snapshot` readers raise `SnapshotSchemaError` with file + index + remediation instead of splatting `Dataclass(**row)` |
 | ~~F-021~~ ✅ | Med | **Done (2026-06-17).** `run_backtest` returns `total_costs = sum(t.costs_paid)`, so the aggregate carries buy + sell (was sell-only); accumulator + `_evaluate_exits` cost return removed |
 
 ### Wave 3 — Robustness & ops
@@ -100,8 +100,9 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > F-023 (paper-cash ledger) and F-029 (real predictions) also shipped
 > 2026-06-16 — **Wave 1 complete.** Wave 2 in progress: F-024 (days_held) +
 > F-025 (paper costs) + F-022 (health TRIM-bias) done 2026-06-16; F-021 (backtest
-> `total_costs` buy side) + F-015 (50-name alias map) + F-016 (news dedup) done
-> 2026-06-17. Next up: F-002, …
+> `total_costs` buy side) + F-015 (50-name alias map) + F-016 (news dedup) +
+> F-002 (broker-JSON validation) done 2026-06-17. **Wave 2 complete** — next is
+> Wave 3 (F-003, F-032, F-013, …).
 
 ## How to use this file
 
@@ -137,7 +138,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | ID | Cat | Sev | Phase | Title | Status |
 |---|---|---|---|---|---|
 | F-001 | INACC | Med | 0 | `vectorbt` + `anthropic` declared deps but unused in production paths | Open |
-| F-002 | GAP | High | 0 | No schema validation on broker/quote JSON contract between `/kite-*` skills and `data/*_snapshot.py` | Open |
+| ~~F-002~~ | GAP | High | 0 | ~~No schema validation on broker/quote JSON contract between `/kite-*` skills and `data/*_snapshot.py`~~ | ✅ Fixed 2026-06-17 — `data/snapshot_schema.py` validates each row at the read boundary (type/exchange/missing/extra), readers raise `SnapshotSchemaError` |
 | F-003 | GAP | Med | 0 | Daily flow is ~13 manually-sequenced commands with no half-run/missed-step detection | Open |
 | F-004 | DEBT | Low | 0 | Each job re-derives "today" in IST independently; no single canonical clock | Open |
 | F-005 | GAP | High | 0 | No real-money execution path, kill-switch, or risk-halt design (gated to future Phase 19, tracked here so it isn't forgotten) | Needs decision |
@@ -184,16 +185,32 @@ the manifest for the architecture.
   (`grep -r "import vectorbt\|import anthropic"`).
 - **Doc to revisit after fix:** `00-overview.md` §3 tech-stack note.
 
-### F-002 — No validation of the broker JSON contract (`GAP`, High, Phase 0)
-`/kite-snapshot` and `/kite-quotes-snapshot` write JSON that `data/kite_snapshot.py`
-and `data/quotes_snapshot.py` read back into dataclasses. The contract is
-enforced only by the skill obeying its `SKILL.md`. A malformed write (wrong
-`exchange`, missing required field, wrong types) may pass partially and corrupt
-downstream logic (e.g. a wrong-exchange quote driving an MTM exit).
-- **Fix idea:** Add a pydantic/dataclass validator at the read boundary that
-  fails loudly with a clear remediation message; add `TEST` fixtures of malformed
-  payloads.
-- **Depends on:** F-006-range fixtures (to be added when Phase 3 is written).
+### F-002 — No validation of the broker JSON contract (`GAP`, High, Phase 0) — ✅ Fixed 2026-06-17
+**Was:** `/kite-snapshot` and `/kite-quotes-snapshot` write JSON that
+`data/kite_snapshot.py` and `data/quotes_snapshot.py` read back into dataclasses
+via a bare `Dataclass(**row)`. The contract was enforced only by the skill
+obeying its `SKILL.md`; a malformed write (wrong `exchange`, missing field, wrong
+types) either crashed with a cryptic `TypeError`/`KeyError` or — since frozen
+dataclasses don't type-check — passed silently and corrupted downstream logic
+(e.g. a wrong-exchange quote driving an MTM exit).
+
+**Resolution:**
+- New `data/snapshot_schema.py`: `validate_row`/`validate_rows` drive off
+  `dataclasses.fields` + resolved type hints (so the validator can't drift from
+  the dataclass) and reject: non-object/array shapes, missing required fields,
+  unexpected fields (contract drift / wrong resource file), wrong scalar types
+  (`bool` rejected as `int`; `int`→`float` widening allowed), null in a
+  non-optional field, bad list-element types, and any `exchange` outside the Kite
+  set `{NSE,BSE,NFO,BFO,CDS,BCD,MCX,NCO}`. Every `SnapshotSchemaError` carries the
+  file, row index, field, and a "re-run the skill" remediation.
+- `kite_snapshot.read_holdings/gtts/positions` and
+  `quotes_snapshot.read_latest_quotes` now route rows through the validator;
+  the quotes reader also validates `tradingsymbol` presence/type before popping
+  it (was a bare `KeyError` mid-loop).
+- TDD: `tests/test_snapshot_schema.py` (15 unit cases) + 2 integration tests in
+  `test_kite_snapshot.py` (invalid exchange, missing field) + 2 in
+  `test_quotes_snapshot.py` (wrong type, missing `tradingsymbol`). Full suite
+  green, ruff + mypy clean.
 
 ### F-003 — No half-run detection in the daily flow (`GAP`, Med, Phase 0)
 The operator runs the blocks manually; skipping IEP (or running blocks out of

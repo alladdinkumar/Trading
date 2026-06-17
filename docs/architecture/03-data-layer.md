@@ -107,21 +107,25 @@ production path reads JSON snapshots instead (§3.4). `_to_quote` derives `bid`/
 ### 3.4 `kite_snapshot.py` — the production broker reader (MCP pivot)
 Readers for the JSON that the `/kite-snapshot` skill writes. `read_holdings`/
 `read_gtts`/`read_positions` open `data/raw/<as_of>/<resource>.json` and splat
-each row into the `data.kite` dataclass (`Holding(**row)`). `_validate_meta`
-checks that `_meta.json`'s `snapshot_at` date-prefix equals `as_of`, else
-`KiteSnapshotStaleError`; a missing file raises `KiteSnapshotMissingError` with a
-"run /kite-snapshot" remediation.
+each row into the `data.kite` dataclass via `snapshot_schema.validate_rows`.
+`_validate_meta` checks that `_meta.json`'s `snapshot_at` date-prefix equals
+`as_of`, else `KiteSnapshotStaleError`; a missing file raises
+`KiteSnapshotMissingError` with a "run /kite-snapshot" remediation.
 
-> **Validation gap:** `Holding(**row)` is the *only* structural check — an extra
-> key raises a raw `TypeError`, a missing key a `TypeError`, and a wrong-typed
-> value is silently accepted (no coercion, unlike the SDK adapters). The skill
-> is responsible for emitting exactly the dataclass fields. → F-002.
+> **✅ Validation hardened (F-002, 2026-06-17).** Rows are no longer splatted
+> blindly — `snapshot_schema.validate_row` checks each row against its dataclass
+> (missing/extra field, wrong scalar type, null-in-non-optional, bad list element,
+> and `exchange ∈ {NSE,BSE,NFO,BFO,CDS,BCD,MCX,NCO}`) and raises
+> `SnapshotSchemaError` with the file, row index, field, and a re-run-the-skill
+> remediation. The validator drives off `dataclasses.fields` + type hints, so it
+> stays in lock-step with the dataclass definition.
 
 ### 3.5 `quotes_snapshot.py` — intraday quotes reader
 `read_latest_quotes(paths, as_of, max_age_minutes=30)` scans the date dir for
 `quotes_HHMM.json`, picks the newest by `HHMM`, and rebuilds a
-`dict[symbol, Quote]` (popping `tradingsymbol` before `Quote(**row)`). **The
-filename HHMM is the single source of truth for capture time**; staleness is
+`dict[symbol, Quote]` (validating + popping `tradingsymbol`, then
+`snapshot_schema.validate_row(Quote, …)` — F-002). **The filename HHMM is the
+single source of truth for capture time**; staleness is
 `datetime.now() - capture_ts > max_age_minutes`. A tightened regex rejects
 invalid hours/minutes.
 
@@ -251,7 +255,9 @@ session; the batch Python reads files. See [00-overview §1](./00-overview.md).
   + the v3 `idx_news_dedup` UNIQUE index and `INSERT OR IGNORE` make daily
   re-fetch idempotent, so the table no longer accretes duplicates. → F-016.
   (Unbounded *retention* of unique rows is still F-013.)
-- **Snapshot readers trust the skill.** Structural validation is just
-  `Dataclass(**row)`; no schema/type enforcement at the boundary. → F-002.
+- **✅ (Fixed 2026-06-17) Snapshot reader validation.** `snapshot_schema`
+  validates every broker/quote row against its dataclass at the read boundary
+  (type/exchange/missing/extra/null), raising `SnapshotSchemaError` with a
+  remediation instead of a bare `Dataclass(**row)`. → F-002.
 - **Naive local clock** in quote staleness assumes host == IST. → F-004/F-018.
 - **Macro column labels lie** (`*_fut` hold spot; `sgx_nifty` always None). → F-017.

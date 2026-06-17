@@ -16,6 +16,7 @@ from trading.data.quotes_snapshot import (
     QuoteSnapshotStaleError,
     read_latest_quotes,
 )
+from trading.data.snapshot_schema import SnapshotSchemaError
 
 
 @pytest.fixture
@@ -88,6 +89,29 @@ def test_read_latest_quotes_empty_list_returns_empty_dict(paths) -> None:
     _seed_quotes(paths, date(2026, 5, 16), "1232", [])
     quotes, _ = read_latest_quotes(paths, date(2026, 5, 16))
     assert quotes == {}
+
+
+@freeze_time("2026-05-16T12:33:00")
+def test_read_latest_quotes_wrong_type_raises(paths) -> None:
+    """F-002: a malformed quote (wrong type) is rejected at the read boundary."""
+    bad = dict(_QUOTE_ROW)
+    bad["last_price"] = "395.25"  # string, not float
+    _seed_quotes(paths, date(2026, 5, 16), "1232", [bad])
+    with pytest.raises(SnapshotSchemaError) as exc:
+        read_latest_quotes(paths, date(2026, 5, 16))
+    assert "last_price" in str(exc.value)
+
+
+@freeze_time("2026-05-16T12:33:00")
+def test_read_latest_quotes_missing_tradingsymbol_raises(paths) -> None:
+    """F-002: a quote row without its symbol key fails loudly, not with a bare
+    KeyError mid-loop."""
+    bad = dict(_QUOTE_ROW)
+    del bad["tradingsymbol"]
+    _seed_quotes(paths, date(2026, 5, 16), "1232", [bad])
+    with pytest.raises(SnapshotSchemaError) as exc:
+        read_latest_quotes(paths, date(2026, 5, 16))
+    assert "tradingsymbol" in str(exc.value)
 
 
 @freeze_time("2026-05-16T12:33:00")

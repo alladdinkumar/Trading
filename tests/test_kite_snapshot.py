@@ -17,6 +17,7 @@ from trading.data.kite_snapshot import (
     read_holdings,
     read_positions,
 )
+from trading.data.snapshot_schema import SnapshotSchemaError
 
 
 @pytest.fixture
@@ -101,6 +102,30 @@ def test_read_gtts_happy_path(paths) -> None:
 def test_read_gtts_missing_raises(paths) -> None:
     with pytest.raises(KiteSnapshotMissingError):
         read_gtts(paths, date(2026, 5, 15))
+
+
+def test_read_holdings_invalid_exchange_raises(paths) -> None:
+    """F-002: a wrong-exchange row is rejected at the read boundary, not splatted
+    into a Holding that could drive a bad MTM/exit."""
+    bad = dict(_HOLDING_ROW)
+    bad["exchange"] = "NYSE"
+    seed_kite_snapshot(paths, date(2026, 5, 15), holdings=[bad])
+    with pytest.raises(SnapshotSchemaError) as exc:
+        read_holdings(paths, date(2026, 5, 15))
+    assert "exchange" in str(exc.value)
+
+
+def test_read_holdings_missing_field_raises(paths) -> None:
+    """F-002: a malformed payload (missing required field) fails loudly with the
+    field name + the offending file, instead of a cryptic TypeError."""
+    bad = dict(_HOLDING_ROW)
+    del bad["quantity"]
+    seed_kite_snapshot(paths, date(2026, 5, 15), holdings=[bad])
+    with pytest.raises(SnapshotSchemaError) as exc:
+        read_holdings(paths, date(2026, 5, 15))
+    msg = str(exc.value)
+    assert "quantity" in msg
+    assert "holdings.json" in msg
 
 
 def test_read_positions_happy_path(paths) -> None:

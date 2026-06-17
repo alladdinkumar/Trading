@@ -17,6 +17,7 @@ from typing import Any
 
 from trading.config import Paths
 from trading.data.kite import GttOrder, Holding, Position
+from trading.data.snapshot_schema import validate_rows
 
 
 class KiteSnapshotMissingError(RuntimeError):
@@ -49,7 +50,7 @@ def _read_resource(
     paths: Paths,
     as_of: date,
     filename: str,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], Path]:
     date_dir = paths.raw_dir / as_of.isoformat()
     target = date_dir / filename
     if not target.is_file():
@@ -59,22 +60,22 @@ def _read_resource(
         )
     _validate_meta(date_dir, as_of)
     rows: list[dict[str, Any]] = json.loads(target.read_text(encoding="utf-8"))
-    return rows
+    return rows, target
 
 
 def read_holdings(paths: Paths, as_of: date) -> list[Holding]:
-    """Read `holdings.json` for `as_of` → list of Holding dataclasses."""
-    rows = _read_resource(paths, as_of, "holdings.json")
-    return [Holding(**row) for row in rows]
+    """Read `holdings.json` for `as_of` → validated Holding dataclasses (F-002)."""
+    rows, target = _read_resource(paths, as_of, "holdings.json")
+    return validate_rows(Holding, rows, source=str(target))
 
 
 def read_gtts(paths: Paths, as_of: date) -> list[GttOrder]:
-    """Read `gtts.json` for `as_of` → list of GttOrder dataclasses."""
-    rows = _read_resource(paths, as_of, "gtts.json")
-    return [GttOrder(**row) for row in rows]
+    """Read `gtts.json` for `as_of` → validated GttOrder dataclasses (F-002)."""
+    rows, target = _read_resource(paths, as_of, "gtts.json")
+    return validate_rows(GttOrder, rows, source=str(target))
 
 
 def read_positions(paths: Paths, as_of: date) -> list[Position]:
-    """Read `positions.json` for `as_of` → list of Position dataclasses."""
-    rows = _read_resource(paths, as_of, "positions.json")
-    return [Position(**row) for row in rows]
+    """Read `positions.json` for `as_of` → validated Position dataclasses (F-002)."""
+    rows, target = _read_resource(paths, as_of, "positions.json")
+    return validate_rows(Position, rows, source=str(target))

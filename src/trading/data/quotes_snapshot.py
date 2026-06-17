@@ -16,10 +16,10 @@ import json
 import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 from trading.config import Paths
 from trading.data.kite import Quote
+from trading.data.snapshot_schema import SnapshotSchemaError, validate_row
 
 _FILENAME_RE = re.compile(r"^quotes_([01]\d|2[0-3])([0-5]\d)\.json$")
 
@@ -76,9 +76,24 @@ def read_latest_quotes(
             f"({int(age.total_seconds() // 60)} min ago, max {max_age_minutes}). "
             "Re-run /kite-quotes-snapshot skill."
         )
-    rows: list[dict[str, Any]] = json.loads(target.read_text(encoding="utf-8"))
+    rows = json.loads(target.read_text(encoding="utf-8"))
+    if not isinstance(rows, list):
+        raise SnapshotSchemaError(
+            f"{target}: expected a JSON array of quote rows, got {type(rows).__name__}. "
+            "Re-run /kite-quotes-snapshot skill."
+        )
     quotes: dict[str, Quote] = {}
-    for row in rows:
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict) or "tradingsymbol" not in row:
+            raise SnapshotSchemaError(
+                f"{target}[{i}]: quote row is missing its 'tradingsymbol'. "
+                "Re-run /kite-quotes-snapshot skill."
+            )
         sym = row.pop("tradingsymbol")
-        quotes[sym] = Quote(**row)
+        if not isinstance(sym, str):
+            raise SnapshotSchemaError(
+                f"{target}[{i}]: 'tradingsymbol' must be a string, got "
+                f"{type(sym).__name__}. Re-run /kite-quotes-snapshot skill."
+            )
+        quotes[sym] = validate_row(Quote, row, source=str(target), index=i)
     return quotes, capture_ts

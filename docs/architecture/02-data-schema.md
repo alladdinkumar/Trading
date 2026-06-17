@@ -207,8 +207,10 @@ data/parquet/nifty200/<SYMBOL>.parquet     # symbol suffix-stripped: RELIANCE.NS
 ## 6. Broker & quote JSON contracts (`data/raw/<date>/`)
 
 Written by Claude Code skills, read by `data/*_snapshot.py`. The field names
-match the dataclasses in `data/kite.py` so Python does `Holding(**row)` with no
-mapping layer. **These contracts are validated only by convention** → F-002.
+match the dataclasses in `data/kite.py`. **✅ Validated at the read boundary
+(F-002, 2026-06-17):** `snapshot_schema.validate_rows` checks each row against
+its dataclass (type/exchange/missing/extra/null) and raises `SnapshotSchemaError`
+with a remediation, rather than splatting `Holding(**row)` unchecked.
 
 | File | Writer (skill) | Reader | Shape |
 |---|---|---|---|
@@ -265,9 +267,10 @@ compile flow (and mid/post-close).
   `sentiment_daily` row referencing a real symbol/date) is by convention. A bad
   `date` string can't be caught by the DB. Consider a symbol/date dimension or
   app-level validation.
-- **JSON contracts are unvalidated** (F-002) and the `holdings_json` /
-  `rules_passed_json` blobs inside SQLite are opaque to queries — schema changes
-  to those blobs are invisible to migrations.
+- **Broker/quote JSON contracts** are now validated at the read boundary
+  (✅ F-002), but the `holdings_json` / `rules_passed_json` blobs inside SQLite
+  remain opaque to queries — schema changes to those blobs are invisible to
+  migrations.
 - **`nifty200` subdir name overstates the universe** (≈58 ingested symbols).
   Candidate scope pinned to the Nifty 50 (F-012 ✅ Fixed 2026-06-16); the
   directory rename is a deferred cosmetic follow-up.
