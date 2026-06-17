@@ -293,6 +293,45 @@ def test_parse_candidates_from_context_basic() -> None:
     assert symbols == ["RVNL", "NTPC", "RELIANCE"]
 
 
+def test_parse_candidates_from_context_hyphen_and_ampersand() -> None:
+    """Symbols with '-' (BAJAJ-AUTO) or '&' (M&M) must be parsed, not dropped."""
+    context_md = """# Trading context bundle — 2026-06-17
+
+## Today's candidates
+
+### BAJAJ-AUTO — passes 10/10 rules
+
+### M&M — passes 8/10 rules
+
+### COALINDIA — passes 9/10 rules
+"""
+
+    symbols = _parse_candidates_from_context(context_md)
+    assert symbols == ["BAJAJ-AUTO", "M&M", "COALINDIA"]
+
+
+def test_update_context_preserves_hyphenated_symbol_block() -> None:
+    """A hyphenated symbol's block survives the in-place context rewrite."""
+    context_md = """# Trading context bundle — 2026-06-17
+
+## Today's candidates
+
+### BAJAJ-AUTO — passes 10/10 rules
+
+bajaj body
+
+### COALINDIA — passes 9/10 rules
+
+coal body
+"""
+
+    updated = _update_context_markdown(
+        context_md, ["BAJAJ-AUTO", "COALINDIA"], removed_symbols=[]
+    )
+    assert "### BAJAJ-AUTO — passes 10/10 rules" in updated
+    assert "bajaj body" in updated
+
+
 def test_parse_candidates_from_context_empty() -> None:
     """Extract candidates from context with no candidates section."""
     context_md = """# Trading context bundle — 2026-05-16

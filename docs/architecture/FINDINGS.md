@@ -40,14 +40,14 @@ and *how its results are measured*. Both are fixable with localized changes.
 | **High** | 2 | F-002, F-005† |
 | Med | 12 | F-001, F-003, F-006, F-007, F-008, F-010, F-015, F-016, F-020, F-021, F-026, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 9 | F-012, F-014, F-018, F-019, F-022, F-023, F-024, F-025, F-029 |
+| ✅ Fixed | 10 | F-012, F-014, F-018, F-019, F-022, F-023, F-024, F-025, F-029, F-033 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
 
 | Category | Count |
 |---|---:|
-| VULN (correctness/data-integrity) | 5 (F-019 ✅, F-022 ✅, F-023 ✅, F-024 ✅, F-029 ✅) |
+| VULN (correctness/data-integrity) | 6 (F-019 ✅, F-022 ✅, F-023 ✅, F-024 ✅, F-029 ✅, F-033 ✅) |
 | GAP (missing functionality/guardrail) | 11 |
 | INACC (code ≠ spec/docstring) | 7 |
 | DEBT (cleanup) | 8 |
@@ -165,6 +165,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-030 | DEBT | Low | 7 | Visibility-only (non-selected) signals inserted unconditionally each pre_open run → duplicate `signals` rows on re-run | Open |
 | F-031 | INACC | Low | 7 | Train/serve skew: `negative_news_count_7d` empty during weekly retrain (`negative_news_lookup={}`) but populated at inference | Open |
 | F-032 | GAP | Med | 8 | Daily pipeline is human-run reminders only (sole unattended job is weekly_train); a missed day = no snapshot/bundle/MTM, open trades unmanaged, track-record holes | Open |
+| F-033 | VULN | Med | 6 | Candidate-symbol regex `[A-Z0-9_]+` excludes `-`/`&`, so hyphen/ampersand tickers (BAJAJ-AUTO, M&M) are silently dropped from `brief.md` and deleted from `_context.md` by `pre_open_iep` | ✅ Fixed (2026-06-17) |
 
 ---
 
@@ -495,7 +496,10 @@ narrative written off a stale bundle, would pass through silently.
 ### F-027 — Candidate-heading 3-way coupling (`DEBT`, Low, Phase 6)
 `context._render_candidates` writes `### SYM — passes N/M rules`,
 `pre_open_iep` rewrites it, `briefing._CANDIDATE_HEADING` parses it. No single
-test spans all three; a format tweak breaks symbol parsing silently.
+test spans all three; a format tweak breaks symbol parsing silently. **[[F-033]]
+is the concrete bite** — the symbol char-class desynced and silently dropped
+hyphen/ampersand tickers from two of the three parsers (fixed 2026-06-17), but
+the structural coupling + missing spanning test this finding names remain.
 - **Fix idea:** Centralise the heading format in one constant/util imported by
   all three; add a round-trip test (render → IEP rewrite → parse).
 
@@ -547,5 +551,38 @@ trades unmanaged that day), and a gap in `portfolio_snapshots` — undermining t
 
 ---
 
-_Counts: 24 open · 1 superseded · 7 fixed (F-012, F-014, F-018, F-019, F-023,
-F-024, F-029). Updated 2026-06-16 (Wave 1 complete; Wave 2: F-024 done)._
+### F-033 — Hyphen/ampersand tickers dropped by candidate-symbol regex (`VULN`, Med, Phase 6) — ✅ Fixed 2026-06-17
+The candidate-symbol regex `^### ([A-Z0-9_]+) — passes \d+/\d+ rules` matches
+only `A–Z 0–9 _`, so any NSE ticker containing `-` or `&` fails to match. Of the
+Nifty-50 candidate set this hits **BAJAJ-AUTO** and **M&M**. Two silent failures
+resulted:
+- `briefing._parse_candidate_symbols` returned the symbol set **without**
+  `BAJAJ-AUTO`, so `compile_brief` treated `candidates/BAJAJ-AUTO.md` as an
+  *orphan* and dropped it — the day's #1-ranked, 10/10, selected pick was missing
+  from `brief.md` (warning emitted to stderr only).
+- `pre_open_iep._parse_candidates_from_context` parsed 4 of 5 candidates, and
+  `_update_context_markdown` (which rebuilds the candidates section from the
+  parsed list) **deleted the BAJAJ-AUTO block from `_context.md`** on the in-place
+  rewrite.
+
+Discovered live during the 2026-06-17 daily run (BAJAJ-AUTO ranked #1 that day).
+This is the concrete data-integrity instance of the coupling flagged in [[F-027]]
+— the same heading format is parsed in three places with no spanning test.
+- **Fixed:** widened the character class to `[A-Z0-9_&-]+` at all three sites —
+  `briefing._CANDIDATE_HEADING` (×1) and `pre_open_iep` (the candidate parser +
+  the block-key `re.match`, ×2). `-` is trailing (literal) and `&` literal in the
+  class. TDD: added `test_parse_candidates_from_context_hyphen_and_ampersand` +
+  `test_update_context_preserves_hyphenated_symbol_block` (test_jobs_pre_open_iep)
+  and `test_compile_brief_no_orphan_warning_for_hyphenated_symbol`
+  (test_llm_briefing) — all three watched fail, then pass; full IEP + briefing
+  suites green (42), ruff clean. Re-ran `pre-open-iep` + `brief compile` for
+  2026-06-17: `candidates_input` 4→5 and all five cards present in `brief.md`.
+- **Still open ([[F-027]]):** centralise the heading format in one constant and
+  add a render→IEP-rewrite→parse round-trip test so a future format tweak can't
+  silently desync the three parsers again.
+
+---
+
+_Counts: 22 open · 1 superseded · 10 fixed (F-012, F-014, F-018, F-019, F-022,
+F-023, F-024, F-025, F-029, F-033). Updated 2026-06-17 (F-033 — symbol-regex fix,
+found during the daily run)._

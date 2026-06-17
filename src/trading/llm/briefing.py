@@ -39,7 +39,7 @@ def optional_parts(mode: Mode) -> list[str]:
     return ["sector_commentary.md"]
 
 
-_CANDIDATE_HEADING = re.compile(r"^### ([A-Z0-9_]+) — passes \d+/\d+ rules", re.MULTILINE)
+_CANDIDATE_HEADING = re.compile(r"^### ([A-Z0-9_&-]+) — passes \d+/\d+ rules", re.MULTILINE)
 
 
 def _parse_candidate_symbols(context_md: str) -> list[str]:

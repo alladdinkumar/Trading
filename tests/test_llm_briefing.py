@@ -111,6 +111,25 @@ def test_compile_brief_warns_on_orphan_candidate_file(
     assert "IRCTC.md" in err and "orphan" in err.lower()
 
 
+def test_compile_brief_no_orphan_warning_for_hyphenated_symbol(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A hyphenated bundle symbol (BAJAJ-AUTO) must be recognised, not orphaned."""
+    date_dir = tmp_path / "2026-06-17"
+    date_dir.mkdir()
+    _write_part(
+        date_dir, "_context.md",
+        "# Trading context bundle — 2026-06-17  (mode: pre_open)\n"
+        "\n## Today's candidates\n\n### BAJAJ-AUTO — passes 10/10 rules\n",
+    )
+    _write_part(date_dir, "macro_brief.md", "x")
+    _write_part(date_dir, "sector_commentary.md", "x")
+    _write_part(date_dir, "candidates/BAJAJ-AUTO.md", "# BAJAJ-AUTO — Conviction: MEDIUM\n")
+    compile_brief(date_dir, mode="pre_open")
+    err = capsys.readouterr().err
+    assert "orphan" not in err.lower()
+
+
 @freeze_time("2026-05-15T17:00:00")
 def test_compile_brief_post_close_includes_recap(
     tmp_path: Path, snapshot
