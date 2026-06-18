@@ -40,6 +40,24 @@ Get-ChildItem docs\scheduler\trading_remind_*.xml | ForEach-Object {
 
 Open **Task Scheduler** (Win+R, `taskschd.msc`) and verify all 12 tasks appear in the root library and show status **Ready**.
 
+### 2b. Import the unattended jobs
+
+The reminder glob above intentionally excludes the two tasks that **run commands
+unattended** (not reminders). Import them once each:
+
+```cmd
+schtasks /Create /XML "docs\scheduler\trading_weekly_train.xml" /TN "trading_weekly_train"
+schtasks /Create /XML "docs\scheduler\trading_daily_unattended.xml" /TN "trading_daily_unattended"
+```
+
+- `trading_weekly_train` — Sunday 10:00 IST: rolling retrain + weekly review.
+- `trading_daily_unattended` — Mon–Fri 10:00 IST: broker-free pre-open spine
+  gap-filler (F-032); skips any day the operator already covered.
+
+Both have `StartWhenAvailable` set, so a missed window (machine off) is caught up
+on the next wake. Unlike the reminders, a failure here is recorded to
+`data/logs/failures.log` and the task is marked failed.
+
 ### 3. Confirm "Run whether user is logged on or not"
 
 For each task: right-click → **Properties** → **General** tab → tick **Run whether user is logged on or not** if you want reminders even while locked. (The default `InteractiveToken` in the XML only fires when you're logged in.)
