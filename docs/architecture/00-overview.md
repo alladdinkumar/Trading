@@ -153,7 +153,7 @@ data/                    # gitignored runtime data
 ├── cache/               # HTTP cache + FinBERT model cache
 └── logs/                # rotating per-job loguru logs
 models/                  # LightGBM pickles + registry.csv
-.claude/skills/          # analyst, kite-snapshot, kite-quotes-snapshot
+.claude/skills/          # analyst, kite-snapshot, kite-quotes-snapshot, macro-doctor
 docs/scheduler/          # Windows Task Scheduler XML (one per reminder slot)
 ```
 
@@ -167,7 +167,7 @@ purpose:
 | **Daily jobs** | `pre-open`, `pre-open-iep`, `mid-day`, `post-close` |
 | **Periodic** | `weekly-train`, `sip` |
 | **Brief** | `brief assemble-context`, `brief compile` |
-| **Data ingest** | `ingest-history`, `ingest-news`, `macro snapshot`, `macro refresh`, `sector` |
+| **Data ingest** | `ingest-history`, `ingest-news`, `macro snapshot`, `macro refresh`, `macro verify`, `sector` |
 | **Analysis** | `scan`, `backtest` |
 | **Portfolio / paper** | `portfolio`, `paper-open`, `paper-mtm`, `paper-status`, `paper-reconcile` |
 | **Ranker (Layer B)** | `train-ranker`, `ranker-status` |

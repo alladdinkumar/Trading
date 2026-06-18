@@ -150,7 +150,9 @@ invalid hours/minutes.
   into a validated `MacroCrossSource` (`source`, `captured_at`, optional
   `vix`/`usdinr`) via the F-002 `validate_row` boundary. `trading macro refresh
   --cross` gap-fills any still-`None` macro figure from it and records provenance
-  in `macro_reconciliation`; F-036 will add tolerance-based cross-verification.
+  in `macro_reconciliation`. `data/reconcile.py::reconcile_macro` (F-036) adds the
+  pure tolerance core (VIX abs≤0.5, USDINR rel≤0.5%, FII/DII `unreconciled`) that
+  `trading macro verify` and the `/macro-doctor` skill drive.
 
 > Column-naming mismatch: the schema's `dow_fut`/`nasdaq_fut` columns actually
 > store **spot** index closes (`^DJI`/`^IXIC`), not futures, and `sgx_nifty` is

@@ -87,18 +87,41 @@ def _render_macro(conn: sqlite3.Connection, as_of: date) -> str:
     ).fetchone()
     if row is None:
         return "## Macro snapshot\n\n_(no data)_"
+    recon = _macro_recon_annotations(conn, as_of)
     lines = ["## Macro snapshot", "", "| field | value |", "|---|---|"]
     if row["vix"] is not None:
-        lines.append(f"| VIX | {row['vix']:.2f} |")
+        lines.append(f"| VIX | {row['vix']:.2f}{recon.get('vix', '')} |")
     if row["usdinr"] is not None:
-        lines.append(f"| USDINR | {row['usdinr']:.2f} |")
+        lines.append(f"| USDINR | {row['usdinr']:.2f}{recon.get('usdinr', '')} |")
     if row["fii_flow_cr"] is not None:
-        lines.append(f"| FII flow (₹ cr) | {row['fii_flow_cr']:+.0f} |")
+        lines.append(f"| FII flow (₹ cr) | {row['fii_flow_cr']:+.0f}{recon.get('fii_flow_cr', '')} |")
     if row["dii_flow_cr"] is not None:
-        lines.append(f"| DII flow (₹ cr) | {row['dii_flow_cr']:+.0f} |")
+        lines.append(f"| DII flow (₹ cr) | {row['dii_flow_cr']:+.0f}{recon.get('dii_flow_cr', '')} |")
     if row["regime"] is not None:
         lines.append(f"| Regime | {row['regime']} |")
     return "\n".join(lines)
+
+
+def _macro_recon_annotations(conn: sqlite3.Connection, as_of: date) -> dict[str, str]:
+    """Per-field inline suffixes from `macro_reconciliation` (F-036).
+
+    A `mismatch` surfaces the Kite second-source reading; an `unreconciled`
+    field (FII/DII, which Kite can't second-source) is marked so the analyst —
+    and F-026's brief cross-check — sees the bundle itself flagged the figure.
+    `ok` / `missing_*` add nothing.
+    """
+    rows = conn.execute(
+        "SELECT field, secondary_value, status FROM macro_reconciliation WHERE date = ?",
+        (as_of.isoformat(),),
+    ).fetchall()
+    out: dict[str, str] = {}
+    for r in rows:
+        if r["status"] == "mismatch":
+            kite = r["secondary_value"]
+            out[r["field"]] = f" ⚠ kite {kite:g}" if kite is not None else " ⚠ mismatch"
+        elif r["status"] == "unreconciled":
+            out[r["field"]] = " (unreconciled)"
+    return out
 
 
 def _render_sector_snapshot(conn: sqlite3.Connection, as_of: date) -> str:

@@ -1030,3 +1030,59 @@ def test_macro_snapshot_subcommand_still_writes(tmp_path, monkeypatch) -> None:
     with get_conn(paths.db_path) as conn:
         row = get_macro_snapshot(conn, "2026-06-19")
     assert row is not None and row.vix == 18.2
+
+
+def _seed_macro(tmp_path, snap) -> None:
+    from trading.config import get_paths
+    from trading.store.db import get_conn
+    from trading.store.macro_store import upsert_macro_snapshot
+    from trading.store.migrations import run_migrations
+
+    paths = get_paths()
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        upsert_macro_snapshot(conn, snap)
+
+
+def test_macro_verify_writes_rows_and_exits_0_when_ok(tmp_path, monkeypatch) -> None:
+    from trading.config import get_paths
+    from trading.store.db import get_conn
+    from trading.store.reconciliation_store import get_reconciliation_rows
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _seed_macro(tmp_path, _fake_snap(vix=19.40, usdinr=83.10))
+    cross = _write_cross(tmp_path, vix=19.55, usdinr=83.20)
+
+    result = runner.invoke(app, ["macro", "verify", "--date", "2026-06-19", "--cross", str(cross)])
+    assert result.exit_code == 0, result.stdout
+    paths = get_paths()
+    with get_conn(paths.db_path) as conn:
+        recon = {r.field: r for r in get_reconciliation_rows(conn, "2026-06-19")}
+    assert recon["vix"].status == "ok"
+    assert recon["usdinr"].status == "ok"
+    assert recon["fii_flow_cr"].status == "unreconciled"
+
+
+def test_macro_verify_exits_1_on_mismatch(tmp_path, monkeypatch) -> None:
+    from trading.config import get_paths
+    from trading.store.db import get_conn
+    from trading.store.reconciliation_store import get_reconciliation_rows
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _seed_macro(tmp_path, _fake_snap(vix=19.40))
+    cross = _write_cross(tmp_path, vix=25.0)
+
+    result = runner.invoke(app, ["macro", "verify", "--date", "2026-06-19", "--cross", str(cross)])
+    assert result.exit_code == 1, result.stdout
+    paths = get_paths()
+    with get_conn(paths.db_path) as conn:
+        recon = {r.field: r for r in get_reconciliation_rows(conn, "2026-06-19")}
+    assert recon["vix"].status == "mismatch"  # rows persisted even on the exit-1 path
+
+
+def test_macro_verify_errors_when_snapshot_missing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    cross = _write_cross(tmp_path, vix=19.55)
+    result = runner.invoke(app, ["macro", "verify", "--date", "2026-06-19", "--cross", str(cross)])
+    assert result.exit_code != 0
+    assert "snapshot" in result.stdout.lower()

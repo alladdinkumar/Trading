@@ -10,8 +10,8 @@
 
 The architecture review (docs 00–08) produced **35 active findings** (1 earlier
 finding superseded; F-035/F-036 spun off from F-026's self-healing follow-up).
-**21 are now fixed** (F-002, F-003, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035), leaving **14 open**. The system is **well-engineered at the
+**22 are now fixed** (F-002, F-003, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036), leaving **13 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -40,9 +40,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 1 | F-005† |
-| Med | 7 | F-001, F-006, F-007, F-008, F-010, F-020, F-036 |
+| Med | 6 | F-001, F-006, F-007, F-008, F-010, F-020 |
 | Low | 6 | F-004, F-009, F-017, F-027, F-028, F-030 |
-| ✅ Fixed | 21 | F-002, F-003, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035 |
+| ✅ Fixed | 22 | F-002, F-003, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -119,10 +119,10 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > in progress: F-003 (`trading status` half-run detection) + F-032
 > (`daily_unattended` broker-free gap-filler) + F-013 (`trading prune` data
 > retention) + F-031 (train/serve feature parity) + F-026 (deterministic
-> narrative guardrails) done 2026-06-18; F-035 (macro self-healing phase 1 —
-> `trading macro refresh` + Kite cross-source gap-fill + `macro_reconciliation`
-> table) done 2026-06-19 — next is F-036 (`/macro-doctor` skill + cross-verify)
-> then F-010.
+> narrative guardrails) done 2026-06-18; F-035 + F-036 (macro self-healing —
+> `trading macro refresh`/`verify`, `reconcile_macro`, `macro_reconciliation`
+> table + bundle annotation, `/macro-doctor` skill) done 2026-06-19 — next is
+> F-010 (decide each dormant table).
 
 ## How to use this file
 
@@ -191,7 +191,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | ~~F-032~~ | GAP | Med | 8 | ~~Daily pipeline is human-run reminders only (sole unattended job is weekly_train); a missed day = no snapshot/bundle/MTM, open trades unmanaged, track-record holes~~ | ✅ Fixed 2026-06-18 — `jobs/daily_unattended.py` + `trading daily-unattended` run the broker-free pre-open spine unattended (gap-filler); afternoon MTM still interactive |
 | F-033 | VULN | Med | 6 | Candidate-symbol regex `[A-Z0-9_]+` excludes `-`/`&`, so hyphen/ampersand tickers (BAJAJ-AUTO, M&M) are silently dropped from `brief.md` and deleted from `_context.md` by `pre_open_iep` | ✅ Fixed (2026-06-17) |
 | ~~F-035~~ | GAP | Med | 6 | ~~No self-healing: a stale/missing macro snapshot only refuses (F-026) or degrades — nothing auto re-pulls it. The remedy is a manual `assemble-context` re-run. Belongs in the data layer (re-ingestion), not the LLM~~ | ✅ Fixed 2026-06-19 — `trading macro refresh` deterministically re-pulls + upserts the snapshot; `--cross <kite file>` gap-fills still-missing VIX/USDINR from a validated Kite MCP second source with `macro_reconciliation` provenance (migration v4). `/macro-doctor` skill orchestration + cross-verify → F-036 |
-| F-036 | GAP | Med | 6 | Macro figures (VIX/USDINR/FII/DII) come from a single provider with no cross-source reconciliation; a wrong upstream value flows through unflagged. F-026 can only check the brief against the bundle, not the bundle against reality | Open |
+| ~~F-036~~ | GAP | Med | 6 | ~~Macro figures (VIX/USDINR/FII/DII) come from a single provider with no cross-source reconciliation; a wrong upstream value flows through unflagged. F-026 can only check the brief against the bundle, not the bundle against reality~~ | ✅ Fixed 2026-06-19 — pure `reconcile_macro` (VIX abs≤0.5, USDINR rel≤0.5%, FII/DII→`unreconciled`) + `trading macro verify` (exit-1 on mismatch) writes `macro_reconciliation`; `context._render_macro` annotates flagged figures inline (`⚠ kite …`, `(unreconciled)`) so the bundle — and F-026's brief check — carries the reconciliation state. `/macro-doctor` skill pulls the Kite second source read-only |
 
 ---
 
@@ -839,31 +839,39 @@ The `/macro-doctor` skill that orchestrates the Kite pull and the cross-source
 *verification* (vs. gap-fill) of figures the primary feed did supply is **F-036**
 (phase 2). See `docs/superpowers/specs/2026-06-18-macro-self-healing-reconciliation-design.md`.
 
-### F-036 — Single-source macro figures, no cross-verification (`GAP`, Med, Phase 6)
+### F-036 — Single-source macro figures, no cross-verification (`GAP`, Med, Phase 6) — ✅ Fixed 2026-06-19
 Spun off from F-026. VIX/USDINR/FII/DII come from one provider; a wrong upstream
 value enters the bundle unflagged. F-026's figure check only verifies the
 **brief against the bundle** — it cannot catch a bundle that is itself wrong.
-- **Fix idea:** at ingestion, fetch the headline macro figures from a second
-  trusted, structured source (e.g. yfinance `^INDIAVIX` / `USDINR=X`, NSE
-  provisional FII/DII) and reconcile: store the value plus a discrepancy/confidence
-  flag when sources disagree beyond tolerance. `assemble_context` surfaces the
-  flag in the macro snapshot; F-026's warn then upgrades from "the LLM may have
-  invented this" to "the bundle itself flagged this figure as unreconciled."
-- **Phase-1 infrastructure already landed (F-035):** the `macro_reconciliation`
-  table (migration v4) and the validated `MacroCrossSource` reader exist. F-036
-  adds the pure `reconcile_macro` tolerance core, `trading macro verify`
-  (exit-1 on mismatch), `context._render_macro` annotation of flagged figures,
-  and the `/macro-doctor` skill that pulls the Kite second source read-only.
+
+**Resolution (Phase 2 of the macro self-healing spec).**
+- **`data/reconcile.py::reconcile_macro`** — pure (no DB/I-O) tolerance core:
+  VIX absolute (≤0.5), USDINR relative (≤0.5%) → `ok`/`mismatch`; a missing side →
+  `missing_primary`/`missing_secondary`; FII/DII have no Kite feed so they are
+  always `unreconciled` (flagged, never silently `ok`). Returns `ReconRow`s.
+- **`trading macro verify --date <d> --cross <file>`** reads the stored snapshot +
+  the validated Kite cross source, reconciles, upserts `macro_reconciliation`, and
+  **exits 1 on any mismatch** so the daily flow / skill reacts.
+- **`context._render_macro`** reads the day's reconciliation rows and annotates
+  flagged figures inline (`| VIX | 19.40 ⚠ kite 22.10 |`,
+  `| FII flow (₹ cr) | +1234 (unreconciled) |`). The bundle — and therefore
+  F-026's brief cross-check — now carries the bundle-vs-reality state, upgrading
+  the warn from "the LLM may have invented this" to "the bundle flagged this."
+- **`/macro-doctor` skill** orchestrates: auth-probe Kite, pull `NSE:INDIA VIX`
+  (+ USDINR future proxy) read-only, write `macro_cross_HHMM.json`, then invoke
+  `macro refresh`/`verify`. Never places orders.
 - **Out of scope:** LLM web-search verification of precise figures (unreliable —
-  a hallucination vector, not a fix). Verification must be against structured
-  feeds.
+  a hallucination vector, not a fix); an NSE second feed for FII/DII (a larger
+  integration — flagged `unreconciled` for now). Verification stays against
+  structured feeds only.
 
 ---
 
-_Counts: 14 open · 1 superseded · 21 fixed (F-002, F-003, F-012, F-013, F-014,
+_Counts: 13 open · 1 superseded · 22 fixed (F-002, F-003, F-012, F-013, F-014,
 F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029,
-F-031, F-032, F-033, F-034, F-035). Updated 2026-06-19 (F-035 — macro
-self-healing phase 1: `trading macro refresh` re-pulls + upserts the snapshot and
-`--cross` gap-fills still-missing VIX/USDINR from a validated Kite MCP second
-source with `macro_reconciliation` provenance, migration v4; `/macro-doctor`
-orchestration + cross-verify of supplied figures → F-036)._
+F-031, F-032, F-033, F-034, F-035, F-036). Updated 2026-06-19 (F-035/F-036 — macro
+self-healing: `trading macro refresh` re-pulls/upserts + `--cross` gap-fills from a
+validated Kite MCP second source (migration v4 `macro_reconciliation`);
+`reconcile_macro` + `trading macro verify` cross-check VIX/USDINR within tolerance
+(FII/DII `unreconciled`) and `context._render_macro` annotates flagged figures;
+`/macro-doctor` skill pulls the Kite source read-only)._

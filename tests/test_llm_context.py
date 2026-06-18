@@ -89,6 +89,54 @@ def test_assemble_context_macro_no_data_when_missing(conn: sqlite3.Connection, p
     assert "_(no data)_" in body
 
 
+def _seed_recon(conn, field, status, *, secondary_value=None) -> None:
+    from trading.store.reconciliation_store import ReconRow, upsert_reconciliation_row
+
+    upsert_reconciliation_row(
+        conn,
+        ReconRow(
+            date="2026-05-15",
+            field=field,
+            primary_value=None,
+            primary_source="yfinance",
+            secondary_value=secondary_value,
+            secondary_source="kite_mcp",
+            abs_delta=None,
+            status=status,
+            checked_at="t",
+        ),
+    )
+    conn.commit()
+
+
+def test_render_macro_annotates_mismatch(conn: sqlite3.Connection) -> None:
+    from trading.llm.context import _render_macro
+
+    _seed_macro(conn)
+    _seed_recon(conn, "vix", "mismatch", secondary_value=22.5)
+    out = _render_macro(conn, date(2026, 5, 15))
+    assert "⚠" in out
+    assert "22.5" in out  # the Kite second-source reading is surfaced on the VIX line
+
+
+def test_render_macro_flags_unreconciled_fii(conn: sqlite3.Connection) -> None:
+    from trading.llm.context import _render_macro
+
+    _seed_macro(conn)
+    _seed_recon(conn, "fii_flow_cr", "unreconciled")
+    out = _render_macro(conn, date(2026, 5, 15))
+    assert "unreconciled" in out
+
+
+def test_render_macro_no_annotation_when_ok(conn: sqlite3.Connection) -> None:
+    from trading.llm.context import _render_macro
+
+    _seed_macro(conn)
+    _seed_recon(conn, "vix", "ok", secondary_value=19.5)
+    out = _render_macro(conn, date(2026, 5, 15))
+    assert "⚠" not in out
+
+
 def _candidate(symbol: str = "RVNL", n_passed: int = 9) -> Candidate:
     rules = tuple(RuleResult(name=f"r{i}", passed=(i < n_passed), reason="") for i in range(10))
     return Candidate(

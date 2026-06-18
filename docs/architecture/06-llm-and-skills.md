@@ -101,10 +101,12 @@ single `brief.md` in a fixed section order:
 > silently breaks symbol parsing (candidates dropped from the brief, or an
 > orphan-warning storm) with no test spanning the three. → F-027.
 
-## 4. The three skills (`.claude/skills/`)
+## 4. The skills (`.claude/skills/`)
 
 Each skill is a `SKILL.md` the Claude Code session executes. They are the only
-place MCP / the LLM is invoked.
+place MCP / the LLM is invoked. Three drive the daily narrative/broker loop
+(below); a fourth, `/macro-doctor` (§4.4), is the F-036 reconciliation
+orchestrator.
 
 ### 4.1 `/kite-snapshot` — broker holdings/GTTs
 Probes `mcp__kite__get_profile`; on auth failure it halts and tells the user to
@@ -131,6 +133,17 @@ old, it must refuse and tell the user to re-assemble — and this is now also
 enforced in code (F-026): `compile_brief` raises `StaleBundleError` on a stale
 bundle regardless of whether the model honours the SKILL rule.
 
+### 4.4 `/macro-doctor` — macro cross-source reconciliation (F-035/F-036)
+Probes `mcp__kite__get_profile`, then pulls a **read-only** second source —
+`NSE:INDIA VIX` (+ a USDINR currency-future proxy) via `mcp__kite__get_quotes` —
+and writes `data/raw/<date>/macro_cross_HHMM.json` (the validated `MacroCrossSource`
+schema). It then hands off to the deterministic CLI: `trading macro refresh
+--cross` gap-fills any still-missing figure, and `trading macro verify --cross`
+cross-checks within tolerance (exit-1 on mismatch). **Orchestrator only** — every
+DB write goes through the CLI, and it never calls `place_order`/`modify`. Kite has
+no FII/DII feed, so those stay `unreconciled`. This is the "skill is the brain,
+deterministic code is the hands" split applied to ingestion.
+
 ## 5. Where the trust boundaries are
 
 | Boundary | Enforced by | Risk |
@@ -138,7 +151,8 @@ bundle regardless of whether the model honours the SKILL rule.
 | Broker JSON shape | `snapshot_schema` validation at the read boundary | code-enforced ✅ (F-002) — malformed write → `SnapshotSchemaError` with remediation |
 | Quote freshness | `quotes_snapshot` code (30 min) | code-enforced ✅ |
 | Bundle freshness (analyst) | `compile_brief` → `StaleBundleError` (>12h) + SKILL.md | code-enforced ✅ (F-026) — deterministic refuse, `--allow-stale` override |
-| Narrative accuracy | `compile_brief` macro figure cross-check + "evidence-first" SKILL rule | partial ✅ (F-026) — VIX/USDINR cited in `macro_brief.md` are checked against the bundle (warn-only); other prose still LLM-trust. Bundle-vs-reality → F-036 |
+| Narrative accuracy | `compile_brief` macro figure cross-check + "evidence-first" SKILL rule | partial ✅ (F-026) — VIX/USDINR cited in `macro_brief.md` are checked against the bundle (warn-only); other prose still LLM-trust |
+| Bundle-vs-reality (macro) | `reconcile_macro` + `trading macro verify` + `_render_macro` annotation | code-enforced ✅ (F-036) — VIX/USDINR cross-checked vs Kite within tolerance, mismatches flagged in the bundle; FII/DII `unreconciled` (no Kite feed) |
 | Candidate heading format | shared string across 3 modules | silent breakage on change (F-027) |
 
 ## 6. Current-state note
@@ -157,10 +171,12 @@ missing required parts — loud, which is good, but there's no automated fallbac
 - **Narrative verification (F-026) ✅ done 2026-06-18.** `compile_brief` now
   cross-checks the VIX/USDINR figures cited in `macro_brief.md` against the
   bundle's macro snapshot and warns on a mismatch (warn-only; FII/DII left to the
-  human). This catches the brief contradicting the bundle. Two follow-ups remain
-  in the **data layer**: auto re-pulling a stale/missing macro snapshot (F-035)
-  and cross-source verification of the bundle's own figures (F-036) — both kept
-  out of the narrative-compile step to preserve ingestion/analysis decoupling.
+  human). This catches the brief contradicting the bundle. The two data-layer
+  follow-ups are now **✅ done 2026-06-19**: auto re-pull of a stale/missing macro
+  snapshot (F-035, `trading macro refresh`) and cross-source verification of the
+  bundle's own figures (F-036, `reconcile_macro` + `trading macro verify` +
+  `_render_macro` annotation + `/macro-doctor`) — both in ingestion, keeping the
+  narrative-compile step decoupled.
 - **Refuse-stale (F-026) ✅ done 2026-06-18.** The 12-hour gate is now
   deterministic in `compile_brief` (`StaleBundleError`, `--allow-stale` override),
   not just `SKILL.md` text.

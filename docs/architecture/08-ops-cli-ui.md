@@ -132,7 +132,7 @@ A `typer` app; the project's single entry point (`trading …`). It's intentiona
 
 Command groups (full list in [00-overview §5](./00-overview.md)): daily jobs,
 periodic (weekly-train/sip/daily-unattended), brief (assemble-context/compile),
-data ingest (ingest-history/ingest-news/macro snapshot·refresh/sector), analysis (scan/backtest),
+data ingest (ingest-history/ingest-news/macro snapshot·refresh·verify/sector), analysis (scan/backtest),
 portfolio & paper, ranker (train-ranker/ranker-status), broker fallback
 (kite-emergency-*), ops (remind/notify-test/status/prune).
 

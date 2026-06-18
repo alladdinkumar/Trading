@@ -14,17 +14,17 @@ from trading.store.reconciliation_store import (
 
 
 def _row(**over: object) -> ReconRow:
-    base = dict(
-        date="2026-06-19",
-        field="vix",
-        primary_value=19.40,
-        primary_source="yfinance",
-        secondary_value=19.55,
-        secondary_source="kite_mcp",
-        abs_delta=0.15,
-        status="ok",
-        checked_at="2026-06-19T08:15:00",
-    )
+    base = {
+        "date": "2026-06-19",
+        "field": "vix",
+        "primary_value": 19.40,
+        "primary_source": "yfinance",
+        "secondary_value": 19.55,
+        "secondary_source": "kite_mcp",
+        "abs_delta": 0.15,
+        "status": "ok",
+        "checked_at": "2026-06-19T08:15:00",
+    }
     base.update(over)
     return ReconRow(**base)  # type: ignore[arg-type]
 

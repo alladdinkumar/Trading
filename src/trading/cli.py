@@ -53,6 +53,7 @@ from trading.data.macro import MacroSnapshot, snapshot_and_classify
 from trading.data.macro_cross import read_macro_cross
 from trading.data.news import default_aliases, fetch_all_news
 from trading.data.ohlcv_refresh import refresh_ohlcv
+from trading.data.reconcile import reconcile_macro
 from trading.data.sector import fetch_all_sectors
 from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
@@ -84,7 +85,7 @@ from trading.portfolio.health import (
     technicals_from_history,
 )
 from trading.store.db import get_conn
-from trading.store.macro_store import upsert_macro_snapshot
+from trading.store.macro_store import get_macro_snapshot, upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import get_sentiment_daily, insert_news_items
 from trading.store.ohlcv import list_symbols, parquet_path, read_ohlcv, write_ohlcv
@@ -804,6 +805,69 @@ def macro_refresh_cmd(
         for row in recon_rows:
             upsert_reconciliation_row(conn, row)
     console.print(f"[green]macro_snapshot refreshed for {snap.date}.[/green]")
+
+
+@macro_app.command("verify")
+def macro_verify_cmd(
+    date_str: Annotated[str, typer.Option("--date", help="Snapshot date (YYYY-MM-DD).")],
+    cross: Annotated[
+        Path,
+        typer.Option("--cross", help="Kite MCP macro_cross_HHMM.json second source (F-036)."),
+    ],
+) -> None:
+    """Cross-verify the stored macro snapshot against a Kite MCP second source.
+
+    Reconciles VIX/USDINR within tolerance, flags FII/DII as unreconciled, writes
+    the outcome to `macro_reconciliation`, and exits 1 if any figure mismatches so
+    the daily flow / `/macro-doctor` skill can react.
+    """
+    paths = get_paths()
+    cross_src = read_macro_cross(cross)
+    checked_at = datetime.now().isoformat(timespec="seconds")
+
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        snap = get_macro_snapshot(conn, date_str)
+        if snap is None:
+            console.print(
+                f"[red]No macro snapshot for {date_str} — run "
+                f"`trading macro refresh --date {date_str}` first.[/red]"
+            )
+            raise typer.Exit(code=2)
+        rows = reconcile_macro(snap, cross_src, checked_at=checked_at)
+        for row in rows:
+            upsert_reconciliation_row(conn, row)
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Field")
+    table.add_column("Primary", justify="right")
+    table.add_column("Kite", justify="right")
+    table.add_column("Status")
+    status_color = {
+        "ok": "green",
+        "mismatch": "red",
+        "missing_primary": "yellow",
+        "missing_secondary": "yellow",
+        "unreconciled": "dim",
+    }
+    for row in rows:
+        color = status_color.get(row.status, "white")
+        table.add_row(
+            row.field,
+            _fmt(row.primary_value),
+            _fmt(row.secondary_value),
+            f"[{color}]{row.status}[/{color}]",
+        )
+    console.print(table)
+
+    mismatches = [r.field for r in rows if r.status == "mismatch"]
+    if mismatches:
+        console.print(
+            f"[red]Cross-source mismatch on {', '.join(mismatches)} — "
+            f"verify the figures before trusting the bundle.[/red]"
+        )
+        raise typer.Exit(code=1)
+    console.print(f"[green]macro figures reconciled for {date_str}.[/green]")
 
 
 @app.command("sector")
