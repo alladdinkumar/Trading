@@ -219,6 +219,24 @@ def passes_no_critical_event(symbol: str, ctx: ScanContext) -> RuleResult:
 # Orchestration
 # ---------------------------------------------------------------------------
 
+# Canonical Layer-A rule names, in the exact order evaluate_symbol emits them.
+# signals.rules_passed_json persists only the *passed* names, so consumers (the
+# dashboard's rule_chip_grid) reconstruct the full pass/fail grid against this
+# tuple. Kept in sync with evaluate_symbol by
+# test_layer_a_rule_names_match_evaluate_symbol.
+LAYER_A_RULE_NAMES: tuple[str, ...] = (
+    "uptrend",
+    "pullback",
+    "rsi_band",
+    "volume_exhaustion",
+    "liquidity",
+    "no_recent_breakdown",
+    "regime",
+    "not_fno_banned",
+    "not_t2t",
+    "no_critical_event",
+)
+
 
 def _f(series_val: object) -> float:
     """Convert a (possibly NaN) value to plain float, NaN preserved."""

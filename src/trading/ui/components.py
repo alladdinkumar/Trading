@@ -13,6 +13,7 @@ from typing import Literal
 
 import streamlit as st
 
+from trading.strategy.rules import LAYER_A_RULE_NAMES
 from trading.ui.charts import (
     COLOR_INFO,
     COLOR_MUTED,
@@ -82,25 +83,46 @@ def health_chip(verdict: str | None, score: int | None = None) -> str:
     )
 
 
+def _rule_chip_items(parsed: object) -> list[tuple[str, bool]]:
+    """Normalize the parsed ``rules_passed_json`` payload into (name, passed) pairs.
+
+    Two on-disk shapes are supported:
+
+    - ``dict`` ``{name: bool}`` — legacy/explicit pass-fail map, used verbatim.
+    - ``list`` ``[name, …]`` — the current writer (``pre_open``) persists only
+      the *passed* rule names. Failed rules are absent, so we cross-reference
+      :data:`LAYER_A_RULE_NAMES` to render the full grid (absent ⇒ failed).
+
+    Raises ``TypeError`` on any other shape so the caller can show a fallback.
+    """
+    if isinstance(parsed, dict):
+        return [(str(name), bool(ok)) for name, ok in parsed.items()]
+    if isinstance(parsed, list):
+        passed = {str(name) for name in parsed}
+        return [(name, name in passed) for name in LAYER_A_RULE_NAMES]
+    raise TypeError(f"unexpected rules_passed payload: {type(parsed).__name__}")
+
+
 def rule_chip_grid(rules_passed_json: str | None) -> None:
     """Render a horizontal grid of pass/fail chips for the 10 Layer-A rules.
 
-    Accepts the JSON column verbatim — ``{"rule_name": true/false, …}``.
+    Accepts the JSON column verbatim — either a ``{"rule_name": true/false}``
+    map or the writer's ``["passed_rule", …]`` list (see :func:`_rule_chip_items`).
     Falls back to "no rule data" when missing/empty/unparseable.
     """
     if not rules_passed_json:
         st.caption("_(no rule evaluation captured)_")
         return
     try:
-        rules: dict[str, bool] = json.loads(rules_passed_json)
-    except json.JSONDecodeError:
+        items = _rule_chip_items(json.loads(rules_passed_json))
+    except (json.JSONDecodeError, TypeError):
         st.caption("_(rule data unparseable)_")
         return
-    if not rules:
+    if not items:
         st.caption("_(no rule data)_")
         return
     chips = []
-    for name, ok in rules.items():
+    for name, ok in items:
         color = COLOR_POSITIVE if ok else COLOR_NEGATIVE
         glyph = "✓" if ok else "✗"
         short = name.replace("passes_", "").replace("_", " ")

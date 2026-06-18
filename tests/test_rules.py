@@ -13,6 +13,7 @@ from trading.config import get_paths
 from trading.features.technicals import add_indicators
 from trading.store.ohlcv import write_ohlcv
 from trading.strategy.rules import (
+    LAYER_A_RULE_NAMES,
     Candidate,
     RuleResult,
     ScanContext,
@@ -308,6 +309,17 @@ def test_evaluate_symbol_returns_full_candidate() -> None:
         "not_t2t",
         "no_critical_event",
     }
+
+
+def test_layer_a_rule_names_match_evaluate_symbol() -> None:
+    """LAYER_A_RULE_NAMES must mirror evaluate_symbol's rule order exactly.
+
+    signals.rules_passed_json stores only the *passed* rule names, so the UI
+    (rule_chip_grid) reconstructs the full pass/fail grid by cross-referencing
+    this canonical tuple. If the two drift, failed rules silently vanish.
+    """
+    cand = evaluate_symbol("RVNL", _uptrend_df(), ScanContext(scan_date=date(2024, 12, 1)))
+    assert tuple(r.name for r in cand.rules) == LAYER_A_RULE_NAMES
 
 
 def test_candidate_all_passed_property() -> None:
