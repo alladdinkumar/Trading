@@ -8,9 +8,10 @@
 
 ## Executive summary
 
-The architecture review (docs 00–08) produced **33 active findings** (1 earlier
-finding superseded). **19 are now fixed** (F-002, F-003, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-031, F-032, F-033, F-034), leaving **14 open**. The system is **well-engineered at the
+The architecture review (docs 00–08) produced **35 active findings** (1 earlier
+finding superseded; F-035/F-036 spun off from F-026's self-healing follow-up).
+**20 are now fixed** (F-002, F-003, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034), leaving **15 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -39,9 +40,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 1 | F-005† |
-| Med | 7 | F-001, F-006, F-007, F-008, F-010, F-020, F-026 |
+| Med | 8 | F-001, F-006, F-007, F-008, F-010, F-020, F-035, F-036 |
 | Low | 6 | F-004, F-009, F-017, F-027, F-028, F-030 |
-| ✅ Fixed | 19 | F-002, F-003, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-031, F-032, F-033, F-034 |
+| ✅ Fixed | 20 | F-002, F-003, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -90,8 +91,13 @@ pre-open spine on operator-absent days (gap-filler; skips days already covered).
 `trading prune` cap `raw/<date>/` (30d) and `news_items` (365d) growth, auto-run
 in weekly_train. ~~F-031 (train/serve skew)~~ ✅ **Done (2026-06-18)** — shared
 `news_store.negative_news_count_7d` feeds both inference and the training lookup
-(`build_negative_news_lookup`). F-026 (narrative validation), F-010
-(decide each dormant table: implement or mark reserved).
+(`build_negative_news_lookup`). ~~F-026 (narrative validation)~~ ✅ **Done
+(2026-06-18)** — `compile_brief` now refuses a >12h-old bundle
+(`StaleBundleError`, deterministic) and warns when a VIX/USDINR figure cited in
+`macro_brief.md` disagrees with the bundle. Its self-healing follow-up was split
+into **F-035** (auto re-pull stale/missing macro) and **F-036** (multi-source
+macro reconciliation). Remaining: F-010 (decide each dormant table: implement or
+mark reserved).
 
 ### Wave 4 — Structural & cleanup (low-risk, alongside)
 F-001 (prune unused deps), F-004 (canonical IST clock), F-006/F-007/F-008/F-009
@@ -112,8 +118,9 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > F-002 (broker-JSON validation) done 2026-06-17. **Wave 2 complete.** Wave 3
 > in progress: F-003 (`trading status` half-run detection) + F-032
 > (`daily_unattended` broker-free gap-filler) + F-013 (`trading prune` data
-> retention) + F-031 (train/serve feature parity) done 2026-06-18 — next is
-> F-026, F-010.
+> retention) + F-031 (train/serve feature parity) + F-026 (deterministic
+> narrative guardrails) done 2026-06-18 — next is F-010 (and the F-026 spin-offs
+> F-035/F-036).
 
 ## How to use this file
 
@@ -173,7 +180,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | ~~F-023~~ | VULN | High | 5 | ~~Paper equity curve never compounds realised P&L — cash is a constant; closing a winner drops its gain from `portfolio_snapshots.equity`. Equity/drawdown are not a true track record~~ | ✅ Fixed 2026-06-16 — `compute_paper_cash` derives cash from the ledger; equity = derived cash + open MTM, so realised P&L compounds |
 | ~~F-024~~ | VULN | Med | 5 | ~~`days_held` bumped per MTM call, so mid-day + post-close double-count → 25-day time stop fires at ~12 calendar days~~ | ✅ Fixed 2026-06-16 — `days_held = np.busday_count(ts_entry, as_of)`, derived not incremented, so same-day passes don't double-count |
 | ~~F-025~~ | INACC | Med | 5 | ~~Cost asymmetry: backtest applies full Zerodha costs but live paper MTM applies none (raw-price fills) → paper results flatter than backtest~~ | ✅ Fixed 2026-06-16 — `ledger.buy_side_cost`/`sell_side_cost` reuse the backtest cost model; `compute_trade_pnl` nets round-trip costs into pnl and `compute_paper_cash` debits/credits them, so paper P&L + equity carry the same friction as the backtest |
-| F-026 | GAP | Med | 6 | Analyst narrative is unvalidated against the bundle — "evidence-first" is an LLM instruction, not a code check; wrong/invented numbers in brief.md pass through. Refuse-stale (12h) is also advisory-only | Open |
+| ~~F-026~~ | GAP | Med | 6 | ~~Analyst narrative is unvalidated against the bundle — "evidence-first" is an LLM instruction, not a code check; wrong/invented numbers in brief.md pass through. Refuse-stale (12h) is also advisory-only~~ | ✅ Fixed 2026-06-18 — `compile_brief` raises `StaleBundleError` on a >12h-old bundle (deterministic, `--allow-stale` override) and warns when a VIX/USDINR figure in `macro_brief.md` disagrees with the bundle. Self-healing follow-up → F-035/F-036 |
 | F-027 | DEBT | Low | 6 | Brittle 3-way coupling on the `### SYM — passes N/M rules` heading (context renderer / pre_open_iep rewrite / briefing regex), no spanning test | Open |
 | F-028 | INACC | Low | 6 | `assemble_context` docstring omits the sector + Layer-B ranker sections (added Phases 12.6/16) | Open |
 | ~~F-029~~ | VULN | Med | 7 | ~~`pre_open._step_auto_open` hardcodes `predicted_return_pct=20.0` + target=+20% for every signal → prediction calibration is a single meaningless bucket; signal.target disagrees with exit engine's min(+20%,2.5R)~~ | ✅ Fixed 2026-06-16 — `signal.target = target_price(close, stop)` (exit engine's `min(+20%, 2.5R)`); prediction defaults to that target's implied %, so buckets vary per signal |
@@ -181,6 +188,8 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | ~~F-031~~ | INACC | Low | 7 | ~~Train/serve skew: `negative_news_count_7d` empty during weekly retrain (`negative_news_lookup={}`) but populated at inference~~ | ✅ Fixed 2026-06-18 — shared `news_store.negative_news_count_7d` feeds both paths; `ranker_io.build_negative_news_lookup` precomputes the training lookup |
 | ~~F-032~~ | GAP | Med | 8 | ~~Daily pipeline is human-run reminders only (sole unattended job is weekly_train); a missed day = no snapshot/bundle/MTM, open trades unmanaged, track-record holes~~ | ✅ Fixed 2026-06-18 — `jobs/daily_unattended.py` + `trading daily-unattended` run the broker-free pre-open spine unattended (gap-filler); afternoon MTM still interactive |
 | F-033 | VULN | Med | 6 | Candidate-symbol regex `[A-Z0-9_]+` excludes `-`/`&`, so hyphen/ampersand tickers (BAJAJ-AUTO, M&M) are silently dropped from `brief.md` and deleted from `_context.md` by `pre_open_iep` | ✅ Fixed (2026-06-17) |
+| F-035 | GAP | Med | 6 | No self-healing: a stale/missing macro snapshot only refuses (F-026) or degrades — nothing auto re-pulls it. The remedy is a manual `assemble-context` re-run. Belongs in the data layer (re-ingestion), not the LLM | Open |
+| F-036 | GAP | Med | 6 | Macro figures (VIX/USDINR/FII/DII) come from a single provider with no cross-source reconciliation; a wrong upstream value flows through unflagged. F-026 can only check the brief against the bundle, not the bundle against reality | Open |
 
 ---
 
@@ -588,14 +597,41 @@ Paper P&L was systematically rosier than the backtest that justifies the strateg
 
 ---
 
-### F-026 — Narrative unverified + advisory staleness (`GAP`, Med, Phase 6)
-`/analyst` is told to be evidence-first and to refuse a >12h-old bundle, but both
-are instructions, not code. A hallucinated number/event in `brief.md`, or a
+### F-026 — Narrative unverified + advisory staleness (`GAP`, Med, Phase 6) — ✅ Fixed 2026-06-18
+**Was:** `/analyst` is told to be evidence-first and to refuse a >12h-old bundle,
+but both were instructions, not code. A hallucinated number in `brief.md`, or a
 narrative written off a stale bundle, would pass through silently.
-- **Fix idea:** Post-compile validator: assert figures quoted in `macro_brief.md`
-  match the macro row; warn on symbols mentioned that aren't bundle candidates;
-  move the 12h freshness check into `compile_brief` (compare `_Assembled at_` vs
-  now) so it's deterministic.
+
+**Resolution (deterministic guardrails in `compile_brief`):**
+- **Staleness is now code, not advice.** `compile_brief` parses the bundle's
+  `_Assembled at_` stamp and raises `StaleBundleError` when it is older than
+  `max_age` (default 12h) relative to `now` (both injectable for tests). A missing
+  stamp skips the check (age unknowable); `allow_stale=True` / the CLI
+  `--allow-stale` flag is the deliberate override. `trading brief compile`
+  surfaces it as a clean exit-1 message pointing at `assemble-context`.
+- **Macro figure cross-check (warn-only).** The bundle's `## Macro snapshot` table
+  is parsed from `_context.md` (so `compile_brief` stays a pure file op — the
+  bundle, not the DB, is the source of truth at compile time). For the
+  unambiguous, sign-stable fields VIX and USDINR, if `macro_brief.md` cites the
+  field by keyword but the bundle's value isn't found (rounding-tolerant), a
+  `warning:` is printed to stderr — same channel as the existing orphan-candidate
+  warning. Non-fatal, so a correctly-rounded figure never breaks the build but an
+  invented/transposed one is surfaced. FII/DII flows (₹/comma/sign formatting)
+  are deliberately left to the human to avoid false positives.
+
+Tests: `test_llm_briefing` (stale raises, allow_stale bypasses, fresh compiles,
+absent-stamp skips, figure mismatch warns, match/absent-keyword quiet) +
+`test_cli` (refuses stale exit-1, `--allow-stale` overrides).
+
+**Deliberately out of scope (→ F-035, F-036):** auto re-pulling a stale/missing
+macro snapshot, and cross-source verification of the bundle's figures against a
+second provider. Both belong in the **data/ingestion layer**, not the
+narrative-compile step — keeping ingestion decoupled from analysis preserves the
+bundle's reproducibility. F-026's guardrail remains the safety net for when a
+self-healing refresh itself returns nothing.
+
+*Original fix idea:* post-compile validator asserting `macro_brief.md` figures
+match the macro row + deterministic 12h freshness check in `compile_brief`.
 
 ### F-027 — Candidate-heading 3-way coupling (`DEBT`, Low, Phase 6)
 `context._render_candidates` writes `### SYM — passes N/M rules`,
@@ -770,9 +806,44 @@ render→store→parse round-trip test spanning `pre_open` and the UI).
 
 ---
 
-_Counts: 14 open · 1 superseded · 19 fixed (F-002, F-003, F-012, F-013, F-014,
-F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-031,
-F-032, F-033, F-034). Updated 2026-06-18 (F-031 — train/serve skew on
-`negative_news_count_7d`; shared `news_store.negative_news_count_7d` +
-`ranker_io.build_negative_news_lookup` feed both inference and the training
-lookup)._
+### F-035 — No self-healing for stale/missing macro data (`GAP`, Med, Phase 6)
+Spun off from F-026. When the macro snapshot is stale or missing, the system can
+only **refuse** (`compile_brief` → `StaleBundleError`) or **degrade** (render
+`_(no data)_`) — nothing re-pulls it. The remedy is the operator manually
+re-running `trading brief assemble-context`. A self-healing system would, on
+detecting stale/missing macro, re-invoke the **data layer** to refresh it and
+write a new, reproducible bundle.
+- **Why data-layer, not LLM:** having the analyst LLM pull/patch figures fuses
+  ingestion into analysis (violates the decoupling rule), breaks bundle
+  reproducibility/audit, and is unreliable for precise numbers. The refresh must
+  be deterministic ingestion code.
+- **Fix idea:** a bounded `refresh_macro(as_of)` in the data layer (re-fetch from
+  the existing provider, upsert `macro_snapshot`); wire the stale/missing path
+  (CLI and/or `daily_unattended`) to call it and re-assemble, rather than only
+  emitting the refuse/degrade message. Keep F-026's guardrail as the backstop for
+  when the refresh returns nothing. **Decoupling note:** must not call any broker
+  / network from `compile_brief` itself.
+
+### F-036 — Single-source macro figures, no cross-verification (`GAP`, Med, Phase 6)
+Spun off from F-026. VIX/USDINR/FII/DII come from one provider; a wrong upstream
+value enters the bundle unflagged. F-026's figure check only verifies the
+**brief against the bundle** — it cannot catch a bundle that is itself wrong.
+- **Fix idea:** at ingestion, fetch the headline macro figures from a second
+  trusted, structured source (e.g. yfinance `^INDIAVIX` / `USDINR=X`, NSE
+  provisional FII/DII) and reconcile: store the value plus a discrepancy/confidence
+  flag when sources disagree beyond tolerance. `assemble_context` surfaces the
+  flag in the macro snapshot; F-026's warn then upgrades from "the LLM may have
+  invented this" to "the bundle itself flagged this figure as unreconciled."
+- **Out of scope:** LLM web-search verification of precise figures (unreliable —
+  a hallucination vector, not a fix). Verification must be against structured
+  feeds.
+
+---
+
+_Counts: 15 open · 1 superseded · 20 fixed (F-002, F-003, F-012, F-013, F-014,
+F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029,
+F-031, F-032, F-033, F-034). Updated 2026-06-18 (F-026 — deterministic narrative
+guardrails: `compile_brief` refuses >12h-old bundles via `StaleBundleError` and
+warns on VIX/USDINR figure mismatch; self-healing follow-up split into F-035
+[auto re-pull stale/missing macro] and F-036 [multi-source macro
+reconciliation])._

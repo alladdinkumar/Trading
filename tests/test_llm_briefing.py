@@ -9,6 +9,7 @@ from freezegun import freeze_time
 
 from trading.llm.briefing import (
     MissingNarrativeError,
+    StaleBundleError,
     compile_brief,
     optional_parts,
     required_parts,
@@ -128,6 +129,127 @@ def test_compile_brief_no_orphan_warning_for_hyphenated_symbol(
     compile_brief(date_dir, mode="pre_open")
     err = capsys.readouterr().err
     assert "orphan" not in err.lower()
+
+
+# --- F-026: deterministic staleness refusal -------------------------------
+
+
+@freeze_time("2026-05-15T22:00:00")
+def test_compile_brief_raises_when_bundle_stale(tmp_path: Path) -> None:
+    """A bundle assembled >12h before now refuses to compile (was advisory)."""
+    date_dir = tmp_path / "2026-05-15"
+    date_dir.mkdir()
+    _write_part(
+        date_dir, "_context.md",
+        "# Trading context bundle — 2026-05-15  (mode: pre_open)\n"
+        "\n_Assembled at 2026-05-15T08:00:00._\n"  # 14h before frozen now
+        "\n## Today's candidates\n\n### RVNL — passes 9/10 rules\n",
+    )
+    with pytest.raises(StaleBundleError) as exc_info:
+        compile_brief(date_dir, mode="pre_open")
+    assert "assemble-context" in str(exc_info.value)
+
+
+@freeze_time("2026-05-15T22:00:00")
+def test_compile_brief_allow_stale_bypasses_age_check(tmp_path: Path) -> None:
+    date_dir = tmp_path / "2026-05-15"
+    date_dir.mkdir()
+    _write_part(
+        date_dir, "_context.md",
+        "# Trading context bundle — 2026-05-15  (mode: pre_open)\n"
+        "\n_Assembled at 2026-05-15T08:00:00._\n"
+        "\n## Today's candidates\n\n### RVNL — passes 9/10 rules\n",
+    )
+    _write_part(date_dir, "macro_brief.md", "Regime: NEUTRAL.\n")
+    _write_part(date_dir, "candidates/RVNL.md", "# RVNL — Conviction: HIGH\n")
+    out = compile_brief(date_dir, mode="pre_open", allow_stale=True)
+    assert out.is_file()
+
+
+@freeze_time("2026-05-15T10:00:00")
+def test_compile_brief_compiles_when_bundle_fresh(tmp_path: Path) -> None:
+    date_dir = tmp_path / "2026-05-15"
+    date_dir.mkdir()
+    _write_part(
+        date_dir, "_context.md",
+        "# Trading context bundle — 2026-05-15  (mode: pre_open)\n"
+        "\n_Assembled at 2026-05-15T09:30:00._\n"  # 30m before frozen now
+        "\n## Today's candidates\n\n### RVNL — passes 9/10 rules\n",
+    )
+    _write_part(date_dir, "macro_brief.md", "Regime: NEUTRAL.\n")
+    _write_part(date_dir, "candidates/RVNL.md", "# RVNL — Conviction: HIGH\n")
+    out = compile_brief(date_dir, mode="pre_open")
+    assert out.is_file()
+
+
+def test_compile_brief_skips_staleness_when_timestamp_absent(
+    tmp_path: Path,
+) -> None:
+    """No `_Assembled at_` line → age cannot be determined → do NOT refuse."""
+    date_dir = tmp_path / "2026-05-15"
+    date_dir.mkdir()
+    _write_part(
+        date_dir, "_context.md",
+        "# Trading context bundle — 2026-05-15  (mode: pre_open)\n"
+        "\n## Today's candidates\n\n### RVNL — passes 9/10 rules\n",
+    )
+    _write_part(date_dir, "macro_brief.md", "Regime: NEUTRAL.\n")
+    _write_part(date_dir, "candidates/RVNL.md", "# RVNL — Conviction: HIGH\n")
+    out = compile_brief(date_dir, mode="pre_open")
+    assert out.is_file()
+
+
+# --- F-026: warn-only macro figure cross-check ----------------------------
+
+
+def _bundle_with_macro(date_dir: Path, macro_rows: str) -> None:
+    _write_part(
+        date_dir, "_context.md",
+        "# Trading context bundle — 2026-05-15  (mode: pre_open)\n\n"
+        "## Macro snapshot\n\n| field | value |\n|---|---|\n"
+        f"{macro_rows}\n"
+        "## Today's candidates\n\n### RVNL — passes 9/10 rules\n",
+    )
+    _write_part(date_dir, "candidates/RVNL.md", "# RVNL — Conviction: HIGH\n")
+
+
+def test_compile_brief_warns_on_macro_figure_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    date_dir = tmp_path / "2026-05-15"
+    date_dir.mkdir()
+    _bundle_with_macro(date_dir, "| VIX | 19.40 |\n| USDINR | 83.12 |\n")
+    _write_part(date_dir, "macro_brief.md", "Regime NEUTRAL. VIX spiked to 25.0.\n")
+    compile_brief(date_dir, mode="pre_open")
+    err = capsys.readouterr().err
+    assert "VIX" in err and "19.40" in err
+
+
+def test_compile_brief_no_warn_when_macro_figure_matches(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    date_dir = tmp_path / "2026-05-15"
+    date_dir.mkdir()
+    _bundle_with_macro(date_dir, "| VIX | 19.40 |\n| USDINR | 83.12 |\n")
+    _write_part(
+        date_dir, "macro_brief.md",
+        "Regime NEUTRAL. VIX at 19.4 with USDINR near 83.12.\n",
+    )
+    compile_brief(date_dir, mode="pre_open")
+    err = capsys.readouterr().err
+    assert "hallucinated" not in err
+
+
+def test_compile_brief_no_warn_when_macro_field_absent_from_brief(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    date_dir = tmp_path / "2026-05-15"
+    date_dir.mkdir()
+    _bundle_with_macro(date_dir, "| VIX | 19.40 |\n| USDINR | 83.12 |\n")
+    _write_part(date_dir, "macro_brief.md", "Regime NEUTRAL. Conditions calm.\n")
+    compile_brief(date_dir, mode="pre_open")
+    err = capsys.readouterr().err
+    assert "hallucinated" not in err
 
 
 @freeze_time("2026-05-15T17:00:00")

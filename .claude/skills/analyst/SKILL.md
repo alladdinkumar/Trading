@@ -17,6 +17,8 @@ If the user gave you an explicit date, use that instead.
 
 If the bundle's `_Assembled at_` timestamp is more than 12 hours old relative to now, do NOT write outputs. Tell the user to re-run `trading brief assemble-context --date <today>` first.
 
+This is now also enforced in code (F-026): `trading brief compile` raises `StaleBundleError` on a >12h-old bundle, so a stale narrative cannot be assembled by accident. Use `--allow-stale` only when deliberately compiling an old bundle. `compile` also cross-checks the VIX/USDINR figures you cite in `macro_brief.md` against the bundle's macro snapshot and warns on a mismatch — so quote those numbers verbatim from the bundle.
+
 ## Outputs
 
 Write each file under the same `data/research/YYYY-MM-DD/` directory. Follow the skeletons in `references/output-templates.md` exactly — `compile_brief` parses fixed headings.

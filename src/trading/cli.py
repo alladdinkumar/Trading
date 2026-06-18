@@ -61,7 +61,11 @@ from trading.jobs.mid_day import MidDayAborted, run_mid_day
 from trading.jobs.post_close import PostCloseAborted, run_post_close
 from trading.jobs.pre_open import PreOpenAborted, build_scan_context, run_pre_open
 from trading.jobs.pre_open_iep import PreOpenIepAborted, run_pre_open_iep
-from trading.llm.briefing import MissingNarrativeError, compile_brief
+from trading.llm.briefing import (
+    MissingNarrativeError,
+    StaleBundleError,
+    compile_brief,
+)
 from trading.llm.context import ContextInputs
 from trading.llm.context import assemble_context as _assemble_context
 from trading.ops.notify import notify as _notify
@@ -1246,12 +1250,22 @@ def brief_assemble_context_cmd(
 @brief_app.command("compile")
 def brief_compile_cmd(
     date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD")],
+    allow_stale: Annotated[
+        bool,
+        typer.Option(
+            "--allow-stale",
+            help="Compile even if the bundle is older than 12h (F-026).",
+        ),
+    ] = False,
 ) -> None:
     """Concatenate analyst-produced narrative parts into brief.md."""
     paths = get_paths()
     date_dir = paths.research_dir / date_str
     try:
-        out = compile_brief(date_dir)
+        out = compile_brief(date_dir, allow_stale=allow_stale)
+    except StaleBundleError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1) from e
     except MissingNarrativeError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(code=1) from e

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from trading.llm.context import Mode
@@ -18,6 +18,20 @@ from trading.llm.context import Mode
 
 class MissingNarrativeError(RuntimeError):
     """Raised by `compile_brief` when one or more required parts are absent."""
+
+
+class StaleBundleError(RuntimeError):
+    """Raised by `compile_brief` when the bundle is older than `max_age`.
+
+    Moves the analyst skill's advisory ">12h-old bundle" rule into code so a
+    narrative is never compiled off a stale snapshot by accident (F-026).
+    """
+
+
+# F-026: the analyst skill's advisory refuse-stale threshold, now enforced.
+DEFAULT_MAX_BUNDLE_AGE = timedelta(hours=12)
+
+_ASSEMBLED_AT = re.compile(r"_Assembled at (\S+?)\._")
 
 
 SECTOR_COMMENTARY_PLACEHOLDER = (
@@ -52,7 +66,91 @@ def _infer_mode(context_md: str) -> Mode:
     return "pre_open"
 
 
-def compile_brief(date_dir: Path, *, mode: Mode | None = None) -> Path:
+def _parse_assembled_at(context_md: str) -> datetime | None:
+    """Parse the bundle's `_Assembled at <iso>._` stamp; None if absent/bad."""
+    m = _ASSEMBLED_AT.search(context_md)
+    if m is None:
+        return None
+    try:
+        return datetime.fromisoformat(m.group(1))
+    except ValueError:
+        return None
+
+
+def _parse_macro_table(context_md: str) -> dict[str, str]:
+    """Extract the `## Macro snapshot` field→value rows from the bundle.
+
+    The bundle (not the DB) is the source of truth at compile time, so this
+    keeps `compile_brief` a pure file operation.
+    """
+    out: dict[str, str] = {}
+    in_section = False
+    for line in context_md.splitlines():
+        if line.strip() == "## Macro snapshot":
+            in_section = True
+            continue
+        if in_section:
+            if line.startswith("## "):
+                break
+            if line.startswith("|"):
+                cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                if (
+                    len(cells) == 2
+                    and cells[0] not in ("field", "---")
+                    and cells[1] not in ("value", "---")
+                ):
+                    out[cells[0]] = cells[1]
+    return out
+
+
+# Field → keywords that, if present in macro_brief.md, mean the analyst cited
+# that figure and we should cross-check its value. Limited to the unambiguous,
+# sign-stable numeric fields (VIX, USDINR); flows carry ₹/comma/sign formatting
+# that makes numeric matching unreliable, so they are left to the human.
+_MACRO_FIGURE_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
+    ("VIX", ("vix",)),
+    ("USDINR", ("usdinr", "usd/inr", "usd-inr")),
+]
+
+
+def _macro_figure_warnings(
+    macro_table: dict[str, str], brief_text: str
+) -> list[str]:
+    """Warn when macro_brief cites a field but its bundle value is absent.
+
+    Rounding-tolerant (matches to 1 decimal or nearest integer) so a correctly
+    rounded figure never warns; a clearly different number does. Warn-only —
+    never blocks the compile (F-026)."""
+    brief_lower = brief_text.lower()
+    nums = [
+        float(t)
+        for t in re.findall(r"-?\d+(?:\.\d+)?", brief_text.replace(",", ""))
+    ]
+    warnings: list[str] = []
+    for field, keywords in _MACRO_FIGURE_KEYWORDS:
+        val_str = macro_table.get(field)
+        if val_str is None or not any(k in brief_lower for k in keywords):
+            continue
+        try:
+            v = float(val_str.replace(",", ""))
+        except ValueError:
+            continue
+        if not any(round(n, 1) == round(v, 1) or round(n) == round(v) for n in nums):
+            warnings.append(
+                f"warning: macro_brief cites {field} but bundle value {val_str} "
+                f"not found — verify (possible hallucinated figure)"
+            )
+    return warnings
+
+
+def compile_brief(
+    date_dir: Path,
+    *,
+    mode: Mode | None = None,
+    now: datetime | None = None,
+    max_age: timedelta = DEFAULT_MAX_BUNDLE_AGE,
+    allow_stale: bool = False,
+) -> Path:
     """Read narrative parts in `date_dir`, write `brief.md`, return its path.
 
     Raises `MissingNarrativeError` listing any required parts that are
@@ -61,6 +159,11 @@ def compile_brief(date_dir: Path, *, mode: Mode | None = None) -> Path:
     candidate files (symbols not in the bundle) are skipped with a
     stderr warning. If `mode` is None, it is inferred from the bundle
     header.
+
+    F-026 guardrails: refuses (`StaleBundleError`) when the bundle's
+    `_Assembled at_` stamp is older than `max_age` relative to `now`
+    (unless `allow_stale`); and warns to stderr when a macro figure cited
+    in `macro_brief.md` disagrees with the bundle's macro snapshot.
     """
     context_path = date_dir / "_context.md"
     if not context_path.is_file():
@@ -71,6 +174,19 @@ def compile_brief(date_dir: Path, *, mode: Mode | None = None) -> Path:
     context_md = context_path.read_text(encoding="utf-8")
     if mode is None:
         mode = _infer_mode(context_md)
+
+    if not allow_stale:
+        assembled = _parse_assembled_at(context_md)
+        if assembled is not None:
+            age = (now or datetime.now()) - assembled
+            if age > max_age:
+                raise StaleBundleError(
+                    f"Bundle at {context_path} was assembled "
+                    f"{assembled.isoformat()} ({age} ago, limit {max_age}). "
+                    f"Re-run `trading brief assemble-context --date "
+                    f"{date_dir.name}` to refresh it, or pass allow_stale=True."
+                )
+
     symbols = _parse_candidate_symbols(context_md)
     required = required_parts(mode, symbols)
     missing = [p for p in required if not (date_dir / p).is_file()]
@@ -90,6 +206,10 @@ def compile_brief(date_dir: Path, *, mode: Mode | None = None) -> Path:
                     file=sys.stderr,
                 )
 
+    macro_brief_text = (date_dir / "macro_brief.md").read_text(encoding="utf-8")
+    for w in _macro_figure_warnings(_parse_macro_table(context_md), macro_brief_text):
+        print(w, file=sys.stderr)
+
     sector_path = date_dir / "sector_commentary.md"
     sector_body = (
         sector_path.read_text(encoding="utf-8").strip()
@@ -105,7 +225,7 @@ def compile_brief(date_dir: Path, *, mode: Mode | None = None) -> Path:
         f"{parts_count} narrative parts._",
         "",
         "## Macro",
-        (date_dir / "macro_brief.md").read_text(encoding="utf-8").strip(),
+        macro_brief_text.strip(),
         "",
         "## Sector commentary",
         sector_body,

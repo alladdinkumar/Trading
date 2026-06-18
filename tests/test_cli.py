@@ -374,6 +374,45 @@ def test_brief_compile_assembles_brief(tmp_path: Path, monkeypatch) -> None:
     assert "brief.md" in result.stdout
 
 
+def test_brief_compile_refuses_stale_bundle(tmp_path: Path, monkeypatch) -> None:
+    """F-026: a bundle assembled long ago refuses to compile (exit 1)."""
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+    date_dir = tmp_path / "data" / "research" / "2026-05-15"
+    date_dir.mkdir(parents=True)
+    (date_dir / "_context.md").write_text(
+        "# Trading context bundle — 2026-05-15  (mode: pre_open)\n"
+        "\n_Assembled at 2020-01-01T08:00:00._\n"
+        "\n## Today's candidates\n\n_(no data)_\n",
+        encoding="utf-8",
+    )
+    (date_dir / "macro_brief.md").write_text("x\n", encoding="utf-8")
+    result = runner.invoke(app, ["brief", "compile", "--date", "2026-05-15"])
+    assert result.exit_code == 1, result.stdout
+    assert "assemble-context" in result.stdout
+    assert not (date_dir / "brief.md").is_file()
+
+
+def test_brief_compile_allow_stale_overrides(tmp_path: Path, monkeypatch) -> None:
+    """F-026: --allow-stale compiles despite an old bundle."""
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+    date_dir = tmp_path / "data" / "research" / "2026-05-15"
+    date_dir.mkdir(parents=True)
+    (date_dir / "_context.md").write_text(
+        "# Trading context bundle — 2026-05-15  (mode: pre_open)\n"
+        "\n_Assembled at 2020-01-01T08:00:00._\n"
+        "\n## Today's candidates\n\n_(no data)_\n",
+        encoding="utf-8",
+    )
+    (date_dir / "macro_brief.md").write_text("x\n", encoding="utf-8")
+    result = runner.invoke(
+        app, ["brief", "compile", "--date", "2026-05-15", "--allow-stale"]
+    )
+    assert result.exit_code == 0, result.stdout
+    assert (date_dir / "brief.md").is_file()
+
+
 def test_pre_open_cli_writes_bundle_and_prints_next_step(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
     _init_db(tmp_path)

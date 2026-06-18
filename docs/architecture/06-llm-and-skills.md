@@ -85,6 +85,14 @@ single `brief.md` in a fixed section order:
   in the bundle) are skipped with a stderr warning.
 - **Mode** is inferred from the bundle header (`(mode: post_close)`) if not
   passed.
+- **Deterministic guardrails (F-026):** before compiling, `compile_brief` parses
+  the bundle's `_Assembled at_` stamp and raises `StaleBundleError` if it is
+  older than `max_age` (default 12 h) relative to `now` — both injectable; a
+  missing stamp skips the check; `allow_stale=True` (CLI `--allow-stale`) is the
+  override. It also parses the bundle's `## Macro snapshot` table and warns to
+  stderr when a VIX/USDINR figure cited in `macro_brief.md` disagrees with the
+  bundle (rounding-tolerant, warn-only). Both keep `compile_brief` a pure file
+  operation — the bundle, not the DB, is the source of truth at compile time.
 
 > **Brittle three-way coupling (F-027):** the candidate heading string is written
 > by `context._render_candidates`, re-written in place by `pre_open_iep` when it
@@ -119,7 +127,9 @@ Reads the most recent `_context.md`, and writes `macro_brief.md`,
 headings parse. Style rules: **evidence-first** (cite numbers from the bundle,
 never invent), concise word caps, and a conviction (HIGH/MEDIUM/LOW) justified in
 the body. **Refuse-stale:** if the bundle's `_Assembled at_` timestamp is > 12 h
-old, it must refuse and tell the user to re-assemble.
+old, it must refuse and tell the user to re-assemble — and this is now also
+enforced in code (F-026): `compile_brief` raises `StaleBundleError` on a stale
+bundle regardless of whether the model honours the SKILL rule.
 
 ## 5. Where the trust boundaries are
 
@@ -127,8 +137,8 @@ old, it must refuse and tell the user to re-assemble.
 |---|---|---|
 | Broker JSON shape | `snapshot_schema` validation at the read boundary | code-enforced ✅ (F-002) — malformed write → `SnapshotSchemaError` with remediation |
 | Quote freshness | `quotes_snapshot` code (30 min) | code-enforced ✅ |
-| Bundle freshness (analyst) | **the LLM following SKILL.md** | advisory only — a compliant model refuses, but nothing in code blocks a stale narrative |
-| Narrative accuracy | **the LLM following "evidence-first"** | no code checks the prose against the bundle numbers — interpretation can drift or hallucinate |
+| Bundle freshness (analyst) | `compile_brief` → `StaleBundleError` (>12h) + SKILL.md | code-enforced ✅ (F-026) — deterministic refuse, `--allow-stale` override |
+| Narrative accuracy | `compile_brief` macro figure cross-check + "evidence-first" SKILL rule | partial ✅ (F-026) — VIX/USDINR cited in `macro_brief.md` are checked against the bundle (warn-only); other prose still LLM-trust. Bundle-vs-reality → F-036 |
 | Candidate heading format | shared string across 3 modules | silent breakage on change (F-027) |
 
 ## 6. Current-state note
@@ -144,15 +154,16 @@ missing required parts — loud, which is good, but there's no automated fallbac
 
 ## ⚠️ Robustness notes / open questions
 
-- **Narrative is unverified against the bundle (F-026).** The "evidence-first"
-  rule is an instruction to the LLM, not a check. A wrong number or an invented
-  event in `brief.md` would pass through. For a brief that informs trade
-  decisions, a lightweight post-compile validator (e.g. assert any figure quoted
-  in `macro_brief.md` matches the macro row, flag symbols mentioned that aren't in
-  the bundle) would raise confidence. → F-026.
-- **Refuse-stale is advisory.** The 12-hour gate lives in `SKILL.md` text, so it
-  depends on the model honouring it. Moving a staleness check into `compile_brief`
-  (compare `_Assembled at_` to file mtimes / now) would make it deterministic.
+- **Narrative verification (F-026) ✅ done 2026-06-18.** `compile_brief` now
+  cross-checks the VIX/USDINR figures cited in `macro_brief.md` against the
+  bundle's macro snapshot and warns on a mismatch (warn-only; FII/DII left to the
+  human). This catches the brief contradicting the bundle. Two follow-ups remain
+  in the **data layer**: auto re-pulling a stale/missing macro snapshot (F-035)
+  and cross-source verification of the bundle's own figures (F-036) — both kept
+  out of the narrative-compile step to preserve ingestion/analysis decoupling.
+- **Refuse-stale (F-026) ✅ done 2026-06-18.** The 12-hour gate is now
+  deterministic in `compile_brief` (`StaleBundleError`, `--allow-stale` override),
+  not just `SKILL.md` text.
 - **Three-way heading coupling (F-027)** has no spanning test.
 - **Manual narrative step** means no brief on days the human skips `/analyst`;
   acceptable for solo use but a single point of process failure (F-003).
