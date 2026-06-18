@@ -66,6 +66,26 @@ def test_weekly_train_exits_zero_on_empty_project(project) -> None:
         text.encode("utf-8")
 
 
+def test_weekly_train_failure_is_recorded_in_failures_log(project, tmp_path, monkeypatch) -> None:
+    """An unexpected failure in the scheduled run is captured durably in
+    failures.log (so it can be flagged/fixed) and still exits non-zero."""
+    import trading.jobs.weekly_train as wt
+
+    def boom(*a, **kw):
+        raise RuntimeError("simulated weekly failure")
+
+    monkeypatch.setattr(wt, "run_weekly_train", boom)
+
+    result = runner.invoke(app, ["weekly-train", "--date", "2026-06-21"])
+    assert result.exit_code != 0
+
+    failures = tmp_path / "data" / "logs" / "failures.log"
+    assert failures.exists()
+    text = failures.read_text(encoding="utf-8")
+    assert "weekly_train" in text
+    assert "simulated weekly failure" in text
+
+
 def test_scheduled_notify_emoji_are_utf8_safe() -> None:
     """The emoji these jobs emit (📊 weekly, 💰 SIP, 🔔 reminders) encode to UTF-8.
 

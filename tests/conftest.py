@@ -7,6 +7,38 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolate_notifications(monkeypatch):
+    """No test may emit a real Slack post or Windows toast, and no loguru sink
+    may leak into the next test.
+
+    Background: `configure_logging(..., slack_on_error=True)` installs an ERROR
+    loguru sink into the *global* logger. Loguru is a process-wide singleton, so
+    a sink installed by one test (e.g. the real `trading weekly-train` smoke run)
+    survived into later tests; any subsequent `logger.exception(...)` then fired
+    that stale sink through the real notify boundary, spamming Slack/Windows with
+    mismatched "monthly_sip/weekly_train FAILED" messages carrying an unrelated
+    test's traceback. This fixture closes both holes:
+
+    - Neutralise the notify boundary (drop SLACK_WEBHOOK_URL so `post_slack`
+      no-ops; null the toast backend) so even an in-test error sink can't escape.
+      Tests that exercise the real notify path re-set these themselves.
+    - Reset loguru handlers + the configured-set after every test so no sink
+      leaks forward.
+    """
+    from loguru import logger
+
+    from trading.ops import logging_setup
+    from trading.ops import notify as notify_mod
+
+    monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
+    monkeypatch.delenv("TRADING_SLACK_ON_ERROR", raising=False)
+    monkeypatch.setattr(notify_mod, "_plyer_notification", None, raising=False)
+    yield
+    logger.remove()
+    logging_setup._configured.clear()
+
+
 @pytest.fixture
 def fixtures_dir() -> Path:
     """Path to the tests/fixtures/ directory."""

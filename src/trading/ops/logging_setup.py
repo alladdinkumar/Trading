@@ -1,16 +1,22 @@
 """Loguru configuration for daily jobs.
 
-`configure_logging(job)` adds three sinks:
+`configure_logging(job)` adds these sinks:
 - Rotating file at `data/logs/{job}_YYYY-MM-DD.log` (daily rotation,
   60-day retention, gzip compression).
 - stderr in human-readable format.
-- (Optional, ERROR+) Slack sink — added in `_install_slack_sink`.
+- A durable, job-tagged `data/logs/failures.log` (ERROR+, synchronous) — the
+  single place to flag-and-fix any job failure without trawling per-job logs.
+- (Opt-in, ERROR+) Slack/toast sink — added in `_install_slack_sink` only when
+  `slack_on_error` is True. It defaults to the `TRADING_SLACK_ON_ERROR` env flag
+  (off unless set), so a failing job records to `failures.log` instead of
+  spamming Slack/Windows on every run.
 
 Idempotent within a process via `_configured: set[str]`.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from datetime import date
 from pathlib import Path
@@ -21,6 +27,12 @@ from trading.config import get_paths
 
 _configured: set[str] = set()
 
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in _TRUTHY
+
 
 def _file_format() -> str:
     return "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}"
@@ -30,12 +42,33 @@ def _stderr_format() -> str:
     return "<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>"
 
 
-def configure_logging(job: str, *, slack_on_error: bool = True) -> Path:
-    """Add file + stderr (+ optional Slack) sinks for `job`.
+def _failure_format(job: str) -> str:
+    """File format for the shared failures ledger, tagged with the job name.
+
+    `job` is an internal constant (never user input), so embedding it directly
+    in the loguru template is safe.
+    """
+    return (
+        "{time:YYYY-MM-DD HH:mm:ss} | "
+        + job
+        + " | {level: <8} | {name}:{function}:{line} | {message}"
+    )
+
+
+def configure_logging(job: str, *, slack_on_error: bool | None = None) -> Path:
+    """Add file + stderr + failures.log (+ opt-in Slack) sinks for `job`.
+
+    `slack_on_error=None` (the default) reads the `TRADING_SLACK_ON_ERROR` env
+    flag, which is off unless explicitly set — so failures are tracked in
+    `failures.log` rather than pushed to Slack/Windows on every run. Pass
+    `True`/`False` to force it.
 
     Returns the resolved log file path. Idempotent — second call for
     the same job in the same process is a no-op.
     """
+    if slack_on_error is None:
+        slack_on_error = _env_truthy("TRADING_SLACK_ON_ERROR")
+
     if job in _configured:
         return _current_log_path(job)
 
@@ -61,6 +94,15 @@ def configure_logging(job: str, *, slack_on_error: bool = True) -> Path:
         format=_stderr_format(),
         level="INFO",
         colorize=True,
+    )
+    # Durable failure ledger — synchronous (enqueue=False) so a crashing job
+    # still leaves a reviewable, job-tagged record even when Slack is silenced.
+    logger.add(
+        paths.logs_dir / "failures.log",
+        format=_failure_format(job),
+        level="ERROR",
+        rotation="5 MB",
+        retention="90 days",
     )
 
     if slack_on_error:

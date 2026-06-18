@@ -1628,14 +1628,23 @@ def weekly_train_cmd(
     """Sunday weekly_train job (Phase 18): rolling retrain + weekly review."""
     from datetime import date as _date
 
+    from loguru import logger
+
     from trading.jobs.weekly_train import run_weekly_train
     from trading.ops.logging_setup import configure_logging
 
     configure_logging("weekly_train")
-    result = run_weekly_train(
-        _date.fromisoformat(date_str) if date_str else None,
-        skip_train=skip_train,
-    )
+    try:
+        result = run_weekly_train(
+            _date.fromisoformat(date_str) if date_str else None,
+            skip_train=skip_train,
+        )
+    except Exception:
+        # Record the failure durably (failures.log + per-job log) so the
+        # unattended Sunday run can be flagged and fixed, then re-raise so
+        # Task Scheduler marks the task failed.
+        logger.exception("weekly_train failed")
+        raise
 
     table = Table(title=f"weekly_train — {result.as_of.isoformat()}")
     table.add_column("field")
@@ -1663,6 +1672,8 @@ def sip_cmd(
     """Monthly ₹1L SIP allocation plan (Phase 18). Needs today's /kite-snapshot."""
     from datetime import date as _date
 
+    from loguru import logger
+
     from trading.jobs.monthly_sip import MonthlySipAborted, run_monthly_sip
     from trading.ops.logging_setup import configure_logging
 
@@ -1670,9 +1681,14 @@ def sip_cmd(
     try:
         result = run_monthly_sip(_date.fromisoformat(date_str), budget=budget, dry_run=dry_run)
     except MonthlySipAborted as e:
+        # Expected, user-actionable (missing/stale snapshot) — not a failure to log.
         console.print(f"[red]sip aborted:[/red] {e}")
         console.print("Run /kite-snapshot in Claude Code first, then retry.")
         raise typer.Exit(code=2) from e
+    except Exception:
+        # Unexpected — record durably (failures.log) before propagating.
+        logger.exception("monthly_sip failed")
+        raise
 
     table = Table(title=f"monthly_sip — {result.as_of.isoformat()}")
     table.add_column("field")

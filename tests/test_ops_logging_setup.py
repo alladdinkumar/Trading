@@ -147,3 +147,78 @@ def test_slack_sink_disabled_when_flag_false(tmp_path, monkeypatch, isolated_log
     logger.error("boom")
     logger.complete()
     assert calls == []
+
+
+def test_slack_on_error_off_by_default(tmp_path, monkeypatch, isolated_logger):
+    """No `slack_on_error` arg + no env → errors are NOT pushed to Slack/toast.
+
+    The error-notification path is now opt-in so failures don't spam Slack/Windows;
+    they're tracked in the log files instead (see failures.log tests)."""
+    from trading.ops import logging_setup
+    from trading.ops import notify as notify_mod
+
+    monkeypatch.setattr(logging_setup, "get_paths", lambda: _make_fake_paths(tmp_path))
+    monkeypatch.delenv("TRADING_SLACK_ON_ERROR", raising=False)
+
+    calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        notify_mod, "notify", lambda level, title, body="": calls.append((level, title, body))
+    )
+
+    logging_setup.configure_logging("test_job")  # default — no slack arg
+    logger.error("boom")
+    logger.complete()
+    assert calls == []
+
+
+def test_slack_on_error_enabled_by_env(tmp_path, monkeypatch, isolated_logger):
+    """`TRADING_SLACK_ON_ERROR=1` re-enables the opt-in error notification."""
+    from trading.ops import logging_setup
+    from trading.ops import notify as notify_mod
+
+    monkeypatch.setattr(logging_setup, "get_paths", lambda: _make_fake_paths(tmp_path))
+    monkeypatch.setenv("TRADING_SLACK_ON_ERROR", "1")
+
+    calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        notify_mod, "notify", lambda level, title, body="": calls.append((level, title, body))
+    )
+
+    logging_setup.configure_logging("test_job")  # default reads the env
+    logger.error("boom")
+    logger.complete()
+    assert len(calls) == 1
+    assert calls[0][0] == "error"
+
+
+def test_error_is_recorded_in_failures_log(tmp_path, monkeypatch, isolated_logger):
+    """Every ERROR is appended to a durable, job-tagged `failures.log` so a
+    failure can be flagged and fixed from a file rather than a transient toast."""
+    from trading.ops import logging_setup
+
+    monkeypatch.setattr(logging_setup, "get_paths", lambda: _make_fake_paths(tmp_path))
+
+    logging_setup.configure_logging("monthly_sip", slack_on_error=False)
+    logger.error("kaboom from sip")
+    logger.complete()
+
+    failures = tmp_path / "data" / "logs" / "failures.log"
+    assert failures.exists()
+    text = failures.read_text(encoding="utf-8")
+    assert "kaboom from sip" in text
+    assert "monthly_sip" in text  # job-tagged
+    assert "ERROR" in text
+
+
+def test_info_is_not_recorded_in_failures_log(tmp_path, monkeypatch, isolated_logger):
+    from trading.ops import logging_setup
+
+    monkeypatch.setattr(logging_setup, "get_paths", lambda: _make_fake_paths(tmp_path))
+
+    logging_setup.configure_logging("monthly_sip", slack_on_error=False)
+    logger.info("routine progress")
+    logger.complete()
+
+    failures = tmp_path / "data" / "logs" / "failures.log"
+    if failures.exists():
+        assert "routine progress" not in failures.read_text(encoding="utf-8")

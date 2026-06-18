@@ -25,11 +25,23 @@ WARN; `notify` never raises, so a notification problem can't crash a job.
 Multi-line / error bodies are fenced for Slack readability.
 
 ### 1.3 `logging_setup.py` — loguru sinks
-`configure_logging(job)` (idempotent per process) installs three sinks: a rotating
-file (`data/logs/{job}_YYYY-MM-DD.log`, daily rotation, 60-day retention, gzip),
-colorised stderr, and — for ERROR+ — a **Slack sink** that formats the traceback
-plus the last 20 log lines into a notification. The Slack sink itself is wrapped
-so a notify failure can't crash the job.
+`configure_logging(job)` (idempotent per process) installs: a rotating file
+(`data/logs/{job}_YYYY-MM-DD.log`, daily rotation, 60-day retention, gzip),
+colorised stderr, and a durable **`data/logs/failures.log`** (ERROR+, synchronous,
+job-tagged) — the single place to flag-and-fix any job failure. A **Slack/toast
+error sink** is **opt-in**: `slack_on_error` defaults to the `TRADING_SLACK_ON_ERROR`
+env flag (off unless set), so a failing job records to `failures.log` rather than
+pushing an error notification to Slack/Windows on every run. When enabled, the sink
+formats the traceback plus the last 20 log lines and is wrapped so a notify failure
+can't crash the job. The scheduled `weekly-train` / `sip` CLI commands `logger.exception`
+on an unexpected failure before re-raising, so the durable record is always written.
+
+> **Test isolation (important):** loguru is a process-wide singleton, so an ERROR
+> sink installed by one test used to leak into later tests and fire real
+> Slack/toast notifications (the "monthly_sip/weekly_train FAILED" spam). The
+> autouse `tests/conftest.py::_isolate_notifications` fixture now drops
+> `SLACK_WEBHOOK_URL`, nulls the toast backend, and resets loguru sinks after every
+> test, so the suite can never emit a real notification.
 
 ### 1.4 `runner.py` — the reminder schedule
 `SCHEDULE` is a static dict of `ReminderSlot`s (time, title, body, `gate_holidays`).
@@ -116,7 +128,8 @@ OHLCV, and brief markdown.
 
 - **Automation:** reminder-only daily flow + one unattended weekly job. Robust to
   external outages (everything degrades), fragile to operator absence (F-032).
-- **Observability:** good — per-job rotating logs, ERROR→Slack, a live dashboard.
+- **Observability:** good — per-job rotating logs, a durable `failures.log` ledger
+  (ERROR→Slack opt-in via `TRADING_SLACK_ON_ERROR`), a live dashboard.
 - **The interfaces are solid;** the gaps are upstream (data coverage, gate wiring,
   paper accounting), not in `ops`/`cli`/`ui`.
 
