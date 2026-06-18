@@ -50,7 +50,8 @@ schtasks /Create /XML "docs\scheduler\trading_weekly_train.xml" /TN "trading_wee
 schtasks /Create /XML "docs\scheduler\trading_daily_unattended.xml" /TN "trading_daily_unattended"
 ```
 
-- `trading_weekly_train` — Sunday 10:00 IST: rolling retrain + weekly review.
+- `trading_weekly_train` — Sunday 10:00 IST: rolling retrain + weekly review +
+  data-retention prune (see *Data retention* below).
 - `trading_daily_unattended` — Mon–Fri 10:00 IST: broker-free pre-open spine
   gap-filler (F-032); skips any day the operator already covered.
 
@@ -101,6 +102,24 @@ Followed by a code-fenced block with the Python traceback and the last 20 lines 
 - **Compression:** gzip on rotation (`*.log.gz`)
 
 To inspect a failed run, open the corresponding file. To trace a specific symbol, `grep` for the ticker.
+
+## Data retention
+
+`data/raw/<YYYY-MM-DD>/` snapshot dirs and the `news_items` table are append-only
+and would otherwise grow without bound (F-013). The Sunday `weekly_train` job
+prunes them automatically, but you can also run it by hand:
+
+```
+uv run trading prune                 # dry-run: report the stale tail, delete nothing
+uv run trading prune --apply         # actually delete
+uv run trading prune --raw-days 14 --news-days 180 --apply   # custom windows
+```
+
+Defaults keep **30 days** of `raw/<date>/` dirs and **365 days** of `news_items`
+rows. Only directories named like an ISO date are eligible — a stray file or the
+`static/` helper dir is never touched. The derived `sentiment_daily` rollups are
+kept regardless (they feed the live 30-day health scorer), so pruning old raw
+news is lossless for the live path.
 
 ## Holiday list maintenance
 

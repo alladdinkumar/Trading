@@ -67,6 +67,19 @@ meaningful completion signal). The report is **time-aware**: an un-run step is
 `trading status` exit code (1 on a real half-run), so cron/scripts can gate on
 it.
 
+### 1.6 `retention.py` — data prune (F-013)
+`data/raw/<YYYY-MM-DD>/` snapshot dirs and the append-only `news_items` table
+grew without bound. `run_retention(paths, conn, ...)` prunes the stale tail of
+each: `prune_raw_dirs` deletes only `raw_dir/` children whose **name parses as an
+ISO date** older than the cutoff (non-date entries are never touched), and
+`prune_news` deletes `news_items` rows older than the cutoff — the derived
+`sentiment_daily` rollups are **kept** (tiny, and feed the live 30-day health
+scorer), so dropping old raw news is lossless for the live path. Defaults: **raw
+30 days, news 365 days**. Everything is **dry-run unless `apply=True`** (mirroring
+the daily-job apply discipline). It runs two ways: the `trading prune` command
+(dry-run by default, `--apply`/`--raw-days`/`--news-days`) and automatically as a
+housekeeping step inside the Sunday `weekly_train` (so cleanup happens unattended).
+
 ## 2. The automation model
 
 This is the operational heart of the system, and it's important to state plainly:
@@ -90,7 +103,7 @@ flowchart LR
 |---|---|---|
 | 13 daily slots (pre_open ×4, iep ×2, mid_day ×3, post_close ×3) | Slack/toast "run command X" | **human** |
 | `monthly_sip` slot (1st, `gate_holidays=False`) | reminder to run `trading sip` | **human** |
-| `trading_weekly_train.xml` (Sunday) | runs `trading weekly-train` | **unattended** |
+| `trading_weekly_train.xml` (Sunday) | runs `trading weekly-train` (retrain + review + retention prune) | **unattended** |
 | `trading_daily_unattended.xml` (Mon–Fri 10:00) | runs `trading daily-unattended` — broker-free spine, skips days already covered | **unattended** |
 
 > **Live-run continuity (F-032 — partly closed):** the interactive pipeline is
@@ -121,7 +134,7 @@ Command groups (full list in [00-overview §5](./00-overview.md)): daily jobs,
 periodic (weekly-train/sip/daily-unattended), brief (assemble-context/compile),
 data ingest (ingest-history/ingest-news/macro/sector), analysis (scan/backtest),
 portfolio & paper, ranker (train-ranker/ranker-status), broker fallback
-(kite-emergency-*), ops (remind/notify-test/status).
+(kite-emergency-*), ops (remind/notify-test/status/prune).
 
 ## 4. `ui/` — the Streamlit dashboard
 
@@ -158,6 +171,8 @@ OHLCV, and brief markdown.
 - **Observability:** good — per-job rotating logs, a durable `failures.log` ledger
   (ERROR→Slack opt-in via `TRADING_SLACK_ON_ERROR`), a `trading status` half-run
   detector (F-003), a live dashboard.
+- **Data hygiene:** bounded — `retention.py` / `trading prune` caps `raw/<date>/`
+  (30d) and `news_items` (365d) growth, auto-run weekly (F-013).
 - **The interfaces are solid;** the gaps are upstream (data coverage, gate wiring,
   paper accounting), not in `ops`/`cli`/`ui`.
 

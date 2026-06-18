@@ -8,9 +8,9 @@
 
 ## Executive summary
 
-The architecture review (docs 00–08) produced **32 active findings** (1 earlier
-finding superseded). **16 are now fixed** (F-002, F-003, F-012, F-014, F-015, F-016,
-F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-032, F-033), leaving **16 open**. The system is **well-engineered at the
+The architecture review (docs 00–08) produced **33 active findings** (1 earlier
+finding superseded). **18 are now fixed** (F-002, F-003, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-032, F-033, F-034), leaving **15 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -40,16 +40,16 @@ and *how its results are measured*. Both are fixable with localized changes.
 |---|---:|---|
 | **High** | 1 | F-005† |
 | Med | 7 | F-001, F-006, F-007, F-008, F-010, F-020, F-026 |
-| Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 16 | F-002, F-003, F-012, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-032, F-033 |
+| Low | 7 | F-004, F-009, F-017, F-027, F-028, F-030, F-031 |
+| ✅ Fixed | 18 | F-002, F-003, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-032, F-033, F-034 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
 
 | Category | Count |
 |---|---:|
-| VULN (correctness/data-integrity) | 6 (F-019 ✅, F-022 ✅, F-023 ✅, F-024 ✅, F-029 ✅, F-033 ✅) |
-| GAP (missing functionality/guardrail) | 11 (F-003 ✅, F-015 ✅, F-032 ✅) |
+| VULN (correctness/data-integrity) | 7 (F-019 ✅, F-022 ✅, F-023 ✅, F-024 ✅, F-029 ✅, F-033 ✅, F-034 ✅) |
+| GAP (missing functionality/guardrail) | 11 (F-003 ✅, F-013 ✅, F-015 ✅, F-032 ✅) |
 | INACC (code ≠ spec/docstring) | 7 (F-021 ✅) |
 | DEBT (cleanup) | 8 |
 
@@ -86,8 +86,10 @@ status` infers per-step completion from on-disk artifacts (time-aware
 done/missing/pending; exit 1 on a due-step miss). ~~F-032 (run broker-free steps
 unattended)~~ ✅ **Done (2026-06-18)** — `daily_unattended` runs the broker-free
 pre-open spine on operator-absent days (gap-filler; skips days already covered).
-F-013 (retention policy), F-031 (train/serve skew), F-026 (narrative
-validation), F-010 (decide each dormant table: implement or mark reserved).
+~~F-013 (retention policy)~~ ✅ **Done (2026-06-18)** — `ops/retention.py` +
+`trading prune` cap `raw/<date>/` (30d) and `news_items` (365d) growth, auto-run
+in weekly_train. F-031 (train/serve skew), F-026 (narrative validation), F-010
+(decide each dormant table: implement or mark reserved).
 
 ### Wave 4 — Structural & cleanup (low-risk, alongside)
 F-001 (prune unused deps), F-004 (canonical IST clock), F-006/F-007/F-008/F-009
@@ -107,8 +109,8 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > `total_costs` buy side) + F-015 (50-name alias map) + F-016 (news dedup) +
 > F-002 (broker-JSON validation) done 2026-06-17. **Wave 2 complete.** Wave 3
 > in progress: F-003 (`trading status` half-run detection) + F-032
-> (`daily_unattended` broker-free gap-filler) done 2026-06-18 — next is F-013,
-> F-031, F-026, F-010.
+> (`daily_unattended` broker-free gap-filler) + F-013 (`trading prune` data
+> retention) done 2026-06-18 — next is F-031, F-026, F-010.
 
 ## How to use this file
 
@@ -155,7 +157,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-010 | GAP | Med | 2 | 8 of 16 SQLite domain tables are defined but have zero writers (dormant schema reservations) | Open |
 | F-011 | VULN | High | 2 | Rule gates depend on empty tables — **superseded by F-019** (root cause is unpopulated `ScanContext`, not the tables) | Superseded |
 | F-012 | INACC | Med | 2 | Universe scope: paper-trading candidate set should be **Nifty 50 (50 stocks)** per user req; currently ~57 (Nifty 50 + holdings) under a `nifty200/` subdir | ✅ Fixed (2026-06-16) — candidate set pinned to Nifty 50; subdir rename deferred (cosmetic) |
-| F-013 | GAP | Low | 2 | No retention/compaction policy for `news_items` (append-only) or `data/raw/<date>/` JSON — unbounded growth | Open |
+| ~~F-013~~ | GAP | Low | 2 | ~~No retention/compaction policy for `news_items` (append-only) or `data/raw/<date>/` JSON — unbounded growth~~ | ✅ Fixed 2026-06-18 — `ops/retention.py` + `trading prune` (dry-run by default) cap `raw/<date>/` (30d) and `news_items` (365d); auto-run in weekly_train; `sentiment_daily` rollups kept |
 | F-014 | GAP | High | 3 | Only 12 symbols have parquet OHLCV on disk → live candidate universe is 12, not the configured ~57 nor the required Nifty 50 | ✅ Fixed (2026-06-16) — all 50 Nifty + 8 holdings ingested; `candidates_total` 12→50 |
 | ~~F-015~~ | GAP | Med | 3 | ~~News symbol-attribution alias map covers only 12 symbols → sparse `sentiment_daily`, near-empty per-symbol sentiment/critical inputs~~ | ✅ Fixed 2026-06-17 — `data/static/aliases.csv` covers all 58 ingest symbols; attribution + rollup watch-list both read it |
 | ~~F-016~~ | DEBT | Med | 3 | ~~News dedup is URL-only and single-run; daily event/headline re-fetch creates duplicate `news_items` rows (no DB-level uniqueness)~~ | ✅ Fixed 2026-06-17 — v3 `idx_news_dedup` UNIQUE + `INSERT OR IGNORE`; NSE events get per-event URLs so distinct events stop colliding |
@@ -334,10 +336,19 @@ Parquet lives under `data/parquet/nifty200/` but the active set is ~57 symbols
 - **Severity bumped** Low→Med because it now reflects an explicit scope
   requirement, not just a naming nit.
 
-### F-013 — No data retention policy (`GAP`, Low, Phase 2)
-`news_items` and `data/raw/<date>/` grow without bound.
-- **Fix idea:** Add a prune/compaction command (e.g. keep N days of raw JSON,
-  archive/rollup old news).
+### F-013 — No data retention policy (`GAP`, Low, Phase 2) — ✅ Fixed 2026-06-18
+**Resolution:** New `ops/retention.py` prunes the stale tail of both unbounded
+stores. `prune_raw_dirs` deletes only `raw_dir/` children whose name parses as an
+ISO date older than the cutoff (non-date entries untouched); `prune_news` deletes
+`news_items` rows older than the cutoff while **keeping** the derived
+`sentiment_daily` rollups (tiny, and feed the live 30-day health scorer), so the
+prune is lossless for the live path. Defaults: **raw 30d, news 365d**. Everything
+is **dry-run unless `apply=True`**. Exposed as `trading prune`
+(`--apply`/`--raw-days`/`--news-days`) and auto-run as a housekeeping step inside
+the Sunday `weekly_train` (`WeeklyTrainResult.retention`). Verified live: the
+dry-run flagged 3 stale May `raw/<date>/` dirs and deleted nothing.
+
+*Original finding:* `news_items` and `data/raw/<date>/` grow without bound.
 
 ---
 
@@ -694,7 +705,51 @@ This is the concrete data-integrity instance of the coupling flagged in [[F-027]
 
 ---
 
-_Counts: 16 open · 1 superseded · 16 fixed (F-002, F-003, F-012, F-014, F-015,
-F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-032, F-033).
-Updated 2026-06-18 (F-032 — `daily_unattended` broker-free unattended gap-filler
-keeps the macro/scan spine continuous on operator-absent days)._
+### F-034 — Dashboard rule grid crashes on the signals JSON contract (`VULN`, Med, Phase 15) — ✅ Fixed 2026-06-18
+**Was:** `ui/components.rule_chip_grid` (and its docstring) assumed
+`signals.rules_passed_json` was a `{rule_name: bool}` map and called
+`rules.items()`. The writer (`jobs/pre_open._step_auto_open`, line 399) actually
+persists `json.dumps([r.name for r in cand.rules if r.passed])` — a **list of the
+passed rule names only**. Opening **Today's Signals → "Rule evaluation per
+signal"** therefore crashed with
+`AttributeError: 'list' object has no attribute 'items'`. Two layered problems:
+1. **Crash:** the page is unusable whenever a signal row carries rule data.
+2. **Latent mis-report:** signals are logged for non-selected candidates too
+   (`_step_auto_open`, "visibility-only"), which can pass <10 rules — and since
+   only *passed* names are stored, naively rendering the list would paint a 9/10
+   as ten green chips, hiding the failed rule.
+
+Another instance of the write/read format coupling flagged in [[F-027]] /
+[[F-033]]: one JSON shape produced in `pre_open`, parsed elsewhere, no spanning
+contract test. Discovered live opening the Streamlit dashboard on 2026-06-18.
+
+**Resolution:**
+- New `LAYER_A_RULE_NAMES` tuple in `strategy/rules.py` — single source of truth
+  for the 10 rule names in `evaluate_symbol` order, locked by
+  `test_layer_a_rule_names_match_evaluate_symbol` so it can't drift from the
+  orchestrator.
+- New pure helper `components._rule_chip_items(parsed)` normalises **both**
+  shapes: a `dict` passes through; a `list` is cross-referenced against
+  `LAYER_A_RULE_NAMES` so absent (failed) rules render as ✗ instead of
+  vanishing. `rule_chip_grid` parses → normalises → falls back to its existing
+  captions on `JSONDecodeError`/`TypeError`.
+- TDD (red→green): `tests/test_ui_components.py` (dict shape; list cross-ref with
+  a 9/10 case; all-passed list; bad-type → `TypeError`) + the rules-order test.
+  Verified against the live DB — the list payload that crashed now normalises to
+  10/10 for the day's selected signals. Full suite green, ruff clean.
+
+**Still open (gap):** the writer is **lossy** — it drops failed-rule names and
+every rule's `reason` at write time, so the dashboard can show *which* rules
+failed but never *why* (the `RuleResult.reason`, e.g. "RSI=63.5 outside
+[30,45]"). Surfacing reasons needs either storing the full
+`{name: {passed, reason}}` map in `rules_passed_json` or a side table — tracked
+as a follow-up to [[F-027]] (centralise the rule-payload contract + a
+render→store→parse round-trip test spanning `pre_open` and the UI).
+
+---
+
+_Counts: 15 open · 1 superseded · 18 fixed (F-002, F-003, F-012, F-013, F-014,
+F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-032,
+F-033, F-034). Updated 2026-06-18 (F-013 — no data-retention policy;
+`ops/retention.py` + `trading prune` cap `raw/<date>/` and `news_items` growth,
+auto-run in weekly_train)._

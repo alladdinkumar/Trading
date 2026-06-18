@@ -65,6 +65,7 @@ from trading.llm.briefing import MissingNarrativeError, compile_brief
 from trading.llm.context import ContextInputs
 from trading.llm.context import assemble_context as _assemble_context
 from trading.ops.notify import notify as _notify
+from trading.ops.retention import DEFAULT_NEWS_KEEP_DAYS, DEFAULT_RAW_KEEP_DAYS
 from trading.ops.run_status import StepStatus, compute_status, has_due_failure
 from trading.ops.runner import SCHEDULE, _today_ist, fire_reminder
 from trading.paper.ledger import log_signal_and_open_trade, open_trades
@@ -1759,6 +1760,57 @@ def daily_unattended_cmd(
     console.print(table)
     for w in r.warnings:
         console.print(f"[yellow]warning:[/yellow] {w}")
+
+
+@app.command("prune")
+def prune_cmd(
+    date_str: Annotated[
+        str, typer.Option("--date", help="As-of date YYYY-MM-DD (default: today IST).")
+    ] = "",
+    raw_days: Annotated[
+        int, typer.Option("--raw-days", help="Keep this many days of raw/<date>/ dirs.")
+    ] = DEFAULT_RAW_KEEP_DAYS,
+    news_days: Annotated[
+        int, typer.Option("--news-days", help="Keep this many days of news_items rows.")
+    ] = DEFAULT_NEWS_KEEP_DAYS,
+    apply: Annotated[
+        bool, typer.Option("--apply", help="Actually delete (default: dry-run report only).")
+    ] = False,
+) -> None:
+    """Prune stale raw date-dirs + old news_items rows (F-013).
+
+    Dry-run by default — pass --apply to delete. Also runs automatically as a
+    housekeeping step inside the Sunday weekly-train job.
+    """
+    from trading.ops.retention import run_retention
+
+    paths = get_paths()
+    as_of = date.fromisoformat(date_str) if date_str else _today_ist()
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        result = run_retention(
+            paths,
+            conn,
+            as_of=as_of,
+            raw_keep_days=raw_days,
+            news_keep_days=news_days,
+            apply=apply,
+        )
+
+    mode = "APPLIED" if result.applied else "dry-run"
+    table = Table(title=f"prune — {result.as_of.isoformat()} ({mode})")
+    table.add_column("target")
+    table.add_column("keep days", justify="right")
+    table.add_column("deleted", justify="right")
+    table.add_row(
+        "raw/<date>/ dirs", str(result.raw_keep_days), str(len(result.raw_dirs_deleted))
+    )
+    table.add_row("news_items rows", str(result.news_keep_days), str(result.news_rows_deleted))
+    console.print(table)
+    for name in result.raw_dirs_deleted:
+        console.print(f"  raw/{name}")
+    if not result.applied and (result.raw_dirs_deleted or result.news_rows_deleted):
+        console.print("[yellow]dry-run — re-run with --apply to delete.[/yellow]")
 
 
 @app.command("sip")

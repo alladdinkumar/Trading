@@ -823,3 +823,32 @@ def test_cli_sip_happy(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert "monthly_sip" in result.output
     assert (paths.research_dir / "2026-07-01" / "sip_plan.md").is_file()
+
+
+def test_cli_prune_dry_run_reports_without_deleting(tmp_path, monkeypatch) -> None:
+    """`trading prune` defaults to dry-run: reports the stale tail, deletes nothing."""
+    from trading.config import get_paths
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    paths = get_paths()
+    stale = paths.raw_dir / "2025-01-01"
+    stale.mkdir(parents=True)
+
+    result = runner.invoke(app, ["prune", "--date", "2026-06-18"])
+    assert result.exit_code == 0
+    assert "dry-run" in result.output.lower()
+    assert "2025-01-01" in result.output
+    assert stale.exists()  # not deleted without --apply
+
+
+def test_cli_prune_apply_deletes(tmp_path, monkeypatch) -> None:
+    from trading.config import get_paths
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    paths = get_paths()
+    stale = paths.raw_dir / "2025-01-01"
+    stale.mkdir(parents=True)
+
+    result = runner.invoke(app, ["prune", "--date", "2026-06-18", "--apply"])
+    assert result.exit_code == 0
+    assert not stale.exists()

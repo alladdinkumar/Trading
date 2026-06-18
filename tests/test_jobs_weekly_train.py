@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from trading.config import get_paths
+from trading.data.news import NewsItem
 from trading.store.migrations import run_migrations
 
 AS_OF = date(2026, 6, 14)  # a Sunday
@@ -193,6 +194,46 @@ def test_run_skip_train_writes_review(paths, notify_calls) -> None:
     level, title, _body = notify_calls[0]
     assert level == "info"
     assert "2026-06-14" in title
+
+
+def test_run_weekly_train_prunes_stale_data(paths, notify_calls) -> None:
+    """The Sunday housekeeping slot prunes old raw date-dirs + news rows (F-013)."""
+    from trading.config import get_paths
+    from trading.jobs.weekly_train import run_weekly_train
+    from trading.store.db import get_conn
+    from trading.store.migrations import run_migrations
+    from trading.store.news_store import insert_news_items
+
+    p = get_paths()
+    stale_dir = p.raw_dir / "2025-01-01"  # well past the 30d raw window
+    stale_dir.mkdir(parents=True)
+    (stale_dir / "holdings.json").write_text("{}", encoding="utf-8")
+    with get_conn(p.db_path) as conn:
+        run_migrations(conn)
+        insert_news_items(
+            conn,
+            [
+                NewsItem(
+                    ts="2024-01-01T10:00:00+00:00",  # past the 365d news window
+                    symbol="RELIANCE",
+                    source="mc",
+                    headline="ancient",
+                    url="https://x/old",
+                    sentiment=0.0,
+                    category="results",
+                    is_critical=False,
+                )
+            ],
+        )
+
+    result = run_weekly_train(AS_OF, paths=paths, skip_train=True)
+
+    assert result.retention.applied is True
+    assert result.retention.raw_dirs_deleted == ["2025-01-01"]
+    assert result.retention.news_rows_deleted == 1
+    assert not stale_dir.exists()
+    with get_conn(p.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) AS c FROM news_items").fetchone()["c"] == 0
 
 
 def test_retrain_guard_skips_duplicate_window(paths, notify_calls, monkeypatch) -> None:

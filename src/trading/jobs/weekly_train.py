@@ -26,6 +26,7 @@ from trading.backtest.metrics import (
 )
 from trading.config import Paths, get_paths
 from trading.ops.notify import notify
+from trading.ops.retention import RetentionResult, run_retention
 from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
 from trading.store.model_registry import (
@@ -119,6 +120,7 @@ class WeeklyTrainResult:
     promoted: bool
     model_path: str | None
     review_path: Path
+    retention: RetentionResult
 
 
 # ---------------------------------------------------------------------------
@@ -417,6 +419,8 @@ def run_weekly_train(
         run_migrations(conn)
         retrain = _step_retrain(p, conn, window_start, d, skip_train)
         data = gather_review_data(conn, d)
+        # Housekeeping: prune stale raw date-dirs + old news rows (F-013).
+        retention = run_retention(p, conn, as_of=d, apply=True)
 
     review_dir = p.research_dir / "weekly"
     review_dir.mkdir(parents=True, exist_ok=True)
@@ -436,6 +440,7 @@ def run_weekly_train(
         promoted=retrain.promoted,
         model_path=retrain.model_path,
         review_path=review_path,
+        retention=retention,
     )
 
 
