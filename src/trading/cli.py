@@ -65,7 +65,8 @@ from trading.llm.briefing import MissingNarrativeError, compile_brief
 from trading.llm.context import ContextInputs
 from trading.llm.context import assemble_context as _assemble_context
 from trading.ops.notify import notify as _notify
-from trading.ops.runner import SCHEDULE, fire_reminder
+from trading.ops.run_status import StepStatus, compute_status, has_due_failure
+from trading.ops.runner import SCHEDULE, _today_ist, fire_reminder
 from trading.paper.ledger import log_signal_and_open_trade, open_trades
 from trading.paper.mtm import build_bars_from_history, mtm_open_trades
 from trading.paper.reconcile import INITIAL_CAPITAL, reconcile_day
@@ -1457,6 +1458,57 @@ def notify_test_cmd() -> None:
         "If you see this in Slack AND as a Windows toast, you're wired up correctly.",
     )
     console.print("[green]ok[/green] — check Slack + Windows notification area")
+
+
+@app.command("status")
+def status_cmd(
+    date_str: Annotated[
+        str | None, typer.Option("--date", help="ISO date YYYY-MM-DD (default: today IST)")
+    ] = None,
+) -> None:
+    """Report which daily-flow checkpoints have run (half-run detection, F-003).
+
+    Infers per-step completion from on-disk artifacts; time-aware, so a step is
+    only flagged missing once its IST slot time has passed. Exits 1 if any due
+    step is missing (so cron/scripts can gate on it).
+    """
+    paths = get_paths()
+    as_of = date.fromisoformat(date_str) if date_str else _today_ist()
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        statuses = compute_status(paths, as_of, conn=conn)
+
+    glyph = {"done": "[green]✅[/green]", "missing": "[red]❌[/red]",
+             "pending": "[grey50]·[/grey50]", "n/a": "[grey50]-[/grey50]"}
+    table = Table(title=f"daily status — {as_of.isoformat()}", show_header=True)
+    table.add_column("")
+    table.add_column("block")
+    table.add_column("when", justify="right")
+    table.add_column("step")
+    table.add_column("detail")
+    for s in statuses:
+        table.add_row(
+            glyph.get(s.state, s.state),
+            s.block,
+            s.when.strftime("%H:%M"),
+            s.label,
+            s.detail,
+        )
+    console.print(table)
+
+    by_block: dict[str, list[StepStatus]] = {}
+    for s in statuses:
+        by_block.setdefault(s.block, []).append(s)
+    parts = []
+    for block, items in by_block.items():
+        done = sum(1 for s in items if s.state == "done")
+        flag = " [red]❌[/red]" if any(s.state == "missing" for s in items) else ""
+        parts.append(f"{block} {done}/{len(items)}{flag}")
+    console.print("  ·  ".join(parts))
+
+    if has_due_failure(statuses):
+        console.print("[red]Half-run detected:[/red] a due step has not run.")
+        raise typer.Exit(code=1)
 
 
 @app.command("ranker-status")

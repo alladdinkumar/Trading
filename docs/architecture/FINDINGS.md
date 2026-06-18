@@ -9,8 +9,8 @@
 ## Executive summary
 
 The architecture review (docs 00–08) produced **32 active findings** (1 earlier
-finding superseded). **14 are now fixed** (F-002, F-012, F-014, F-015, F-016, F-018,
-F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033), leaving **18 open**. The system is **well-engineered at the
+finding superseded). **15 are now fixed** (F-002, F-003, F-012, F-014, F-015, F-016,
+F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033), leaving **17 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -39,9 +39,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 1 | F-005† |
-| Med | 9 | F-001, F-003, F-006, F-007, F-008, F-010, F-020, F-026, F-032 |
+| Med | 8 | F-001, F-006, F-007, F-008, F-010, F-020, F-026, F-032 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 14 | F-002, F-012, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033 |
+| ✅ Fixed | 15 | F-002, F-003, F-012, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -49,7 +49,7 @@ future Phase 19 — out of scope for hardening the paper run.
 | Category | Count |
 |---|---:|
 | VULN (correctness/data-integrity) | 6 (F-019 ✅, F-022 ✅, F-023 ✅, F-024 ✅, F-029 ✅, F-033 ✅) |
-| GAP (missing functionality/guardrail) | 11 (F-015 ✅) |
+| GAP (missing functionality/guardrail) | 11 (F-003 ✅, F-015 ✅) |
 | INACC (code ≠ spec/docstring) | 7 (F-021 ✅) |
 | DEBT (cleanup) | 8 |
 
@@ -81,9 +81,12 @@ The highest-leverage cluster; everything else is noise until these land.
 | ~~F-021~~ ✅ | Med | **Done (2026-06-17).** `run_backtest` returns `total_costs = sum(t.costs_paid)`, so the aggregate carries buy + sell (was sell-only); accumulator + `_evaluate_exits` cost return removed |
 
 ### Wave 3 — Robustness & ops
-F-003 (half-run/run-state detection), F-032 (run broker-free steps unattended),
-F-013 (retention policy), F-031 (train/serve skew), F-026 (narrative validation),
-F-010 (decide each dormant table: implement or mark reserved).
+~~F-003 (half-run/run-state detection)~~ ✅ **Done (2026-06-18)** — `trading
+status` infers per-step completion from on-disk artifacts (time-aware
+done/missing/pending; exit 1 on a due-step miss). F-032 (run broker-free steps
+unattended), F-013 (retention policy), F-031 (train/serve skew), F-026
+(narrative validation), F-010 (decide each dormant table: implement or mark
+reserved).
 
 ### Wave 4 — Structural & cleanup (low-risk, alongside)
 F-001 (prune unused deps), F-004 (canonical IST clock), F-006/F-007/F-008/F-009
@@ -101,8 +104,9 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > 2026-06-16 — **Wave 1 complete.** Wave 2 in progress: F-024 (days_held) +
 > F-025 (paper costs) + F-022 (health TRIM-bias) done 2026-06-16; F-021 (backtest
 > `total_costs` buy side) + F-015 (50-name alias map) + F-016 (news dedup) +
-> F-002 (broker-JSON validation) done 2026-06-17. **Wave 2 complete** — next is
-> Wave 3 (F-003, F-032, F-013, …).
+> F-002 (broker-JSON validation) done 2026-06-17. **Wave 2 complete.** Wave 3
+> started: F-003 (`trading status` half-run detection) done 2026-06-18 — next is
+> F-032, F-013, F-031, F-026, F-010.
 
 ## How to use this file
 
@@ -139,7 +143,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 |---|---|---|---|---|---|
 | F-001 | INACC | Med | 0 | `vectorbt` + `anthropic` declared deps but unused in production paths | Open |
 | ~~F-002~~ | GAP | High | 0 | ~~No schema validation on broker/quote JSON contract between `/kite-*` skills and `data/*_snapshot.py`~~ | ✅ Fixed 2026-06-17 — `data/snapshot_schema.py` validates each row at the read boundary (type/exchange/missing/extra), readers raise `SnapshotSchemaError` |
-| F-003 | GAP | Med | 0 | Daily flow is ~13 manually-sequenced commands with no half-run/missed-step detection | Open |
+| ~~F-003~~ | GAP | Med | 0 | ~~Daily flow is ~13 manually-sequenced commands with no half-run/missed-step detection~~ | ✅ Fixed 2026-06-18 — `ops/run_status.py` + `trading status` infer per-step completion from on-disk artifacts (time-aware; exit 1 on a due-step miss) |
 | F-004 | DEBT | Low | 0 | Each job re-derives "today" in IST independently; no single canonical clock | Open |
 | F-005 | GAP | High | 0 | No real-money execution path, kill-switch, or risk-halt design (gated to future Phase 19, tracked here so it isn't forgotten) | Needs decision |
 | F-006 | DEBT | Med | 1 | Domain DTOs live in `data/` so `store` depends "up" into the ingestion layer | Open |
@@ -212,12 +216,34 @@ dataclasses don't type-check — passed silently and corrupted downstream logic
   `test_quotes_snapshot.py` (wrong type, missing `tradingsymbol`). Full suite
   green, ruff + mypy clean.
 
-### F-003 — No half-run detection in the daily flow (`GAP`, Med, Phase 0)
-The operator runs the blocks manually; skipping IEP (or running blocks out of
-order) silently leaves the bundle un-reranked or stale. Nothing reconciles
+### F-003 — No half-run detection in the daily flow (`GAP`, Med, Phase 0) — ✅ Fixed 2026-06-18
+**Was:** the operator runs the blocks manually; skipping IEP (or running blocks
+out of order) silently left the bundle un-reranked or stale. Nothing reconciled
 "which steps ran today".
-- **Fix idea:** A lightweight per-date run-state file (or a `run_log` table)
-  each step stamps, plus a `trading status --date` that reports gaps.
+
+**Resolution (artifact-inference, no stamping):**
+- New `ops/run_status.py`: `compute_status(paths, as_of, *, now=None, conn=None)`
+  resolves **8 checkpoints across the 4 IST blocks** by probing the durable
+  artifact each step leaves — `holdings.json` (+`_meta.snapshot_at`),
+  `_context.md` (scan), `macro_brief.md` (analyst), `brief.md` (compile), an
+  IEP-band `quotes_*.json`, `_context.md` re-touched after those quotes (IEP
+  filter), `mid_day_update.md`, and `post_close_summary.md` **or** a
+  `portfolio_snapshots` row. No job or skill stamps anything (the two `prepare`
+  steps share one overwritten `_quote_symbols.txt`, so a block's "apply" output
+  is the meaningful signal — hence 8 checkpoints, not all 13 reminder slots).
+- **Time-aware:** an un-run step is `missing` only once its IST slot time has
+  passed (or for any past date), else `pending`; non-trading days are `n/a`.
+  `has_due_failure` is true iff some checkpoint is `missing`.
+- New `trading status [--date]` (default today IST) renders a `rich` table
+  grouped by block + a per-block summary, and **exits 1 on a real half-run** so
+  cron/scripts can gate on it. Verified live on 2026-06-17 (IEP + post-close
+  correctly flagged ❌, exit 1).
+- TDD: `tests/test_run_status.py` (17 tests) — probe truth-tables, the
+  done/missing/pending state machine with an injected `now`, past-date
+  all-missing, future-date all-pending, non-trading-day n/a, IEP quote
+  time-band + the IEP-filter mtime heuristic, DB-row post-close detection, and
+  two CLI smoke tests (exit 1 half-run / exit 0 nothing-due). Full suite green
+  (864 passed), ruff + mypy clean.
 
 ### F-004 — No canonical clock (`DEBT`, Low, Phase 0)
 "Today in IST" is re-derived in several places (`ops/runner._today_ist`, jobs,
@@ -645,6 +671,7 @@ This is the concrete data-integrity instance of the coupling flagged in [[F-027]
 
 ---
 
-_Counts: 20 open · 1 superseded · 12 fixed (F-012, F-014, F-015, F-018, F-019,
-F-021, F-022, F-023, F-024, F-025, F-029, F-033). Updated 2026-06-17 (F-015 —
-`data/static/aliases.csv` covers all 58 ingest symbols for news attribution)._
+_Counts: 17 open · 1 superseded · 15 fixed (F-002, F-003, F-012, F-014, F-015,
+F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033). Updated
+2026-06-18 (F-003 — `trading status` half-run detection via on-disk artifact
+inference)._

@@ -6,7 +6,7 @@
 
 ## 1. `ops/` — cross-cutting operations
 
-Four small, well-isolated modules that everything else leans on.
+Five small, well-isolated modules that everything else leans on.
 
 ### 1.1 `calendar.py` — the holiday gate
 `is_trading_day(d)` = Mon–Fri **and** not in `nse_holidays(d.year)`. Holidays come
@@ -50,6 +50,23 @@ non-trading days unless `gate_holidays=False`, as for `monthly_sip`), substitute
 `<date>`, and dispatches `notify`. **It runs nothing** — it just tells the human
 what to run.
 
+### 1.5 `run_status.py` — half-run / missed-step detection (F-003)
+The daily flow is ~13 manually-run commands; nothing reconciled *which* steps
+ran on a date, so a skipped block (IEP, post-close) failed silently.
+`compute_status(paths, as_of)` infers per-step completion **purely from the
+durable artifact each step leaves** — `holdings.json` (snapshot), `_context.md`
+(scan), `macro_brief.md` (analyst), `brief.md` (compile), an IEP-band
+`quotes_*.json`, `_context.md` re-touched after those quotes (IEP filter),
+`mid_day_update.md` (mid-day), and `post_close_summary.md` **or** a
+`portfolio_snapshots` row (post-close). No job or skill stamps anything. It
+tracks **8 checkpoints across the 4 blocks** (the two `prepare` steps share one
+overwritten `_quote_symbols.txt`, so the block's "apply" output is the
+meaningful completion signal). The report is **time-aware**: an un-run step is
+`missing` only once its IST slot time has passed (or for any past date), else
+`pending`; non-trading days are `n/a`. `has_due_failure` drives the
+`trading status` exit code (1 on a real half-run), so cron/scripts can gate on
+it.
+
 ## 2. The automation model
 
 This is the operational heart of the system, and it's important to state plainly:
@@ -77,7 +94,8 @@ flowchart LR
 > no bundle, **no MTM and no exit management for open trades**, no portfolio
 > snapshot. For a 3–6 month live paper-run whose output must be a continuous track
 > record, missed days both break continuity and leave positions unmanaged.
-> → F-032. Ties to F-003 (no half-run detection). (`days_held` is now
+> → F-032. (Half-run detection now exists — `trading status` flags any block
+> whose due step didn't run, F-003 ✅.) (`days_held` is now
 > calendar-derived, so a missed day no longer corrupts the exit-timing count —
 > F-024 ✅.)
 
@@ -97,7 +115,7 @@ Command groups (full list in [00-overview §5](./00-overview.md)): daily jobs,
 periodic (weekly-train/sip), brief (assemble-context/compile), data ingest
 (ingest-history/ingest-news/macro/sector), analysis (scan/backtest), portfolio &
 paper, ranker (train-ranker/ranker-status), broker fallback (kite-emergency-*),
-ops (remind/notify-test).
+ops (remind/notify-test/status).
 
 ## 4. `ui/` — the Streamlit dashboard
 
@@ -129,7 +147,8 @@ OHLCV, and brief markdown.
 - **Automation:** reminder-only daily flow + one unattended weekly job. Robust to
   external outages (everything degrades), fragile to operator absence (F-032).
 - **Observability:** good — per-job rotating logs, a durable `failures.log` ledger
-  (ERROR→Slack opt-in via `TRADING_SLACK_ON_ERROR`), a live dashboard.
+  (ERROR→Slack opt-in via `TRADING_SLACK_ON_ERROR`), a `trading status` half-run
+  detector (F-003), a live dashboard.
 - **The interfaces are solid;** the gaps are upstream (data coverage, gate wiring,
   paper accounting), not in `ops`/`cli`/`ui`.
 
