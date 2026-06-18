@@ -10,8 +10,8 @@
 
 The architecture review (docs 00–08) produced **35 active findings** (1 earlier
 finding superseded; F-035/F-036 spun off from F-026's self-healing follow-up).
-**20 are now fixed** (F-002, F-003, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034), leaving **15 open**. The system is **well-engineered at the
+**21 are now fixed** (F-002, F-003, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035), leaving **14 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -40,9 +40,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 1 | F-005† |
-| Med | 8 | F-001, F-006, F-007, F-008, F-010, F-020, F-035, F-036 |
+| Med | 7 | F-001, F-006, F-007, F-008, F-010, F-020, F-036 |
 | Low | 6 | F-004, F-009, F-017, F-027, F-028, F-030 |
-| ✅ Fixed | 20 | F-002, F-003, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034 |
+| ✅ Fixed | 21 | F-002, F-003, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -119,8 +119,10 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > in progress: F-003 (`trading status` half-run detection) + F-032
 > (`daily_unattended` broker-free gap-filler) + F-013 (`trading prune` data
 > retention) + F-031 (train/serve feature parity) + F-026 (deterministic
-> narrative guardrails) done 2026-06-18 — next is F-010 (and the F-026 spin-offs
-> F-035/F-036).
+> narrative guardrails) done 2026-06-18; F-035 (macro self-healing phase 1 —
+> `trading macro refresh` + Kite cross-source gap-fill + `macro_reconciliation`
+> table) done 2026-06-19 — next is F-036 (`/macro-doctor` skill + cross-verify)
+> then F-010.
 
 ## How to use this file
 
@@ -188,7 +190,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | ~~F-031~~ | INACC | Low | 7 | ~~Train/serve skew: `negative_news_count_7d` empty during weekly retrain (`negative_news_lookup={}`) but populated at inference~~ | ✅ Fixed 2026-06-18 — shared `news_store.negative_news_count_7d` feeds both paths; `ranker_io.build_negative_news_lookup` precomputes the training lookup |
 | ~~F-032~~ | GAP | Med | 8 | ~~Daily pipeline is human-run reminders only (sole unattended job is weekly_train); a missed day = no snapshot/bundle/MTM, open trades unmanaged, track-record holes~~ | ✅ Fixed 2026-06-18 — `jobs/daily_unattended.py` + `trading daily-unattended` run the broker-free pre-open spine unattended (gap-filler); afternoon MTM still interactive |
 | F-033 | VULN | Med | 6 | Candidate-symbol regex `[A-Z0-9_]+` excludes `-`/`&`, so hyphen/ampersand tickers (BAJAJ-AUTO, M&M) are silently dropped from `brief.md` and deleted from `_context.md` by `pre_open_iep` | ✅ Fixed (2026-06-17) |
-| F-035 | GAP | Med | 6 | No self-healing: a stale/missing macro snapshot only refuses (F-026) or degrades — nothing auto re-pulls it. The remedy is a manual `assemble-context` re-run. Belongs in the data layer (re-ingestion), not the LLM | Open |
+| ~~F-035~~ | GAP | Med | 6 | ~~No self-healing: a stale/missing macro snapshot only refuses (F-026) or degrades — nothing auto re-pulls it. The remedy is a manual `assemble-context` re-run. Belongs in the data layer (re-ingestion), not the LLM~~ | ✅ Fixed 2026-06-19 — `trading macro refresh` deterministically re-pulls + upserts the snapshot; `--cross <kite file>` gap-fills still-missing VIX/USDINR from a validated Kite MCP second source with `macro_reconciliation` provenance (migration v4). `/macro-doctor` skill orchestration + cross-verify → F-036 |
 | F-036 | GAP | Med | 6 | Macro figures (VIX/USDINR/FII/DII) come from a single provider with no cross-source reconciliation; a wrong upstream value flows through unflagged. F-026 can only check the brief against the bundle, not the bundle against reality | Open |
 
 ---
@@ -806,7 +808,7 @@ render→store→parse round-trip test spanning `pre_open` and the UI).
 
 ---
 
-### F-035 — No self-healing for stale/missing macro data (`GAP`, Med, Phase 6)
+### F-035 — No self-healing for stale/missing macro data (`GAP`, Med, Phase 6) — ✅ Fixed 2026-06-19
 Spun off from F-026. When the macro snapshot is stale or missing, the system can
 only **refuse** (`compile_brief` → `StaleBundleError`) or **degrade** (render
 `_(no data)_`) — nothing re-pulls it. The remedy is the operator manually
@@ -817,12 +819,25 @@ write a new, reproducible bundle.
   ingestion into analysis (violates the decoupling rule), breaks bundle
   reproducibility/audit, and is unreliable for precise numbers. The refresh must
   be deterministic ingestion code.
-- **Fix idea:** a bounded `refresh_macro(as_of)` in the data layer (re-fetch from
-  the existing provider, upsert `macro_snapshot`); wire the stale/missing path
-  (CLI and/or `daily_unattended`) to call it and re-assemble, rather than only
-  emitting the refuse/degrade message. Keep F-026's guardrail as the backstop for
-  when the refresh returns nothing. **Decoupling note:** must not call any broker
-  / network from `compile_brief` itself.
+
+**Resolution (Phase 1 of the macro self-healing spec).** `trading macro` is now a
+command group:
+- `trading macro snapshot` — the former flat `trading macro` (pull + classify +
+  upsert), unchanged behaviour.
+- `trading macro refresh --date <d> [--cross <file>]` — deterministically
+  re-pulls (`snapshot_and_classify`) and upserts `macro_snapshot`. With `--cross`
+  it reads a validated Kite MCP second-source file
+  (`data/raw/<date>/macro_cross_HHMM.json` → `read_macro_cross` /
+  `MacroCrossSource`, F-002-style boundary) and **gap-fills only fields still
+  `None` after the re-fetch** (VIX, USDINR), recording each fill in the new
+  `macro_reconciliation` provenance table (migration v4, `missing_primary`
+  status). A figure the primary feed already supplied is never overwritten.
+- **Decoupling preserved:** `compile_brief` stays network/DB-free; refresh lives
+  in ingestion, with F-026's `StaleBundleError` as the compile-time backstop.
+
+The `/macro-doctor` skill that orchestrates the Kite pull and the cross-source
+*verification* (vs. gap-fill) of figures the primary feed did supply is **F-036**
+(phase 2). See `docs/superpowers/specs/2026-06-18-macro-self-healing-reconciliation-design.md`.
 
 ### F-036 — Single-source macro figures, no cross-verification (`GAP`, Med, Phase 6)
 Spun off from F-026. VIX/USDINR/FII/DII come from one provider; a wrong upstream
@@ -834,16 +849,21 @@ value enters the bundle unflagged. F-026's figure check only verifies the
   flag when sources disagree beyond tolerance. `assemble_context` surfaces the
   flag in the macro snapshot; F-026's warn then upgrades from "the LLM may have
   invented this" to "the bundle itself flagged this figure as unreconciled."
+- **Phase-1 infrastructure already landed (F-035):** the `macro_reconciliation`
+  table (migration v4) and the validated `MacroCrossSource` reader exist. F-036
+  adds the pure `reconcile_macro` tolerance core, `trading macro verify`
+  (exit-1 on mismatch), `context._render_macro` annotation of flagged figures,
+  and the `/macro-doctor` skill that pulls the Kite second source read-only.
 - **Out of scope:** LLM web-search verification of precise figures (unreliable —
   a hallucination vector, not a fix). Verification must be against structured
   feeds.
 
 ---
 
-_Counts: 15 open · 1 superseded · 20 fixed (F-002, F-003, F-012, F-013, F-014,
+_Counts: 14 open · 1 superseded · 21 fixed (F-002, F-003, F-012, F-013, F-014,
 F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029,
-F-031, F-032, F-033, F-034). Updated 2026-06-18 (F-026 — deterministic narrative
-guardrails: `compile_brief` refuses >12h-old bundles via `StaleBundleError` and
-warns on VIX/USDINR figure mismatch; self-healing follow-up split into F-035
-[auto re-pull stale/missing macro] and F-036 [multi-source macro
-reconciliation])._
+F-031, F-032, F-033, F-034, F-035). Updated 2026-06-19 (F-035 — macro
+self-healing phase 1: `trading macro refresh` re-pulls + upserts the snapshot and
+`--cross` gap-fills still-missing VIX/USDINR from a validated Kite MCP second
+source with `macro_reconciliation` provenance, migration v4; `/macro-doctor`
+orchestration + cross-verify of supplied figures → F-036)._

@@ -167,7 +167,7 @@ purpose:
 | **Daily jobs** | `pre-open`, `pre-open-iep`, `mid-day`, `post-close` |
 | **Periodic** | `weekly-train`, `sip` |
 | **Brief** | `brief assemble-context`, `brief compile` |
-| **Data ingest** | `ingest-history`, `ingest-news`, `macro`, `sector` |
+| **Data ingest** | `ingest-history`, `ingest-news`, `macro snapshot`, `macro refresh`, `sector` |
 | **Analysis** | `scan`, `backtest` |
 | **Portfolio / paper** | `portfolio`, `paper-open`, `paper-mtm`, `paper-status`, `paper-reconcile` |
 | **Ranker (Layer B)** | `train-ranker`, `ranker-status` |

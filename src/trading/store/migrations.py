@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-CURRENT_VERSION = 3
+CURRENT_VERSION = 4
 
 
 SCHEMA_V1 = """
@@ -239,6 +239,30 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_news_dedup
 """
 
 
+# v4 (F-035): cross-source reconciliation provenance for the macro snapshot.
+# One row per (date, field) records the primary (existing feed) value/source,
+# the secondary (Kite MCP) value/source, their absolute delta, and a status
+# flag. Kept off `macro_snapshot` so that table stays a clean single-row-per-day
+# fact; this side table carries the audit trail of refresh/verify decisions.
+# `status` is the closed set the reconciler and `macro refresh --cross` emit.
+SCHEMA_V4 = """
+CREATE TABLE IF NOT EXISTS macro_reconciliation (
+  date             TEXT NOT NULL,
+  field            TEXT NOT NULL,
+  primary_value    REAL,
+  primary_source   TEXT,
+  secondary_value  REAL,
+  secondary_source TEXT,
+  abs_delta        REAL,
+  status           TEXT NOT NULL CHECK (
+                     status IN ('ok','mismatch','missing_primary',
+                                'missing_secondary','unreconciled')),
+  checked_at       TEXT NOT NULL,
+  PRIMARY KEY (date, field)
+);
+"""
+
+
 def _current_db_version(conn: sqlite3.Connection) -> int:
     """Return the highest applied version, or 0 if schema_version doesn't exist yet."""
     row = conn.execute(
@@ -275,5 +299,11 @@ def run_migrations(conn: sqlite3.Connection) -> int:
         conn.execute(
             "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
             (3, datetime.now(UTC).isoformat()),
+        )
+    if current < 4:
+        conn.executescript(SCHEMA_V4)
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (4, datetime.now(UTC).isoformat()),
         )
     return CURRENT_VERSION

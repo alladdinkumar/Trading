@@ -891,3 +891,142 @@ def test_cli_prune_apply_deletes(tmp_path, monkeypatch) -> None:
     result = runner.invoke(app, ["prune", "--date", "2026-06-18", "--apply"])
     assert result.exit_code == 0
     assert not stale.exists()
+
+
+# --- trading macro refresh (F-035) ----------------------------------------
+
+
+def _fake_snap(vix=19.40, usdinr=83.10):
+    from trading.data.macro import MacroSnapshot
+
+    return MacroSnapshot(
+        date="2026-06-19",
+        sgx_nifty=None,
+        dow_fut=None,
+        nasdaq_fut=None,
+        sp500=None,
+        usdinr=usdinr,
+        crude=None,
+        vix=vix,
+        us_10y=None,
+        fii_flow_cr=None,
+        dii_flow_cr=None,
+        regime="NEUTRAL",
+    )
+
+
+def _fake_regime():
+    from trading.features.regime import RegimeResult
+
+    return RegimeResult(
+        regime="NEUTRAL",
+        composite_score=0,
+        vix_vote=0,
+        futures_vote=0,
+        fii_vote=0,
+        usdinr_vote=0,
+        reasons=["vix neutral"],
+    )
+
+
+def _write_cross(tmp_path, *, vix=None, usdinr=None):
+    import json
+
+    payload = {"source": "kite_mcp", "captured_at": "2026-06-19T08:15:00"}
+    if vix is not None:
+        payload["vix"] = vix
+    if usdinr is not None:
+        payload["usdinr"] = usdinr
+    f = tmp_path / "macro_cross_0815.json"
+    f.write_text(json.dumps(payload), encoding="utf-8")
+    return f
+
+
+def test_macro_refresh_upserts_snapshot(tmp_path, monkeypatch) -> None:
+    from trading.config import get_paths
+    from trading.store.db import get_conn
+    from trading.store.macro_store import get_macro_snapshot
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    with patch(
+        "trading.cli.snapshot_and_classify", return_value=(_fake_snap(vix=21.5), _fake_regime())
+    ):
+        result = runner.invoke(app, ["macro", "refresh", "--date", "2026-06-19"])
+    assert result.exit_code == 0, result.stdout
+    paths = get_paths()
+    with get_conn(paths.db_path) as conn:
+        row = get_macro_snapshot(conn, "2026-06-19")
+    assert row is not None
+    assert row.vix == 21.5
+
+
+def test_macro_refresh_cross_fills_missing_field_with_provenance(tmp_path, monkeypatch) -> None:
+    from trading.config import get_paths
+    from trading.store.db import get_conn
+    from trading.store.macro_store import get_macro_snapshot
+    from trading.store.reconciliation_store import get_reconciliation_rows
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    cross = _write_cross(tmp_path, vix=19.55)
+    with patch(
+        "trading.cli.snapshot_and_classify",
+        return_value=(_fake_snap(vix=None), _fake_regime()),
+    ):
+        result = runner.invoke(
+            app, ["macro", "refresh", "--date", "2026-06-19", "--cross", str(cross)]
+        )
+    assert result.exit_code == 0, result.stdout
+    paths = get_paths()
+    with get_conn(paths.db_path) as conn:
+        row = get_macro_snapshot(conn, "2026-06-19")
+        recon = get_reconciliation_rows(conn, "2026-06-19")
+    assert row is not None
+    assert row.vix == 19.55  # gap-filled from the Kite cross source
+    vix_rows = [r for r in recon if r.field == "vix"]
+    assert len(vix_rows) == 1
+    assert vix_rows[0].status == "missing_primary"
+    assert vix_rows[0].secondary_value == 19.55
+    assert vix_rows[0].secondary_source == "kite_mcp"
+
+
+def test_macro_refresh_cross_does_not_override_present_field(tmp_path, monkeypatch) -> None:
+    from trading.config import get_paths
+    from trading.store.db import get_conn
+    from trading.store.macro_store import get_macro_snapshot
+    from trading.store.reconciliation_store import get_reconciliation_rows
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    cross = _write_cross(tmp_path, vix=19.55)
+    with patch(
+        "trading.cli.snapshot_and_classify",
+        return_value=(_fake_snap(vix=20.0), _fake_regime()),
+    ):
+        result = runner.invoke(
+            app, ["macro", "refresh", "--date", "2026-06-19", "--cross", str(cross)]
+        )
+    assert result.exit_code == 0, result.stdout
+    paths = get_paths()
+    with get_conn(paths.db_path) as conn:
+        row = get_macro_snapshot(conn, "2026-06-19")
+        recon = get_reconciliation_rows(conn, "2026-06-19")
+    assert row is not None
+    assert row.vix == 20.0  # present figure is NOT overwritten
+    assert [r for r in recon if r.field == "vix"] == []  # no gap-fill, no provenance
+
+
+def test_macro_snapshot_subcommand_still_writes(tmp_path, monkeypatch) -> None:
+    """The former flat `trading macro` is now `trading macro snapshot`."""
+    from trading.config import get_paths
+    from trading.store.db import get_conn
+    from trading.store.macro_store import get_macro_snapshot
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    with patch(
+        "trading.cli.snapshot_and_classify", return_value=(_fake_snap(vix=18.2), _fake_regime())
+    ):
+        result = runner.invoke(app, ["macro", "snapshot", "--date", "2026-06-19"])
+    assert result.exit_code == 0, result.stdout
+    paths = get_paths()
+    with get_conn(paths.db_path) as conn:
+        row = get_macro_snapshot(conn, "2026-06-19")
+    assert row is not None and row.vix == 18.2

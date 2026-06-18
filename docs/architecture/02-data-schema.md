@@ -26,7 +26,7 @@ All of `data/` and `models/*.pkl` are gitignored runtime state.
   `row_factory = sqlite3.Row` (so callers index columns by name).
 - **Migrations** — `store/migrations.py::run_migrations(conn)` is idempotent and
   version-stamped. `schema_version` records each applied version with a UTC
-  timestamp. Current version is **3**:
+  timestamp. Current version is **4**:
   - **v1** — all 16 domain tables.
   - **v2** — adds `current_stop` + `atr_at_entry` to `paper_trades` so the
     trailing stop ratchets across daily MTM runs without re-deriving from
@@ -34,8 +34,13 @@ All of `data/` and `models/*.pkl` are gitignored runtime state.
   - **v3** (F-016) — collapses any pre-existing duplicate `news_items` rows, then
     adds the `idx_news_dedup` UNIQUE index on `(source, headline, COALESCE(url,''))`
     so daily re-fetch (with `INSERT OR IGNORE`) is idempotent at the DB level.
-- **Upgrade path** — future changes add a `SCHEMA_V4` constant + a `if current
-  < 4:` branch. Migrations only ever move forward; there is no down-migration.
+  - **v4** (F-035) — adds the `macro_reconciliation` side table (PK
+    `(date, field)`) carrying the cross-source audit trail for macro figures:
+    primary/secondary value + source, `abs_delta`, and a `status` flag
+    (`ok`/`mismatch`/`missing_primary`/`missing_secondary`/`unreconciled`). Kept
+    off `macro_snapshot` so that table stays a clean one-row-per-day fact.
+- **Upgrade path** — future changes add a `SCHEMA_V5` constant + a `if current
+  < 5:` branch. Migrations only ever move forward; there is no down-migration.
 
 ## 3. Entity-relationship view (active tables)
 
@@ -148,6 +153,7 @@ These 8 tables have live writers and drive the daily flow.
 | `sentiment_daily` | `(date,symbol)` | `features.sentiment` | Per-symbol rollup: 7d/30d mean score, counts, `has_critical`. UPSERT. The strategy reads this, not raw `news_items`. |
 | `sector_daily` | `(date,sector)` | `data.sector` → `store.sector_store` | Per-sector close + relative strength (5/20/60d) + LEADING/NEUTRAL/LAGGING regime. UPSERT. |
 | `macro_snapshot` | `date` | `data.macro` → `store.macro_store` | Daily macro row + classified `regime`. The schema has 11 macro columns; §4.3 notes which are actually populated. UPSERT. |
+| `macro_reconciliation` | `(date,field)` | `cli macro refresh` → `store.reconciliation_store` (F-035; F-036 verify) | Cross-source audit trail per macro field: primary/secondary value + source, `abs_delta`, `status`. v4 table. UPSERT. |
 
 ### 4.2 Dormant tables (defined in v1, **zero writers**)
 

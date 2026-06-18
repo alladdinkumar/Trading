@@ -49,7 +49,8 @@ from trading.data.kite_snapshot import (
 from trading.data.kite_snapshot import (
     read_holdings as _snapshot_read_holdings,
 )
-from trading.data.macro import snapshot_and_classify
+from trading.data.macro import MacroSnapshot, snapshot_and_classify
+from trading.data.macro_cross import read_macro_cross
 from trading.data.news import default_aliases, fetch_all_news
 from trading.data.ohlcv_refresh import refresh_ohlcv
 from trading.data.sector import fetch_all_sectors
@@ -87,12 +88,16 @@ from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import get_sentiment_daily, insert_news_items
 from trading.store.ohlcv import list_symbols, parquet_path, read_ohlcv, write_ohlcv
+from trading.store.reconciliation_store import ReconRow, upsert_reconciliation_row
 from trading.store.repo import Signal, get_signal
 from trading.store.sector_store import upsert_sector_daily
 from trading.strategy.rules import passing, scan
 
 app = typer.Typer(help="Trading — research and paper-trading CLI.", add_completion=False)
 console = Console()
+
+macro_app = typer.Typer(help="Macro snapshot pull + cross-source reconciliation.")
+app.add_typer(macro_app, name="macro")
 
 
 def _force_utf8_io(*streams: object) -> None:
@@ -674,8 +679,17 @@ def ingest_news(
             console.print(table)
 
 
-@app.command("macro")
-def macro_cmd(
+# Fields the Kite MCP cross source can supply a second reading for (F-035).
+# Each entry maps the MacroSnapshot/MacroCrossSource attribute name to the
+# upstream feed that normally provides it.
+_CROSS_FIELDS: tuple[tuple[str, str], ...] = (
+    ("vix", "yfinance"),
+    ("usdinr", "yfinance"),
+)
+
+
+@macro_app.command("snapshot")
+def macro_snapshot_cmd(
     as_of: Annotated[
         str | None,
         typer.Option(
@@ -725,6 +739,71 @@ def macro_cmd(
         run_migrations(conn)
         upsert_macro_snapshot(conn, snap)
     console.print(f"\n[green]macro_snapshot written for {snap.date}.[/green]")
+
+
+@macro_app.command("refresh")
+def macro_refresh_cmd(
+    as_of: Annotated[
+        str | None,
+        typer.Option("--date", help="Snapshot date (YYYY-MM-DD). Defaults to today."),
+    ] = None,
+    cross: Annotated[
+        Path | None,
+        typer.Option(
+            "--cross",
+            help="Kite MCP macro_cross_HHMM.json to gap-fill still-missing figures (F-035).",
+        ),
+    ] = None,
+) -> None:
+    """Re-pull the macro snapshot and upsert it; optionally gap-fill missing
+    figures from a Kite MCP cross-source file with logged provenance (F-035).
+
+    Deterministic counterpart to the `/macro-doctor` skill: the skill pulls the
+    cross source read-only and writes the file, this command does the re-fetch,
+    the gap-fill, and every DB write through validated boundaries.
+    """
+    paths = get_paths()
+    target_date = date.fromisoformat(as_of) if as_of else date.today()
+
+    console.print(f"[bold]Refreshing macro snapshot for {target_date}…[/bold]")
+    snap, _result = snapshot_and_classify(target_date)
+
+    recon_rows: list[ReconRow] = []
+    if cross is not None:
+        cross_src = read_macro_cross(cross)
+        checked_at = datetime.now().isoformat(timespec="seconds")
+        filled: dict[str, float] = {}
+        for field_name, primary_source in _CROSS_FIELDS:
+            primary_val = getattr(snap, field_name)
+            secondary_val = getattr(cross_src, field_name)
+            if primary_val is None and secondary_val is not None:
+                filled[field_name] = secondary_val
+                recon_rows.append(
+                    ReconRow(
+                        date=snap.date,
+                        field=field_name,
+                        primary_value=None,
+                        primary_source=primary_source,
+                        secondary_value=secondary_val,
+                        secondary_source=cross_src.source,
+                        abs_delta=None,
+                        status="missing_primary",
+                        checked_at=checked_at,
+                    )
+                )
+        if filled:
+            snap = MacroSnapshot(**{**snap.__dict__, **filled})
+            for field_name, val in filled.items():
+                console.print(
+                    f"[yellow]gap-filled[/yellow] {field_name} ← {cross_src.source} {val}"
+                )
+
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        upsert_macro_snapshot(conn, snap)
+        for row in recon_rows:
+            upsert_reconciliation_row(conn, row)
+    console.print(f"[green]macro_snapshot refreshed for {snap.date}.[/green]")
 
 
 @app.command("sector")

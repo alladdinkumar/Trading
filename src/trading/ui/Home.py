@@ -105,7 +105,7 @@ with col_macro:
     if macro is None:
         empty_state(
             "No macro snapshot",
-            f"Run <code>trading macro --date {as_of}</code>.",
+            f"Run <code>trading macro snapshot --date {as_of}</code>.",
         )
     else:
         rows = [

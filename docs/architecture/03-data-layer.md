@@ -145,6 +145,12 @@ invalid hours/minutes.
 - **`snapshot_and_classify`** is the end-to-end call: fetch once → build snapshot
   → run the regime classifier → return a snapshot with `regime` filled. This is
   the documented **upward back-edge** into `features.regime` (F-007).
+- **`macro_cross.py` — Kite MCP second source (F-035).** `read_macro_cross` parses
+  `data/raw/<date>/macro_cross_HHMM.json` (written by the `/macro-doctor` skill)
+  into a validated `MacroCrossSource` (`source`, `captured_at`, optional
+  `vix`/`usdinr`) via the F-002 `validate_row` boundary. `trading macro refresh
+  --cross` gap-fills any still-`None` macro figure from it and records provenance
+  in `macro_reconciliation`; F-036 will add tolerance-based cross-verification.
 
 > Column-naming mismatch: the schema's `dow_fut`/`nasdaq_fut` columns actually
 > store **spot** index closes (`^DJI`/`^IXIC`), not futures, and `sgx_nifty` is

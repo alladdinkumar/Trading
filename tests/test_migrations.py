@@ -33,6 +33,7 @@ EXPECTED_TABLES = {
     "preopen_snapshot",
     "live_quotes",
     "event_calendar",
+    "macro_reconciliation",
 }
 
 
@@ -151,6 +152,32 @@ def test_v3_collapses_preexisting_duplicate_news_rows(tmp_path: Path) -> None:
         run_migrations(conn)  # applies v3 → dedup + unique index
         count = conn.execute("SELECT COUNT(*) AS c FROM news_items").fetchone()["c"]
     assert count == 1
+
+
+def test_macro_reconciliation_status_check(tmp_path: Path) -> None:
+    """F-035: macro_reconciliation.status is constrained to the known flag set."""
+    with get_conn(tmp_path / "mr.db") as conn:
+        run_migrations(conn)
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO macro_reconciliation (date, field, status, checked_at) "
+                "VALUES ('2026-06-19', 'vix', 'WAT', '2026-06-19T08:00:00')"
+            )
+
+
+def test_macro_reconciliation_pk_composite_date_field(tmp_path: Path) -> None:
+    """F-035: (date, field) is the primary key — one row per field per day."""
+    with get_conn(tmp_path / "mr2.db") as conn:
+        run_migrations(conn)
+        conn.execute(
+            "INSERT INTO macro_reconciliation (date, field, status, checked_at) "
+            "VALUES ('2026-06-19', 'vix', 'ok', '2026-06-19T08:00:00')"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO macro_reconciliation (date, field, status, checked_at) "
+                "VALUES ('2026-06-19', 'vix', 'mismatch', '2026-06-19T09:00:00')"
+            )
 
 
 def test_pk_composite_sentiment_daily(tmp_path: Path) -> None:
