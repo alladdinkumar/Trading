@@ -382,7 +382,7 @@ def test_pre_open_cli_writes_bundle_and_prints_next_step(tmp_path: Path, monkeyp
     monkeypatch.setattr(po, "_step_macro", lambda c, d, w: (False, "NEUTRAL"))
     monkeypatch.setattr(po, "_step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr(po, "_step_scan", lambda c, p, d, w: [])
-    monkeypatch.setattr(po, "_step_portfolio", lambda p, s, w, *, as_of: [])
+    monkeypatch.setattr(po, "_step_portfolio", lambda p, s, w, *, as_of, **_: [])
     monkeypatch.setattr(po, "_step_auto_open", lambda *a, **kw: 0)
     result = runner.invoke(
         app,

@@ -9,8 +9,8 @@
 ## Executive summary
 
 The architecture review (docs 00–08) produced **32 active findings** (1 earlier
-finding superseded). **15 are now fixed** (F-002, F-003, F-012, F-014, F-015, F-016,
-F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033), leaving **17 open**. The system is **well-engineered at the
+finding superseded). **16 are now fixed** (F-002, F-003, F-012, F-014, F-015, F-016,
+F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-032, F-033), leaving **16 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -39,9 +39,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 1 | F-005† |
-| Med | 8 | F-001, F-006, F-007, F-008, F-010, F-020, F-026, F-032 |
+| Med | 7 | F-001, F-006, F-007, F-008, F-010, F-020, F-026 |
 | Low | 8 | F-004, F-009, F-013, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 15 | F-002, F-003, F-012, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033 |
+| ✅ Fixed | 16 | F-002, F-003, F-012, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-032, F-033 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -49,7 +49,7 @@ future Phase 19 — out of scope for hardening the paper run.
 | Category | Count |
 |---|---:|
 | VULN (correctness/data-integrity) | 6 (F-019 ✅, F-022 ✅, F-023 ✅, F-024 ✅, F-029 ✅, F-033 ✅) |
-| GAP (missing functionality/guardrail) | 11 (F-003 ✅, F-015 ✅) |
+| GAP (missing functionality/guardrail) | 11 (F-003 ✅, F-015 ✅, F-032 ✅) |
 | INACC (code ≠ spec/docstring) | 7 (F-021 ✅) |
 | DEBT (cleanup) | 8 |
 
@@ -83,10 +83,11 @@ The highest-leverage cluster; everything else is noise until these land.
 ### Wave 3 — Robustness & ops
 ~~F-003 (half-run/run-state detection)~~ ✅ **Done (2026-06-18)** — `trading
 status` infers per-step completion from on-disk artifacts (time-aware
-done/missing/pending; exit 1 on a due-step miss). F-032 (run broker-free steps
-unattended), F-013 (retention policy), F-031 (train/serve skew), F-026
-(narrative validation), F-010 (decide each dormant table: implement or mark
-reserved).
+done/missing/pending; exit 1 on a due-step miss). ~~F-032 (run broker-free steps
+unattended)~~ ✅ **Done (2026-06-18)** — `daily_unattended` runs the broker-free
+pre-open spine on operator-absent days (gap-filler; skips days already covered).
+F-013 (retention policy), F-031 (train/serve skew), F-026 (narrative
+validation), F-010 (decide each dormant table: implement or mark reserved).
 
 ### Wave 4 — Structural & cleanup (low-risk, alongside)
 F-001 (prune unused deps), F-004 (canonical IST clock), F-006/F-007/F-008/F-009
@@ -105,8 +106,9 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > F-025 (paper costs) + F-022 (health TRIM-bias) done 2026-06-16; F-021 (backtest
 > `total_costs` buy side) + F-015 (50-name alias map) + F-016 (news dedup) +
 > F-002 (broker-JSON validation) done 2026-06-17. **Wave 2 complete.** Wave 3
-> started: F-003 (`trading status` half-run detection) done 2026-06-18 — next is
-> F-032, F-013, F-031, F-026, F-010.
+> in progress: F-003 (`trading status` half-run detection) + F-032
+> (`daily_unattended` broker-free gap-filler) done 2026-06-18 — next is F-013,
+> F-031, F-026, F-010.
 
 ## How to use this file
 
@@ -172,7 +174,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | ~~F-029~~ | VULN | Med | 7 | ~~`pre_open._step_auto_open` hardcodes `predicted_return_pct=20.0` + target=+20% for every signal → prediction calibration is a single meaningless bucket; signal.target disagrees with exit engine's min(+20%,2.5R)~~ | ✅ Fixed 2026-06-16 — `signal.target = target_price(close, stop)` (exit engine's `min(+20%, 2.5R)`); prediction defaults to that target's implied %, so buckets vary per signal |
 | F-030 | DEBT | Low | 7 | Visibility-only (non-selected) signals inserted unconditionally each pre_open run → duplicate `signals` rows on re-run | Open |
 | F-031 | INACC | Low | 7 | Train/serve skew: `negative_news_count_7d` empty during weekly retrain (`negative_news_lookup={}`) but populated at inference | Open |
-| F-032 | GAP | Med | 8 | Daily pipeline is human-run reminders only (sole unattended job is weekly_train); a missed day = no snapshot/bundle/MTM, open trades unmanaged, track-record holes | Open |
+| ~~F-032~~ | GAP | Med | 8 | ~~Daily pipeline is human-run reminders only (sole unattended job is weekly_train); a missed day = no snapshot/bundle/MTM, open trades unmanaged, track-record holes~~ | ✅ Fixed 2026-06-18 — `jobs/daily_unattended.py` + `trading daily-unattended` run the broker-free pre-open spine unattended (gap-filler); afternoon MTM still interactive |
 | F-033 | VULN | Med | 6 | Candidate-symbol regex `[A-Z0-9_]+` excludes `-`/`&`, so hyphen/ampersand tickers (BAJAJ-AUTO, M&M) are silently dropped from `brief.md` and deleted from `_context.md` by `pre_open_iep` | ✅ Fixed (2026-06-17) |
 
 ---
@@ -627,15 +629,36 @@ inference.
 
 ---
 
-### F-032 — Live-run continuity depends on the human (`GAP`, Med, Phase 8)
-Only `weekly_train` runs unattended; all daily steps are reminder-driven and
-human-executed. A missed day leaves no Kite snapshot, no bundle, no MTM (open
+### F-032 — Live-run continuity depends on the human (`GAP`, Med, Phase 8) — ✅ Fixed 2026-06-18
+**Was:** only `weekly_train` ran unattended; all daily steps were reminder-driven
+and human-executed. A missed day left no Kite snapshot, no bundle, no MTM (open
 trades unmanaged that day), and a gap in `portfolio_snapshots` — undermining the
 3–6 month continuous track record the live run is meant to produce.
-- **Fix idea:** Split the daily flow into broker-free steps (macro, sector, news,
-  scan, OHLCV refresh) that can run unattended on a schedule like weekly_train,
-  and Kite-dependent steps (snapshot, MTM) that still need the interactive session.
-  Keeps the macro/scan/equity spine continuous on missed days.
+
+**Resolution (broker-free unattended gap-filler):**
+- `run_pre_open` gained `require_snapshot: bool = True`. When `False`,
+  `_step_portfolio` degrades a missing/stale Kite snapshot to a warning + `[]`
+  (no holdings health) instead of raising `PreOpenAborted`; `_step_cross_check`
+  already silently skips. The whole broker-free spine — macro, sector, news,
+  OHLCV refresh, scan, rank, **auto-open**, bundle — runs unchanged.
+- New `jobs/daily_unattended.py`: `run_daily_unattended(as_of, *, force=False)`
+  is holiday-gated, **skips when the operator already produced today's bundle**
+  (reuses the `run_status` `pre_open_scan` artifact probe so it and `trading
+  status` agree on "ran"), else calls `run_pre_open(require_snapshot=False)` and
+  posts an info notification. `--force` overrides the skip.
+- New `trading daily-unattended [--date] [--force]` CLI (mirrors `weekly-train`:
+  `configure_logging` + `logger.exception` → durable `failures.log` on failure),
+  plus `docs/scheduler/trading_daily_unattended.xml` (UTF-16, Mon–Fri 10:00 IST,
+  `StartWhenAvailable`) so it runs after the manual pre-open window.
+- **Scope:** keeps the macro/scan/auto-open/track-record **spine** continuous on
+  missed days. MTM / exit-management of open trades needs live Kite quotes and
+  stays interactive — a missed *afternoon* is not back-filled (noted as still
+  open).
+- TDD: `test_jobs_daily_unattended.py` (skip on non-trading day / already-ran /
+  force; runs degraded with `require_snapshot=False` when absent) + 3 pre_open
+  degradation tests + 2 CLI smoke tests (offline holiday-skip; failure →
+  failures.log) + the scheduler-XML encoding guard auto-covers the new XML. Full
+  suite green (880 passed), ruff + mypy clean.
 
 ---
 
@@ -671,7 +694,7 @@ This is the concrete data-integrity instance of the coupling flagged in [[F-027]
 
 ---
 
-_Counts: 17 open · 1 superseded · 15 fixed (F-002, F-003, F-012, F-014, F-015,
-F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-033). Updated
-2026-06-18 (F-003 — `trading status` half-run detection via on-disk artifact
-inference)._
+_Counts: 16 open · 1 superseded · 16 fixed (F-002, F-003, F-012, F-014, F-015,
+F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-032, F-033).
+Updated 2026-06-18 (F-032 — `daily_unattended` broker-free unattended gap-filler
+keeps the macro/scan spine continuous on operator-absent days)._

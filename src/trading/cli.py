@@ -1713,6 +1713,54 @@ def weekly_train_cmd(
     console.print(table)
 
 
+@app.command("daily-unattended")
+def daily_unattended_cmd(
+    date_str: Annotated[
+        str, typer.Option("--date", help="ISO date YYYY-MM-DD (default: today IST).")
+    ] = "",
+    force: Annotated[
+        bool, typer.Option("--force", help="Run even if the spine already ran today.")
+    ] = False,
+) -> None:
+    """Unattended broker-free daily gap-filler (F-032).
+
+    Runs the macro/scan/auto-open/bundle spine without a Kite snapshot, but only
+    on trading days the operator hasn't already covered. Scheduled like
+    weekly-train; failures are recorded durably in failures.log.
+    """
+    from loguru import logger
+
+    from trading.jobs.daily_unattended import run_daily_unattended
+    from trading.ops.logging_setup import configure_logging
+
+    configure_logging("daily_unattended")
+    as_of = date.fromisoformat(date_str) if date_str else _today_ist()
+    try:
+        result = run_daily_unattended(as_of, force=force)
+    except Exception:
+        # Unattended — record durably (failures.log) before propagating so the
+        # scheduled run can be flagged and fixed.
+        logger.exception("daily_unattended failed")
+        raise
+
+    if not result.ran:
+        console.print(f"[yellow]skipped[/yellow] {as_of.isoformat()} — {result.skipped_reason}")
+        return
+
+    r = result.pre_open
+    assert r is not None  # ran=True always carries a pre_open result
+    table = Table(title=f"daily_unattended — {as_of.isoformat()}")
+    table.add_column("field")
+    table.add_column("value")
+    table.add_row("candidates_passing", str(r.candidates_passing))
+    table.add_row("candidates_selected", str(r.candidates_selected))
+    table.add_row("paper_trades_opened", str(r.paper_trades_opened))
+    table.add_row("bundle", str(r.bundle_path))
+    console.print(table)
+    for w in r.warnings:
+        console.print(f"[yellow]warning:[/yellow] {w}")
+
+
 @app.command("sip")
 def sip_cmd(
     date_str: Annotated[str, typer.Option("--date", help="Plan date (YYYY-MM-DD).")],

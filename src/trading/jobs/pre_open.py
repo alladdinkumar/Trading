@@ -88,6 +88,7 @@ def run_pre_open(
     skip_news: bool = False,
     capital_per_trade: float = 100_000.0,
     risk_pct: float = 0.02,
+    require_snapshot: bool = True,
 ) -> PreOpenResult:
     """Orchestrate Phases 1–12 for `as_of` and write the analyst bundle.
 
@@ -95,6 +96,12 @@ def run_pre_open(
     steps (macro, news, portfolio) are collected as warnings; the bundle
     is written either way. Auto-opened paper-trades use D-1 close as
     entry price (the most recent bar in the parquet).
+
+    `require_snapshot=False` (the unattended/gap-filler path, F-032) lets the
+    broker-free spine run without a Kite snapshot: `_step_portfolio` degrades to
+    a warning instead of raising `PreOpenAborted`, so macro/scan/auto-open/bundle
+    still complete on operator-absent days. The holdings-health section is then
+    simply empty.
     """
     p = paths if paths is not None else get_paths()
     s = settings if settings is not None else get_settings()
@@ -118,7 +125,7 @@ def run_pre_open(
         passing_candidates = passing(candidates)
         scored = _step_rank(conn, p, as_of, passing_candidates, warnings)
 
-        holdings = _step_portfolio(p, s, warnings, as_of=as_of)
+        holdings = _step_portfolio(p, s, warnings, as_of=as_of, require_snapshot=require_snapshot)
         _step_cross_check(p, as_of, warnings)
 
         opened = _step_auto_open(
@@ -306,17 +313,23 @@ def _step_portfolio(
     warnings: list[str],
     *,
     as_of: date,
+    require_snapshot: bool = True,
 ) -> list[HealthScore]:
     """Score each holding from today's Kite snapshot.
 
     Reads `data/raw/<as_of>/holdings.json` (written by the /kite-snapshot
-    skill). Missing or stale snapshot raises `PreOpenAborted`. `settings`
+    skill). A missing or stale snapshot raises `PreOpenAborted` — unless
+    `require_snapshot=False` (the F-032 unattended path), in which case it
+    degrades to a warning and returns `[]` (no holdings health). `settings`
     is unused today; kept on the signature for symmetry with other steps
     and forward-compat with future per-account config.
     """
     try:
         holdings = read_holdings(paths, as_of)
     except (KiteSnapshotMissingError, KiteSnapshotStaleError) as e:
+        if not require_snapshot:
+            warnings.append(f"no Kite snapshot — holdings health skipped ({e!s})")
+            return []
         raise PreOpenAborted(str(e)) from e
 
     fundamentals_map = load_fundamentals_map(paths)

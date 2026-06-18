@@ -90,7 +90,7 @@ def test_run_pre_open_returns_result_with_bundle_path(paths, monkeypatch) -> Non
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_portfolio",
-        lambda paths, settings, warnings, *, as_of: [],
+        lambda paths, settings, warnings, *, as_of, **_: [],
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_auto_open",
@@ -376,7 +376,7 @@ def test_step_ohlcv_runs_before_scan(paths, monkeypatch) -> None:
     monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (False, "NEUTRAL"))
     monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
-    monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: [])
+    monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of, **_: [])
 
     result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=True)
     assert order == ["ohlcv", "scan"]
@@ -392,7 +392,7 @@ def test_cross_check_warnings_surface_in_run(paths, monkeypatch) -> None:
     monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (False, "NEUTRAL"))
     monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
-    monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: [])
+    monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of, **_: [])
     monkeypatch.setattr(
         "trading.jobs.pre_open.cross_check_closes",
         lambda paths, as_of, holdings: ["RVNL: parquet vs Kite mismatch"],
@@ -484,6 +484,48 @@ def test_step_portfolio_raises_pre_open_aborted_when_snapshot_missing(
     with pytest.raises(PreOpenAborted) as exc:
         _step_portfolio(paths, _settings(), warnings, as_of=date(2026, 5, 15))
     assert "/kite-snapshot" in str(exc.value)
+
+
+def test_step_portfolio_degrades_when_snapshot_missing_and_not_required(paths) -> None:
+    """F-032: with require_snapshot=False, a missing snapshot warns + returns []
+    instead of raising PreOpenAborted (the unattended broker-free run)."""
+    warnings: list[str] = []
+    out = _step_portfolio(
+        paths, _settings(), warnings, as_of=date(2026, 5, 15), require_snapshot=False
+    )
+    assert out == []
+    assert any("snapshot" in w.lower() for w in warnings)
+
+
+def test_step_portfolio_still_scores_when_snapshot_present_and_not_required(paths) -> None:
+    """require_snapshot=False must still *use* a snapshot when one exists."""
+    from tests.conftest import seed_kite_snapshot
+
+    seed_kite_snapshot(paths, date(2026, 5, 15), holdings=[_PRE_OPEN_HOLDING])
+    write_ohlcv(_all_pass_frame(), "RVNL", paths)
+    warnings: list[str] = []
+    out = _step_portfolio(
+        paths, _settings(), warnings, as_of=date(2026, 5, 15), require_snapshot=False
+    )
+    assert len(out) == 1
+    assert out[0].symbol == "RVNL"
+
+
+def test_run_pre_open_unattended_writes_bundle_without_snapshot(paths, monkeypatch) -> None:
+    """F-032: run_pre_open(require_snapshot=False) completes — bundle written,
+    holdings-health skipped with a warning — even with no Kite snapshot."""
+    monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (False, "NEUTRAL"))
+    monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
+    monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
+    monkeypatch.setattr("trading.jobs.pre_open._step_ohlcv", lambda p, d, w: 0)
+    monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda c, p, d, w: [])
+
+    result = run_pre_open(
+        date(2026, 5, 15), paths=paths, skip_news=True, require_snapshot=False
+    )
+    assert result.bundle_path.is_file()
+    assert result.holdings_scored == 0
+    assert any("snapshot" in w.lower() for w in result.warnings)
 
 
 def test_step_auto_open_creates_signal_and_paper_trade(
@@ -655,7 +697,7 @@ def test_run_pre_open_full_happy_path_integration(paths, monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_portfolio",
-        lambda p, s, w, *, as_of: [],
+        lambda p, s, w, *, as_of, **_: [],
     )
 
     result = run_pre_open(
@@ -741,7 +783,7 @@ def test_pre_open_persists_ml_score_on_all_passing(paths, monkeypatch) -> None:
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr("trading.jobs.pre_open._step_ohlcv", lambda p, d, w: 0)
     monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda c, p, d, w: fake_cands)
-    monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: [])
+    monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of, **_: [])
 
     result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=False)
     assert result.candidates_passing == 7
@@ -772,7 +814,7 @@ def test_pre_open_without_active_model_opens_all_passing(paths, monkeypatch) -> 
     monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr("trading.jobs.pre_open._step_ohlcv", lambda p, d, w: 0)
     monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda c, p, d, w: fake_cands)
-    monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of: [])
+    monkeypatch.setattr("trading.jobs.pre_open._step_portfolio", lambda p, s, w, *, as_of, **_: [])
 
     result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=False)
     assert result.candidates_selected == result.candidates_passing

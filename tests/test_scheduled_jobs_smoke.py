@@ -86,6 +86,40 @@ def test_weekly_train_failure_is_recorded_in_failures_log(project, tmp_path, mon
     assert "simulated weekly failure" in text
 
 
+def test_daily_unattended_skips_cleanly_on_non_trading_day(project, monkeypatch) -> None:
+    """`trading daily-unattended` exits 0 and runs no pre_open on a holiday.
+
+    The holiday-skip path is offline (no macro/news/scan network calls), so it's
+    the safe way to smoke the scheduled command end-to-end."""
+    monkeypatch.setattr("trading.jobs.daily_unattended.is_trading_day", lambda d: False)
+    result = runner.invoke(app, ["daily-unattended", "--date", "2026-06-20"])  # Saturday
+    assert result.exit_code == 0, result.output
+    assert "skipped" in result.output
+
+
+def test_daily_unattended_failure_is_recorded_in_failures_log(
+    project, tmp_path, monkeypatch
+) -> None:
+    """An unexpected failure in the scheduled gap-filler is captured in
+    failures.log (so it can be flagged/fixed) and still exits non-zero."""
+    import trading.jobs.daily_unattended as du
+
+    def boom(*a, **kw):
+        raise RuntimeError("simulated unattended failure")
+
+    monkeypatch.setattr(du, "is_trading_day", lambda d: True)
+    monkeypatch.setattr(du, "run_pre_open", boom)
+
+    result = runner.invoke(app, ["daily-unattended", "--date", "2026-06-18"])
+    assert result.exit_code != 0
+
+    failures = tmp_path / "data" / "logs" / "failures.log"
+    assert failures.exists()
+    text = failures.read_text(encoding="utf-8")
+    assert "daily_unattended" in text
+    assert "simulated unattended failure" in text
+
+
 def test_scheduled_notify_emoji_are_utf8_safe() -> None:
     """The emoji these jobs emit (📊 weekly, 💰 SIP, 🔔 reminders) encode to UTF-8.
 

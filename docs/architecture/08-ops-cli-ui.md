@@ -70,8 +70,10 @@ it.
 ## 2. The automation model
 
 This is the operational heart of the system, and it's important to state plainly:
-**almost nothing is automated.** Windows Task Scheduler fires *reminders*; the
-human runs every command.
+**the interactive daily flow is reminder-driven** — Windows Task Scheduler fires
+*reminders* and the human runs each command. Two jobs run **unattended**: the
+Sunday `weekly_train`, and (F-032) a weekday **`daily_unattended`** gap-filler
+that runs the broker-free pre-open spine on operator-absent days.
 
 ```mermaid
 flowchart LR
@@ -81,23 +83,27 @@ flowchart LR
     H -->|runs commands manually| JOBS["pre-open / iep / mid-day / post-close / sip"]
 
     TS2["Task Scheduler<br/>(Sunday)"] -->|uv run trading weekly-train| WT["weekly_train<br/>(runs unattended)"]
+    TS3["Task Scheduler<br/>(Mon–Fri 10:00)"] -->|uv run trading daily-unattended| DU["daily_unattended<br/>(broker-free spine,<br/>gap-filler)"]
 ```
 
 | Trigger | What it does | Execution |
 |---|---|---|
 | 13 daily slots (pre_open ×4, iep ×2, mid_day ×3, post_close ×3) | Slack/toast "run command X" | **human** |
 | `monthly_sip` slot (1st, `gate_holidays=False`) | reminder to run `trading sip` | **human** |
-| `trading_weekly_train.xml` (Sunday) | runs `trading weekly-train` | **unattended** (only true automation) |
+| `trading_weekly_train.xml` (Sunday) | runs `trading weekly-train` | **unattended** |
+| `trading_daily_unattended.xml` (Mon–Fri 10:00) | runs `trading daily-unattended` — broker-free spine, skips days already covered | **unattended** |
 
-> **Live-run continuity gap (F-032):** because the daily pipeline is entirely
-> human-run, any day the operator is unavailable leaves a hole — no Kite snapshot,
-> no bundle, **no MTM and no exit management for open trades**, no portfolio
-> snapshot. For a 3–6 month live paper-run whose output must be a continuous track
-> record, missed days both break continuity and leave positions unmanaged.
-> → F-032. (Half-run detection now exists — `trading status` flags any block
-> whose due step didn't run, F-003 ✅.) (`days_held` is now
-> calendar-derived, so a missed day no longer corrupts the exit-timing count —
-> F-024 ✅.)
+> **Live-run continuity (F-032 — partly closed):** the interactive pipeline is
+> still human-run, but the **macro/scan/auto-open/track-record spine no longer
+> depends on the operator** — `daily_unattended` runs it broker-free
+> (`require_snapshot=False`) on any trading day the operator hasn't already
+> covered (detected via the `trading status` artifact probe), so the bundle,
+> signals, and paper-trades are produced even on missed days (F-032 ✅).
+> **Still gapped:** MTM / exit-management of open trades needs live Kite quotes
+> and stays interactive — a missed *afternoon* is not back-filled. Half-run
+> detection exists (`trading status`, F-003 ✅), and `days_held` is
+> calendar-derived so a missed day doesn't corrupt the exit-timing count
+> (F-024 ✅).
 
 ## 3. `cli.py` — the operator surface
 
@@ -112,10 +118,10 @@ A `typer` app; the project's single entry point (`trading …`). It's intentiona
   remediation message ("run /kite-snapshot first").
 
 Command groups (full list in [00-overview §5](./00-overview.md)): daily jobs,
-periodic (weekly-train/sip), brief (assemble-context/compile), data ingest
-(ingest-history/ingest-news/macro/sector), analysis (scan/backtest), portfolio &
-paper, ranker (train-ranker/ranker-status), broker fallback (kite-emergency-*),
-ops (remind/notify-test/status).
+periodic (weekly-train/sip/daily-unattended), brief (assemble-context/compile),
+data ingest (ingest-history/ingest-news/macro/sector), analysis (scan/backtest),
+portfolio & paper, ranker (train-ranker/ranker-status), broker fallback
+(kite-emergency-*), ops (remind/notify-test/status).
 
 ## 4. `ui/` — the Streamlit dashboard
 
@@ -144,8 +150,11 @@ OHLCV, and brief markdown.
 
 ## 5. Where the layers leave the system today
 
-- **Automation:** reminder-only daily flow + one unattended weekly job. Robust to
-  external outages (everything degrades), fragile to operator absence (F-032).
+- **Automation:** reminder-driven interactive daily flow + two unattended jobs
+  (weekly `weekly_train`, weekday `daily_unattended` broker-free gap-filler).
+  Robust to external outages (everything degrades); the macro/scan/track-record
+  spine is now continuous across operator-absent days (F-032 ✅), with only
+  afternoon MTM still operator-dependent.
 - **Observability:** good — per-job rotating logs, a durable `failures.log` ledger
   (ERROR→Slack opt-in via `TRADING_SLACK_ON_ERROR`), a `trading status` half-run
   detector (F-003), a live dashboard.
@@ -156,11 +165,12 @@ OHLCV, and brief markdown.
 
 ## ⚠️ Robustness notes / open questions
 
-- **Live-run continuity depends entirely on the human (F-032).** Consider
-  promoting the read-only, no-broker steps (macro, sector, news, scan, OHLCV
-  refresh) to *run* unattended like `weekly_train` — only the Kite-dependent steps
-  truly need the interactive session. That would keep the macro/scan/track-record
-  spine continuous even on missed days.
+- **✅ (Fixed 2026-06-18) Live-run continuity for the spine (F-032).** The
+  read-only, no-broker steps (macro, sector, news, scan, OHLCV refresh, auto-open,
+  bundle) now *run* unattended via `daily_unattended` (weekday 10:00, gap-filler:
+  holiday-gated + skips days the operator already covered). Only the Kite-dependent
+  afternoon MTM still needs the interactive session — back-filling that on missed
+  days remains open.
 - **✅ (Fixed 2026-06-16) The dashboard's headline equity curve (F-023)** now
   reflects compounded realised P&L (`compute_paper_cash`), so the Overview KPI is
   a sound track record.
