@@ -200,7 +200,10 @@ Advisory re-ranker over Layer-A survivors. Four modules:
   hyperparams tuned for small data (`num_leaves=15`, `min_data_in_leaf=10`,
   `lr=0.05`, `n_estimators=200`, `is_unbalance=True`, `random_state=42`, early
   stopping). `InsufficientDataError` when the final window has < 30 examples or
-  one class.
+  one class. The `neg-news count 7d` feature is fed identically on both paths
+  (F-031): inference and `ranker_io.build_negative_news_lookup` both derive it
+  from the single `news_store.negative_news_count_7d`, so there's no train/serve
+  skew.
 - **`ranker.py`** — `score_and_filter`: loads the active model, builds the
   feature matrix, `predict_proba`, marks top-K (`k=5`) `selected`. **Cold-start**
   (no active model / missing pkl / feature mismatch / any IO error) →

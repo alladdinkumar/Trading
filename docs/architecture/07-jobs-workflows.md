@@ -172,8 +172,11 @@ pickle, appends a registry row, and applies the soft-promotion gate; then
 > - The **calibration** section groups by `predicted_return_pct`, which ~~is always
 >   +20%~~ now varies per signal (F-029 fixed 2026-06-16: prediction derives from
 >   `signal.target = min(+20%, 2.5R)`), so the buckets are meaningful.
-> - `_step_retrain` passes `negative_news_lookup={}` — the `negative_news_count_7d`
->   feature is always empty in *training* (though populated at inference). → F-031.
+> - ~~`_step_retrain` passes `negative_news_lookup={}` — the `negative_news_count_7d`
+>   feature is always empty in *training* (though populated at inference).~~ **F-031
+>   fixed 2026-06-18:** `load_training_inputs` now builds `negative_news_lookup` via
+>   the same `news_store.negative_news_count_7d` inference uses, so the feature is
+>   computed identically on both paths.
 
 ## 7. `monthly_sip` — 1st-of-month plan
 
@@ -227,8 +230,11 @@ the 1st even if a holiday.
   fundamentals into health via `build_holding_context`, so the critical-news EXIT
   veto fires on holdings and the votes_cast-scaled verdict isn't TRIM-pinned.
 - **Visibility-only signals duplicate on re-run (F-030).**
-- **Training feature gap (F-031):** `negative_news_count_7d` is empty during
-  training but populated at inference — a train/serve skew.
+- **✅ Train/serve feature parity (F-031, 2026-06-18).** `negative_news_count_7d`
+  used to be empty in training (`negative_news_lookup={}`) but populated at
+  inference. Now a single `news_store.negative_news_count_7d` is the source of
+  truth for both paths: inference calls it per candidate; `ranker_io` precomputes
+  the training lookup with it (`build_negative_news_lookup`).
 - **Strengths worth keeping:** the per-job `warnings` discipline, the abort/exit-2
   contract, the two-phase prepare/apply, and the registry idempotency guard are all
   solid and should be the template when wiring the fixes above.

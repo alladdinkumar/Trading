@@ -23,7 +23,7 @@ from trading.store.model_registry import (
     RegistryFeatureMismatch,
 )
 from trading.store.model_registry import active as load_active
-from trading.store.news_store import get_sentiment_daily
+from trading.store.news_store import get_sentiment_daily, negative_news_count_7d
 from trading.store.ohlcv import read_ohlcv
 from trading.strategy.ranker_features import (
     FEATURE_NAMES,
@@ -98,27 +98,6 @@ def _macro_history_df(
     )
 
 
-def _negative_news_count_7d(
-    conn: sqlite3.Connection, symbol: str, as_of: date
-) -> int | None:
-    """Count negative-sentiment news (sentiment < -0.20) in the last 7d.
-
-    Returns None if no news rows in window — caller propagates as NaN.
-    Returns 0 when news rows exist but none are negative.
-    """
-    start = (as_of - timedelta(days=7)).isoformat()
-    end_ts = f"{as_of.isoformat()}T23:59:59"
-    row = conn.execute(
-        "SELECT COUNT(*) AS c, SUM(CASE WHEN sentiment < -0.20 THEN 1 ELSE 0 END) AS n "
-        "FROM news_items "
-        "WHERE symbol = ? AND ts >= ? AND ts <= ?",
-        (symbol, start, end_ts),
-    ).fetchone()
-    if row is None or row["c"] == 0:
-        return None
-    return int(row["n"] or 0)
-
-
 # ---------------------------------------------------------------------------
 # Public entry points
 # ---------------------------------------------------------------------------
@@ -159,7 +138,7 @@ def score_and_filter(
         as_of_actual = raw.index[-1] if as_of_ts not in raw.index else as_of_ts
         enriched = add_indicators(raw)
         sent = get_sentiment_daily(conn, as_of.isoformat(), cand.symbol)
-        neg7 = _negative_news_count_7d(conn, cand.symbol, as_of)
+        neg7 = negative_news_count_7d(conn, cand.symbol, as_of)
         ctx = LiveContext(
             macro=macro_snap,
             sentiment=sent,
@@ -229,7 +208,7 @@ class RankerSignalProvider:
             sent = get_sentiment_daily(
                 self._conn, signal_date.strftime("%Y-%m-%d"), sig.symbol
             )
-            neg7 = _negative_news_count_7d(
+            neg7 = negative_news_count_7d(
                 self._conn, sig.symbol, signal_date.date()
             )
             ctx = LiveContext(

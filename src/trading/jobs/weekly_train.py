@@ -344,7 +344,9 @@ def _step_retrain(
             enriched=inputs.enriched,
             macro_history=inputs.macro_history,
             sentiment_lookup=inputs.sentiment_lookup,
-            negative_news_lookup={},
+            # F-031: feed the same 7d negative-news count inference uses, instead
+            # of `{}`, so `negative_news_count_7d` isn't NaN-in-train/live-at-serve.
+            negative_news_lookup=inputs.negative_news_lookup,
             start=pd.Timestamp(window_start),
             end=pd.Timestamp(window_end),
         )

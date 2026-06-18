@@ -80,6 +80,72 @@ def _seed_week(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _ohlcv_frame(n: int) -> pd.DataFrame:
+    idx = pd.date_range("2024-01-01", periods=n, freq="B")
+    idx.name = "date"
+    closes = [100.0 + i * 0.1 for i in range(n)]
+    return pd.DataFrame(
+        {
+            "open": [c - 0.5 for c in closes],
+            "high": [c + 1.0 for c in closes],
+            "low": [c - 1.0 for c in closes],
+            "close": closes,
+            "volume": [1_000_000] * n,
+        },
+        index=idx,
+    )
+
+
+def _neg(symbol: str, ts: str, sentiment: float) -> NewsItem:
+    return NewsItem(
+        ts=ts,
+        symbol=symbol,
+        source="mc",
+        headline=f"{symbol} {ts}",
+        url=f"https://x/{symbol}/{ts}",
+        sentiment=sentiment,
+    )
+
+
+def test_step_retrain_feeds_negative_news_lookup(paths, monkeypatch) -> None:
+    """F-031: the retrain step must pass the populated negative_news_lookup to
+    train_walkforward (not the old `{}`), so the feature is no longer NaN in
+    training while populated at inference."""
+    import trading.jobs.weekly_train as wt
+    from trading.store.db import get_conn
+    from trading.store.news_store import insert_news_items
+    from trading.store.ohlcv import write_ohlcv
+    from trading.strategy.ranker_train import InsufficientDataError
+
+    write_ohlcv(_ohlcv_frame(300), "LONGSYM", paths)
+
+    captured: dict[str, object] = {}
+
+    def fake_train(**kwargs: object) -> None:
+        captured.update(kwargs)
+        raise InsufficientDataError("stub — capture only")
+
+    monkeypatch.setattr(wt, "train_walkforward", fake_train)
+
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        insert_news_items(
+            conn,
+            [
+                _neg("LONGSYM", "2024-03-03T10:00:00+00:00", -0.5),
+                _neg("LONGSYM", "2024-03-05T10:00:00+00:00", -0.3),
+            ],
+        )
+        outcome = wt._step_retrain(
+            paths, conn, date(2024, 1, 1), date(2024, 12, 31), skip_train=False
+        )
+
+    assert outcome.ran is False  # InsufficientDataError → graceful skip
+    lookup = captured["negative_news_lookup"]
+    assert lookup, "weekly_train starved negative_news_lookup (F-031)"
+    assert lookup[("2024-03-06", "LONGSYM")] == 2
+
+
 def test_gather_review_data_empty() -> None:
     from trading.jobs.weekly_train import gather_review_data
 
@@ -281,6 +347,7 @@ def test_insufficient_data_still_writes_review(paths, notify_calls, monkeypatch)
             enriched={"RVNL": pd.DataFrame({"close": [1.0]})},
             macro_history=pd.DataFrame(),
             sentiment_lookup={},
+            negative_news_lookup={},
         ),
     )
 
@@ -312,6 +379,7 @@ def test_retrain_success_registers_and_saves_model(paths, notify_calls, monkeypa
             enriched={"RVNL": pd.DataFrame({"close": [1.0]})},
             macro_history=pd.DataFrame(),
             sentiment_lookup={},
+            negative_news_lookup={},
         ),
     )
     stub = TrainResult(

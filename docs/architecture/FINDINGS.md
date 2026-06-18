@@ -9,8 +9,8 @@
 ## Executive summary
 
 The architecture review (docs 00–08) produced **33 active findings** (1 earlier
-finding superseded). **18 are now fixed** (F-002, F-003, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-032, F-033, F-034), leaving **15 open**. The system is **well-engineered at the
+finding superseded). **19 are now fixed** (F-002, F-003, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-031, F-032, F-033, F-034), leaving **14 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -40,8 +40,8 @@ and *how its results are measured*. Both are fixable with localized changes.
 |---|---:|---|
 | **High** | 1 | F-005† |
 | Med | 7 | F-001, F-006, F-007, F-008, F-010, F-020, F-026 |
-| Low | 7 | F-004, F-009, F-017, F-027, F-028, F-030, F-031 |
-| ✅ Fixed | 18 | F-002, F-003, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-032, F-033, F-034 |
+| Low | 6 | F-004, F-009, F-017, F-027, F-028, F-030 |
+| ✅ Fixed | 19 | F-002, F-003, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-031, F-032, F-033, F-034 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -50,7 +50,7 @@ future Phase 19 — out of scope for hardening the paper run.
 |---|---:|
 | VULN (correctness/data-integrity) | 7 (F-019 ✅, F-022 ✅, F-023 ✅, F-024 ✅, F-029 ✅, F-033 ✅, F-034 ✅) |
 | GAP (missing functionality/guardrail) | 11 (F-003 ✅, F-013 ✅, F-015 ✅, F-032 ✅) |
-| INACC (code ≠ spec/docstring) | 7 (F-021 ✅) |
+| INACC (code ≠ spec/docstring) | 7 (F-021 ✅, F-031 ✅) |
 | DEBT (cleanup) | 8 |
 
 ## Remediation roadmap
@@ -88,7 +88,9 @@ unattended)~~ ✅ **Done (2026-06-18)** — `daily_unattended` runs the broker-f
 pre-open spine on operator-absent days (gap-filler; skips days already covered).
 ~~F-013 (retention policy)~~ ✅ **Done (2026-06-18)** — `ops/retention.py` +
 `trading prune` cap `raw/<date>/` (30d) and `news_items` (365d) growth, auto-run
-in weekly_train. F-031 (train/serve skew), F-026 (narrative validation), F-010
+in weekly_train. ~~F-031 (train/serve skew)~~ ✅ **Done (2026-06-18)** — shared
+`news_store.negative_news_count_7d` feeds both inference and the training lookup
+(`build_negative_news_lookup`). F-026 (narrative validation), F-010
 (decide each dormant table: implement or mark reserved).
 
 ### Wave 4 — Structural & cleanup (low-risk, alongside)
@@ -110,7 +112,8 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > F-002 (broker-JSON validation) done 2026-06-17. **Wave 2 complete.** Wave 3
 > in progress: F-003 (`trading status` half-run detection) + F-032
 > (`daily_unattended` broker-free gap-filler) + F-013 (`trading prune` data
-> retention) done 2026-06-18 — next is F-031, F-026, F-010.
+> retention) + F-031 (train/serve feature parity) done 2026-06-18 — next is
+> F-026, F-010.
 
 ## How to use this file
 
@@ -175,7 +178,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-028 | INACC | Low | 6 | `assemble_context` docstring omits the sector + Layer-B ranker sections (added Phases 12.6/16) | Open |
 | ~~F-029~~ | VULN | Med | 7 | ~~`pre_open._step_auto_open` hardcodes `predicted_return_pct=20.0` + target=+20% for every signal → prediction calibration is a single meaningless bucket; signal.target disagrees with exit engine's min(+20%,2.5R)~~ | ✅ Fixed 2026-06-16 — `signal.target = target_price(close, stop)` (exit engine's `min(+20%, 2.5R)`); prediction defaults to that target's implied %, so buckets vary per signal |
 | F-030 | DEBT | Low | 7 | Visibility-only (non-selected) signals inserted unconditionally each pre_open run → duplicate `signals` rows on re-run | Open |
-| F-031 | INACC | Low | 7 | Train/serve skew: `negative_news_count_7d` empty during weekly retrain (`negative_news_lookup={}`) but populated at inference | Open |
+| ~~F-031~~ | INACC | Low | 7 | ~~Train/serve skew: `negative_news_count_7d` empty during weekly retrain (`negative_news_lookup={}`) but populated at inference~~ | ✅ Fixed 2026-06-18 — shared `news_store.negative_news_count_7d` feeds both paths; `ranker_io.build_negative_news_lookup` precomputes the training lookup |
 | ~~F-032~~ | GAP | Med | 8 | ~~Daily pipeline is human-run reminders only (sole unattended job is weekly_train); a missed day = no snapshot/bundle/MTM, open trades unmanaged, track-record holes~~ | ✅ Fixed 2026-06-18 — `jobs/daily_unattended.py` + `trading daily-unattended` run the broker-free pre-open spine unattended (gap-filler); afternoon MTM still interactive |
 | F-033 | VULN | Med | 6 | Candidate-symbol regex `[A-Z0-9_]+` excludes `-`/`&`, so hyphen/ampersand tickers (BAJAJ-AUTO, M&M) are silently dropped from `brief.md` and deleted from `_context.md` by `pre_open_iep` | ✅ Fixed (2026-06-17) |
 
@@ -631,12 +634,31 @@ Non-selected candidates' `insert_signal` has no idempotency guard; re-running
 pre_open the same day re-inserts them.
 - **Fix idea:** Guard on `(symbol, date, created_by)` or UPSERT a daily signal row.
 
-### F-031 — Train/serve feature skew (`INACC`, Low, Phase 7)
-`weekly_train._step_retrain` passes `negative_news_lookup={}`, so
-`negative_news_count_7d` is always NaN/empty in training but populated at
-inference.
-- **Fix idea:** Build the negative-news lookup for the training window too (or
-  drop the feature until both paths feed it).
+### F-031 — Train/serve feature skew (`INACC`, Low, Phase 7) — ✅ Fixed 2026-06-18
+**Was:** `weekly_train._step_retrain` passed `negative_news_lookup={}`, so
+`negative_news_count_7d` was always NaN/empty in training but populated at
+inference — the model never trained on real values of a feature it sees at serve
+time.
+
+**Resolution (one source of truth, parity-guaranteed):**
+- Extracted the trailing-7d negative-news query into
+  `store.news_store.negative_news_count_7d(conn, symbol, as_of)` (count of
+  `news_items` with `sentiment < -0.20` in `[as_of-7d, as_of]`; `None` when no
+  news in window, `0` when news but none negative). Inference (`strategy.ranker`,
+  both call sites) now calls it instead of its own private copy.
+- `strategy.ranker_io.build_negative_news_lookup(conn, enriched)` precomputes the
+  `(date_iso, symbol) → int` training lookup with that **same** function over each
+  symbol's trading-date index (work bounded to the news-active span), exposed as
+  `TrainingInputs.negative_news_lookup`.
+- `weekly_train._step_retrain` passes `inputs.negative_news_lookup` instead of
+  `{}`. A missing key resolves to NaN in `_build_xy_for_window`, exactly as
+  inference's `None` does — so historical dates with no news (news is young /
+  pruned to 365d by F-013) match on both paths, and recent folds carry the real
+  values the model meets at serve time.
+
+*Original finding:* `weekly_train._step_retrain` passes `negative_news_lookup={}`,
+so `negative_news_count_7d` is always NaN/empty in training but populated at
+inference. *Fix idea:* build the negative-news lookup for the training window too.
 
 ---
 
@@ -748,8 +770,9 @@ render→store→parse round-trip test spanning `pre_open` and the UI).
 
 ---
 
-_Counts: 15 open · 1 superseded · 18 fixed (F-002, F-003, F-012, F-013, F-014,
-F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-032,
-F-033, F-034). Updated 2026-06-18 (F-013 — no data-retention policy;
-`ops/retention.py` + `trading prune` cap `raw/<date>/` and `news_items` growth,
-auto-run in weekly_train)._
+_Counts: 14 open · 1 superseded · 19 fixed (F-002, F-003, F-012, F-013, F-014,
+F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-029, F-031,
+F-032, F-033, F-034). Updated 2026-06-18 (F-031 — train/serve skew on
+`negative_news_count_7d`; shared `news_store.negative_news_count_7d` +
+`ranker_io.build_negative_news_lookup` feed both inference and the training
+lookup)._

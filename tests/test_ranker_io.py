@@ -99,3 +99,55 @@ def test_load_training_inputs_empty_universe(paths, conn) -> None:
     assert inputs.enriched == {}
     assert inputs.macro_history.empty
     assert inputs.sentiment_lookup == {}
+    assert inputs.negative_news_lookup == {}
+
+
+def _news_row(symbol: str, ts: str, sentiment: float):
+    from trading.data.news import NewsItem
+
+    return NewsItem(
+        ts=ts,
+        symbol=symbol,
+        source="mc",
+        headline=f"{symbol} {ts}",
+        url=f"https://x/{symbol}/{ts}",
+        sentiment=sentiment,
+    )
+
+
+def test_load_training_inputs_builds_negative_news_lookup(paths, conn) -> None:
+    """F-031: the training-input loader populates negative_news_lookup using the
+    same 7d query as inference, keyed (date_iso, symbol) over each symbol's
+    trading-date index — so weekly_train no longer starves the feature."""
+    from trading.store.news_store import insert_news_items, negative_news_count_7d
+    from trading.strategy.ranker_io import load_training_inputs
+
+    # OHLCV index spans 2025-01-01 .. (250 business days). Put two negative news
+    # items a few days before a known in-range trading date.
+    write_ohlcv(_frame(250), "LONGSYM", paths)
+    insert_news_items(
+        conn,
+        [
+            _news_row("LONGSYM", "2025-03-03T10:00:00+00:00", -0.5),
+            _news_row("LONGSYM", "2025-03-05T10:00:00+00:00", -0.3),
+            _news_row("LONGSYM", "2025-03-04T10:00:00+00:00", 0.4),  # positive
+        ],
+    )
+
+    inputs = load_training_inputs(paths, conn)
+    lookup = inputs.negative_news_lookup
+
+    # The lookup must agree with the shared inference function on every key.
+    assert lookup, "expected at least one negative-news lookup entry"
+    for (date_iso, symbol), count in lookup.items():
+        assert count == negative_news_count_7d(conn, symbol, date.fromisoformat(date_iso))
+    # On 2025-03-06 (a Thursday, in the index), the trailing 7d holds both negatives.
+    assert lookup[("2025-03-06", "LONGSYM")] == 2
+
+
+def test_load_training_inputs_negative_news_lookup_empty_without_news(paths, conn) -> None:
+    from trading.strategy.ranker_io import load_training_inputs
+
+    write_ohlcv(_frame(250), "LONGSYM", paths)
+    inputs = load_training_inputs(paths, conn)
+    assert inputs.negative_news_lookup == {}

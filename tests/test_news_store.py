@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date
 
 import pytest
 
@@ -15,6 +16,7 @@ from trading.store.news_store import (
     insert_news_items,
     list_critical_for_symbol,
     list_news_for_symbol,
+    negative_news_count_7d,
     upsert_sentiment_daily,
 )
 
@@ -55,6 +57,54 @@ def test_insert_news_items_returns_count(conn: sqlite3.Connection) -> None:
 
 def test_insert_news_items_empty_is_noop(conn: sqlite3.Connection) -> None:
     assert insert_news_items(conn, []) == 0
+
+
+# ---------------------------------------------------------------------------
+# negative_news_count_7d — the shared train/serve feature (F-031)
+# ---------------------------------------------------------------------------
+
+
+def _neg_item(symbol: str, ts: str, sentiment: float | None) -> NewsItem:
+    return NewsItem(
+        ts=ts,
+        symbol=symbol,
+        source="mc",
+        headline=f"{symbol} {ts} {sentiment}",
+        url=f"https://x/{symbol}/{ts}",
+        sentiment=sentiment,
+    )
+
+
+def test_negative_news_count_7d_counts_negatives_in_window(conn: sqlite3.Connection) -> None:
+    insert_news_items(
+        conn,
+        [
+            _neg_item("RELIANCE", "2026-05-18T10:00:00+00:00", -0.5),  # negative, in window
+            _neg_item("RELIANCE", "2026-05-15T10:00:00+00:00", -0.30),  # negative, in window
+            _neg_item("RELIANCE", "2026-05-19T10:00:00+00:00", 0.40),  # positive, in window
+            _neg_item("RELIANCE", "2026-05-10T10:00:00+00:00", -0.9),  # negative, BEFORE window
+        ],
+    )
+    assert negative_news_count_7d(conn, "RELIANCE", date(2026, 5, 20)) == 2
+
+
+def test_negative_news_count_7d_none_when_no_news_in_window(conn: sqlite3.Connection) -> None:
+    # News exists but only outside the trailing-7d window → None (→ NaN feature).
+    insert_news_items(conn, [_neg_item("RELIANCE", "2026-05-10T10:00:00+00:00", -0.9)])
+    assert negative_news_count_7d(conn, "RELIANCE", date(2026, 5, 20)) is None
+    # A symbol with no news at all → None.
+    assert negative_news_count_7d(conn, "TCS", date(2026, 5, 20)) is None
+
+
+def test_negative_news_count_7d_zero_when_news_but_none_negative(conn: sqlite3.Connection) -> None:
+    insert_news_items(
+        conn,
+        [
+            _neg_item("RELIANCE", "2026-05-18T10:00:00+00:00", 0.4),
+            _neg_item("RELIANCE", "2026-05-19T10:00:00+00:00", -0.10),  # above -0.20 threshold
+        ],
+    )
+    assert negative_news_count_7d(conn, "RELIANCE", date(2026, 5, 20)) == 0
 
 
 def _news(headline: str, *, source: str = "mc", url: str | None = "https://x/1") -> NewsItem:

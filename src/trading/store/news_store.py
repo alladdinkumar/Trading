@@ -12,8 +12,12 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import date, timedelta
 
 from trading.data.news import NewsItem
+
+# Sentiment at or below this is "negative" for the news-veto / ranker feature.
+NEGATIVE_SENTIMENT_THRESHOLD = -0.20
 
 
 @dataclass(frozen=True)
@@ -117,6 +121,32 @@ def list_critical_for_symbol(
         (symbol, since_ts),
     ).fetchall()
     return [_row_to_news_item(r) for r in rows]
+
+
+def negative_news_count_7d(
+    conn: sqlite3.Connection, symbol: str, as_of: date
+) -> int | None:
+    """Count negative-sentiment news (sentiment < -0.20) in the trailing 7 days.
+
+    The single source of truth for the `negative_news_count_7d` ranker feature,
+    used by **both** inference (`strategy.ranker`) and training-input assembly
+    (`strategy.ranker_io`) so the two paths compute it identically (F-031).
+
+    Returns ``None`` when no news rows fall in the window (caller propagates as
+    NaN), and ``0`` when news rows exist but none are negative.
+    """
+    start = (as_of - timedelta(days=7)).isoformat()
+    end_ts = f"{as_of.isoformat()}T23:59:59"
+    row = conn.execute(
+        "SELECT COUNT(*) AS c, "
+        "       SUM(CASE WHEN sentiment < ? THEN 1 ELSE 0 END) AS n "
+        "FROM news_items "
+        "WHERE symbol = ? AND ts >= ? AND ts <= ?",
+        (NEGATIVE_SENTIMENT_THRESHOLD, symbol, start, end_ts),
+    ).fetchone()
+    if row is None or row["c"] == 0:
+        return None
+    return int(row["n"] or 0)
 
 
 # ---------------------------------------------------------------------------
