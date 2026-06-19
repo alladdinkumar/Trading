@@ -7,10 +7,12 @@ Sharpe, win-loss donut, prediction calibration scatter.
 from __future__ import annotations
 
 import math
+from datetime import date
 
 import pandas as pd
 import streamlit as st
 
+from trading.paper.journal import deviation_label, expected_target_date
 from trading.ui import data
 from trading.ui.charts import (
     equity_curve,
@@ -89,6 +91,25 @@ def _expectancy(df: pd.DataFrame) -> float | None:
     return float(df["pnl"].mean())
 
 
+def _schedule_cols(df: pd.DataFrame, *, closed: bool) -> pd.DataFrame:
+    """Add Bought / Target date / Deviation columns from ts_entry + horizon_days."""
+    out = df.copy()
+    today = date.today()
+    boughts, targets, deviations = [], [], []
+    for _, row in out.iterrows():
+        entry_iso = str(row["ts_entry"])
+        horizon = int(row["horizon_days"]) if pd.notna(row.get("horizon_days")) else 0
+        target = expected_target_date(entry_iso, horizon)
+        exit_iso = str(row["ts_exit"]) if closed and pd.notna(row.get("ts_exit")) else None
+        boughts.append(entry_iso[:10])
+        targets.append(target.isoformat())
+        deviations.append(deviation_label(target, exit_iso=exit_iso, as_of=today))
+    out["Bought"] = boughts
+    out["Target date"] = targets
+    out["Deviation"] = deviations
+    return out
+
+
 k1, k2, k3, k4, k5 = st.columns(5)
 with k1:
     kpi_tile("Closed trades", str(len(closed_trades)))
@@ -136,6 +157,7 @@ else:
     show = open_trades.copy()
     if "ts_entry" in show.columns:
         show["entry_date"] = show["ts_entry"].str[:10]
+    show = _schedule_cols(show, closed=False)
     cols = [
         "entry_date",
         "symbol",
@@ -144,6 +166,9 @@ else:
         "entry_price",
         "current_stop",
         "target",
+        "Bought",
+        "Target date",
+        "Deviation",
         "days_held",
     ]
     cols = [c for c in cols if c in show.columns]
@@ -177,6 +202,7 @@ else:
         show["entry"] = show["ts_entry"].str[:10]
     if "ts_exit" in show.columns:
         show["exit"] = show["ts_exit"].str[:10]
+    show = _schedule_cols(show, closed=True)
     cols = [
         "entry",
         "exit",
@@ -188,6 +214,9 @@ else:
         "pnl",
         "pnl_pct",
         "exit_reason",
+        "Bought",
+        "Target date",
+        "Deviation",
         "days_held",
     ]
     cols = [c for c in cols if c in show.columns]

@@ -228,3 +228,39 @@ def test_paper_journal_renders_metric_tiles(empty_project):
     assert "Closed trades" in labels
     assert "Hit rate" in labels
     assert "Profit factor" in labels
+
+
+def test_paper_journal_renders_deviation_columns_for_trades(empty_project):
+    """A seeded open + closed trade exercises the Bought/Target/Deviation path."""
+    from trading.paper.ledger import close_with_exit, log_signal_and_open_trade
+    from trading.store.repo import Signal
+
+    paths = empty_project
+    with get_conn(paths.db_path) as conn:
+        # Open trade — still running.
+        open_sig = Signal(
+            id=None, ts="2026-06-01T09:20:00", symbol="ACME", side="LONG",
+            entry=100.0, stop=90.0, target=120.0, horizon_days=5, created_by="auto",
+        )
+        log_signal_and_open_trade(
+            conn, signal=open_sig, entry_ts="2026-06-01T09:20:00",
+            entry_price=100.0, qty=10, atr_at_entry=2.0,
+        )
+        # Closed trade — exited.
+        closed_sig = Signal(
+            id=None, ts="2026-06-01T09:20:00", symbol="BETA", side="LONG",
+            entry=50.0, stop=45.0, target=60.0, horizon_days=5, created_by="auto",
+        )
+        res = log_signal_and_open_trade(
+            conn, signal=closed_sig, entry_ts="2026-06-01T09:20:00",
+            entry_price=50.0, qty=20, atr_at_entry=1.0,
+        )
+        close_with_exit(
+            conn, res.paper_trade_id, exit_ts="2026-06-05T15:30:00",
+            exit_price=60.0, exit_reason="TARGET", days_held=4,
+        )
+        conn.commit()
+    at = AppTest.from_file(str(PAGE_JOURNAL), default_timeout=DEFAULT_TIMEOUT).run()
+    assert not at.exception
+    # Both the open and closed dataframes should carry the new schedule columns.
+    assert any("Deviation" in df.value.columns for df in at.dataframe)
