@@ -40,9 +40,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 1 | F-005† |
-| Med | 6 | F-001, F-006, F-007, F-008, F-010, F-020 |
+| Med | 5 | F-001, F-006, F-007, F-008, F-020 |
 | Low | 6 | F-004, F-009, F-017, F-027, F-028, F-030 |
-| ✅ Fixed | 22 | F-002, F-003, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036 |
+| ✅ Fixed | 23 | F-002, F-003, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -50,7 +50,7 @@ future Phase 19 — out of scope for hardening the paper run.
 | Category | Count |
 |---|---:|
 | VULN (correctness/data-integrity) | 7 (F-019 ✅, F-022 ✅, F-023 ✅, F-024 ✅, F-029 ✅, F-033 ✅, F-034 ✅) |
-| GAP (missing functionality/guardrail) | 11 (F-003 ✅, F-013 ✅, F-015 ✅, F-032 ✅) |
+| GAP (missing functionality/guardrail) | 11 (F-003 ✅, F-010 ✅, F-013 ✅, F-015 ✅, F-032 ✅) |
 | INACC (code ≠ spec/docstring) | 7 (F-021 ✅, F-031 ✅) |
 | DEBT (cleanup) | 8 |
 
@@ -66,7 +66,7 @@ The highest-leverage cluster; everything else is noise until these land.
 |---|---|---|---|
 | ~~**F-014 + F-012**~~ ✅ | High/Med | **Done (2026-06-16).** Ingested OHLCV for all 50 Nifty constituents + 8 holdings; pinned `nifty50.txt` (candidate set) and rebuilt `universe.txt` (ingest set); added `load_candidate_universe()`; `_step_scan` now scans the 50; aligned `sector_map.csv`. Verified: `pre-open` `candidates_total` 12→50. *(`nifty200/` subdir rename deferred — cosmetic.)* | Unblocks the real universe **and** gives the ranker enough labels to ever promote |
 | ~~**F-018**~~ ✅ | High | **Done (2026-06-16).** New `data/ohlcv_refresh.py` (`refresh_ohlcv` + `cross_check_closes`); `pre_open._step_ohlcv` runs before the scan; `scan()` skips symbols whose last bar is >5 days stale (warns); `Candidate.bar_date` rendered in the brief; new `trading refresh-ohlcv` CLI | Prevents the scan running on stale prices |
-| ~~**F-019**~~ ✅ | High | **Done (2026-06-16).** `build_scan_context` populates `india_vix` (from `macro_snapshot`) + `critical_event_symbols` (from `sentiment_daily.has_critical`); `_step_scan`/CLI `scan` use it. Re-enables the regime/VIX gate + critical-news veto. `fno_ban`/`t2t` still need NSE feeds (F-010) | Re-enables 3 risk vetoes + the regime gate |
+| ~~**F-019**~~ ✅ | High | **Done (2026-06-16).** `build_scan_context` populates `india_vix` (from `macro_snapshot`) + `critical_event_symbols` (from `sentiment_daily.has_critical`); `_step_scan`/CLI `scan` use it. Re-enables the regime/VIX gate + critical-news veto. `fno_banned` now live via `fno_ban_list` (F-010); `t2t` still awaits an NSE T2T feed | Re-enables 3 risk vetoes + the regime gate |
 | ~~**F-023**~~ ✅ | High | **Done (2026-06-16).** New `reconcile.compute_paper_cash` derives cash from the trade ledger (debit `entry×qty` on open, credit `exit×qty` on close); `compute_portfolio_snapshot`/`reconcile_day`/`run_post_close` now take `initial_capital` (not a constant `cash`); CLI `--cash` → `--capital`. Equity = derived cash + open MTM, so realised P&L compounds. Round-trip costs now netted in too (F-025) | Makes the Phase-18.5 Sharpe metric trustworthy |
 | ~~**F-029**~~ ✅ | Med | **Done (2026-06-16).** `strategy.exits.target_price` made public; `pre_open._step_auto_open` sets `signal.target = target_price(close, stop)` (the exit engine's `min(+20%, 2.5R)`) and drops the hardcoded `predicted_return_pct=20.0`, so the prediction defaults to the signal's implied target % and varies per signal | Makes calibration meaningful |
 
@@ -96,8 +96,9 @@ in weekly_train. ~~F-031 (train/serve skew)~~ ✅ **Done (2026-06-18)** — shar
 (`StaleBundleError`, deterministic) and warns when a VIX/USDINR figure cited in
 `macro_brief.md` disagrees with the bundle. Its self-healing follow-up was split
 into **F-035** (auto re-pull stale/missing macro) and **F-036** (multi-source
-macro reconciliation). Remaining: F-010 (decide each dormant table: implement or
-mark reserved).
+macro reconciliation). F-010 (decide each dormant table) ✅ **Done 2026-06-19** —
+`fno_ban_list` writer revives the F&O ban gate; the other 7 tables formally
+reserved.
 
 ### Wave 4 — Structural & cleanup (low-risk, alongside)
 F-001 (prune unused deps), F-004 (canonical IST clock), F-006/F-007/F-008/F-009
@@ -121,8 +122,8 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 > retention) + F-031 (train/serve feature parity) + F-026 (deterministic
 > narrative guardrails) done 2026-06-18; F-035 + F-036 (macro self-healing —
 > `trading macro refresh`/`verify`, `reconcile_macro`, `macro_reconciliation`
-> table + bundle annotation, `/macro-doctor` skill) done 2026-06-19 — next is
-> F-010 (decide each dormant table).
+> table + bundle annotation, `/macro-doctor` skill) done 2026-06-19; F-010
+> (`fno_ban_list` writer + 7 tables reserved) done 2026-06-19.
 
 ## How to use this file
 
@@ -166,7 +167,7 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-007 | DEBT | Med | 1 | `data.macro.snapshot_and_classify` puts a decision concern (regime classify) in the data layer (upward back-edge into `features`) | Open |
 | F-008 | DEBT | Med | 1 | `strategy ⇄ backtest` package-level import cycle, broken only by lazy/TYPE_CHECKING imports | Open |
 | F-009 | GAP | Low | 1 | No automated dependency-layering enforcement (e.g. import-linter); layering is convention-only | Open |
-| F-010 | GAP | Med | 2 | 8 of 16 SQLite domain tables are defined but have zero writers (dormant schema reservations) | Open |
+| F-010 | GAP | Med | 2 | 8 of 16 SQLite domain tables are defined but have zero writers (dormant schema reservations) | ✅ Fixed 2026-06-19 — `fno_ban_list` now written by `pre_open._step_fno_ban` (NSE `fo_secban.csv`) + read by `build_scan_context` (revives `passes_not_fno_banned`); other 7 tables formally reserved in migration + schema doc |
 | F-011 | VULN | High | 2 | Rule gates depend on empty tables — **superseded by F-019** (root cause is unpopulated `ScanContext`, not the tables) | Superseded |
 | F-012 | INACC | Med | 2 | Universe scope: paper-trading candidate set should be **Nifty 50 (50 stocks)** per user req; currently ~57 (Nifty 50 + holdings) under a `nifty200/` subdir | ✅ Fixed (2026-06-16) — candidate set pinned to Nifty 50; subdir rename deferred (cosmetic) |
 | ~~F-013~~ | GAP | Low | 2 | ~~No retention/compaction policy for `news_items` (append-only) or `data/raw/<date>/` JSON — unbounded growth~~ | ✅ Fixed 2026-06-18 — `ops/retention.py` + `trading prune` (dry-run by default) cap `raw/<date>/` (30d) and `news_items` (365d); auto-run in weekly_train; `sentiment_daily` rollups kept |
@@ -305,7 +306,21 @@ The downward-dependency rule is convention, unenforced.
 
 ---
 
-### F-010 — Dormant tables (`GAP`, Med, Phase 2)
+### F-010 — Dormant tables (`GAP`, Med, Phase 2) — ✅ Fixed 2026-06-19
+**Resolution:** Decided per-table. `fno_ban_list` was the only one with both a
+live feed and a real consumer, so it got a writer: `data/fno_ban.py`
+(`fetch_fno_ban_symbols`, best-effort parse of NSE `fo_secban.csv`) +
+`store/fno_ban_store.py` (`replace_fno_ban_list`/`get_fno_ban_symbols`). A new
+`pre_open._step_fno_ban` populates it before the scan and `build_scan_context`
+reads it into `ScanContext.fno_ban_symbols`, reviving the `passes_not_fno_banned`
+veto that [[F-019]] had left dead. Fetch failures degrade to an empty set + a
+warning (gate passes), matching every other Layer-A gate. The other 7 tables
+(`oi_daily`, `bulk_block_deals`, `corp_actions`, `account_events`,
+`preopen_snapshot`, `live_quotes`, `event_calendar`) are formally annotated
+`RESERVED` in the migration SQL and `02-data-schema.md` §4.2, each with a
+rationale + revisit trigger. `t2t` has no table and still awaits an NSE T2T feed.
+
+*Original finding:*
 `oi_daily`, `fno_ban_list`, `bulk_block_deals`, `corp_actions`, `account_events`,
 `preopen_snapshot`, `live_quotes`, `event_calendar` are defined in schema v1 but
 have no writer anywhere in `src/trading`.
@@ -477,8 +492,8 @@ assumes the host clock is IST (naive `datetime.now()`).
 `pre_open._step_scan` (signature gained `conn`) and `cli.py::scan_cmd` both call
 it — the CLI builds it best-effort from the DB, degrading to the indicator-only
 preview when no snapshot exists. `nifty200_drawdown_5d_pct` stays `None` (not yet
-stored; the rule degrades gracefully). `fno_ban_symbols`/`t2t_symbols` remain
-empty until the NSE ban-list/T2T feeds land ([[F-010]]). Tests assert a critical
+stored; the rule degrades gracefully). `fno_ban_symbols` is now populated from `fno_ban_list` ([[F-010]]); `t2t_symbols`
+remains empty until an NSE T2T feed lands. Tests assert a critical
 symbol is vetoed and that an empty DB degrades to passing. Supersedes [[F-011]].
 *Naming caveat:* `passes_regime` is now live, which makes the [[F-020]] name
 collision worth resolving next.

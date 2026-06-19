@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS macro_snapshot (
   regime       TEXT CHECK (regime IS NULL OR regime IN ('RISK_ON','NEUTRAL','RISK_OFF'))
 );
 
+-- RESERVED (F-010): no clean OI-history feed; revisit for an options-flow strategy.
 CREATE TABLE IF NOT EXISTS oi_daily (
   date      TEXT    NOT NULL,
   symbol    TEXT    NOT NULL,
@@ -136,12 +137,14 @@ CREATE TABLE IF NOT EXISTS oi_daily (
   PRIMARY KEY (date, symbol, expiry, strike, opt_type)
 );
 
+-- F-010: LIVE — written daily by pre_open._step_fno_ban (NSE fo_secban.csv).
 CREATE TABLE IF NOT EXISTS fno_ban_list (
   date   TEXT NOT NULL,
   symbol TEXT NOT NULL,
   PRIMARY KEY (date, symbol)
 );
 
+-- RESERVED (F-010): informational, no consumer; revisit for a smart-money signal.
 CREATE TABLE IF NOT EXISTS bulk_block_deals (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   date      TEXT    NOT NULL,
@@ -154,6 +157,7 @@ CREATE TABLE IF NOT EXISTS bulk_block_deals (
 );
 CREATE INDEX IF NOT EXISTS idx_bulk_block_symbol_date ON bulk_block_deals(symbol, date);
 
+-- RESERVED (F-010): yfinance already serves adjusted OHLCV; revisit if raw prices are stored.
 CREATE TABLE IF NOT EXISTS corp_actions (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   ex_date         TEXT    NOT NULL,
@@ -163,6 +167,7 @@ CREATE TABLE IF NOT EXISTS corp_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_corp_actions_symbol ON corp_actions(symbol, ex_date);
 
+-- RESERVED (F-010): audit log for the real-money path (F-005, suspended); revisit at Phase 19.
 CREATE TABLE IF NOT EXISTS account_events (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   ts           TEXT    NOT NULL,
@@ -172,6 +177,7 @@ CREATE TABLE IF NOT EXISTS account_events (
 );
 CREATE INDEX IF NOT EXISTS idx_account_events_ts ON account_events(ts);
 
+-- RESERVED (F-010): IEP persists to raw/<date> JSON; revisit if IEP history queries are needed.
 CREATE TABLE IF NOT EXISTS preopen_snapshot (
   date            TEXT NOT NULL,
   symbol          TEXT NOT NULL,
@@ -182,6 +188,7 @@ CREATE TABLE IF NOT EXISTS preopen_snapshot (
   PRIMARY KEY (date, symbol)
 );
 
+-- RESERVED (F-010): intraday quotes persist to quotes_HHMM.json; DB mirror unneeded.
 CREATE TABLE IF NOT EXISTS live_quotes (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   ts             TEXT    NOT NULL,
@@ -198,6 +205,7 @@ CREATE TABLE IF NOT EXISTS live_quotes (
 );
 CREATE INDEX IF NOT EXISTS idx_live_quotes_symbol_ts ON live_quotes(symbol, ts);
 
+-- RESERVED (F-010): NSE events land in news_items + sentiment_daily; revisit for a structured calendar.
 CREATE TABLE IF NOT EXISTS event_calendar (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   event_date   TEXT    NOT NULL,

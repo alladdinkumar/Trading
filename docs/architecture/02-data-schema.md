@@ -155,29 +155,28 @@ These 8 tables have live writers and drive the daily flow.
 | `macro_snapshot` | `date` | `data.macro` → `store.macro_store` | Daily macro row + classified `regime`. The schema has 11 macro columns; §4.3 notes which are actually populated. UPSERT. |
 | `macro_reconciliation` | `(date,field)` | `cli macro refresh` → `store.reconciliation_store` (F-035; F-036 verify) | Cross-source audit trail per macro field: primary/secondary value + source, `abs_delta`, `status`. v4 table. UPSERT. |
 
-### 4.2 Dormant tables (defined in v1, **zero writers**)
+### 4.2 Reserved tables (defined in v1) and the one now live (F-010)
 
-These 8 tables exist in the schema but nothing writes them today. They were
-specced in the original design (spec §13) for features not yet built. **A
-reviewer should treat them as schema reservations, not live data.** → **F-010**.
+`fno_ban_list` is **now written** daily by `pre_open._step_fno_ban` (NSE
+`fo_secban.csv`) and read by `build_scan_context` into `ScanContext`, reviving
+the `passes_not_fno_banned` veto (was dead per F-019). The other 7 tables remain
+**schema reservations** — a reviewer should treat them as reserved, not live
+data. → **F-010**.
 
-| Table | Intended purpose | Consumer that would need it |
+| Table | Status | Rationale / revisit trigger |
 |---|---|---|
-| `oi_daily` | F&O open-interest per strike | OI-based signals (unbuilt) |
-| `fno_ban_list` | NSE F&O ban list per date | `rules.passes_not_fno_banned` |
-| `bulk_block_deals` | Bulk/block deal disclosures | conviction/flow signals |
-| `corp_actions` | Splits/bonuses/dividends ex-dates | OHLCV adjustment, event veto |
-| `account_events` | Broker account events log | reconciliation/audit |
-| `preopen_snapshot` | IEP/gap per symbol | `pre_open_iep` (uses quote JSON instead) |
-| `live_quotes` | Intraday quote ticks | (quotes persist to JSON files instead) |
-| `event_calendar` | Earnings/macro event calendar | `rules.passes_no_critical_event` |
+| `fno_ban_list` | **LIVE** | Written by `_step_fno_ban`; feeds `passes_not_fno_banned` |
+| `oi_daily` | Reserved | No clean OI-history feed; for an options-flow strategy |
+| `bulk_block_deals` | Reserved | Informational, no consumer; for a smart-money signal |
+| `corp_actions` | Reserved | yfinance serves adjusted OHLCV; for raw-price storage |
+| `account_events` | Reserved | Audit log for the real-money path (F-005, suspended) |
+| `preopen_snapshot` | Reserved | IEP persists to `raw/<date>` JSON |
+| `live_quotes` | Reserved | Intraday quotes persist to `quotes_HHMM.json` |
+| `event_calendar` | Reserved | NSE events land in `news_items` + `sentiment_daily` |
 
-Two of these matter for **strategy correctness**: `fno_ban_list` and
-`event_calendar` back the rule gates `passes_not_fno_banned` and
-`passes_no_critical_event`. With the tables empty, those gates can only act on
-whatever the job passes into `ScanContext` (verified in
-[04-analysis-strategy](./04-analysis-strategy.md)) — so they may be effectively
-no-ops today. → **F-011**.
+The critical-event veto (`passes_no_critical_event`) is served by
+`sentiment_daily` (F-019), so `event_calendar` stays reserved without leaving a
+gate dead. `t2t_symbols` has no table and still awaits an NSE T2T feed. → **F-011**.
 
 ### 4.3 Field-level notes worth flagging
 
@@ -265,10 +264,11 @@ compile flow (and mid/post-close).
 
 ## ⚠️ Robustness notes / open questions
 
-- **Half the schema is dormant.** 8 of 16 domain tables have no writer. This is
-  fine as a reservation, but it (a) misleads readers into thinking the data
-  exists and (b) silently neutralises two strategy gates. Either populate them or
-  mark them clearly as reserved. → F-010, F-011.
+- **Most reserved tables remain dormant by design.** Of the 8 once-writerless
+  domain tables, `fno_ban_list` is now live (F-010) — reviving the
+  `passes_not_fno_banned` gate; the other 7 are explicitly annotated as reserved
+  in the migration + §4.2 (rationale + revisit trigger each). → F-010 (resolved),
+  F-011.
 - **Only one enforced FK.** Cross-table integrity (e.g. a `prediction` or
   `sentiment_daily` row referencing a real symbol/date) is by convention. A bad
   `date` string can't be caught by the DB. Consider a symbol/date dimension or
