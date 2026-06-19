@@ -76,6 +76,8 @@ from trading.ops.run_status import StepStatus, compute_status, has_due_failure
 from trading.ops.runner import SCHEDULE, _today_ist, fire_reminder
 from trading.paper.ledger import log_signal_and_open_trade, open_trades
 from trading.paper.mtm import build_bars_from_history, mtm_open_trades
+from trading.paper.funds import add_funds, list_funds, total_funds_added
+from trading.paper.positions import compute_summary
 from trading.paper.reconcile import INITIAL_CAPITAL, reconcile_day
 from trading.portfolio.gtt import project_all_gtts
 from trading.portfolio.health import (
@@ -99,6 +101,9 @@ console = Console()
 
 macro_app = typer.Typer(help="Macro snapshot pull + cross-source reconciliation.")
 app.add_typer(macro_app, name="macro")
+
+funds_app = typer.Typer(help="Paper-trading funds ledger — deposits + balance.")
+app.add_typer(funds_app, name="funds")
 
 
 def _force_utf8_io(*streams: object) -> None:
@@ -868,6 +873,79 @@ def macro_verify_cmd(
         )
         raise typer.Exit(code=1)
     console.print(f"[green]macro figures reconciled for {date_str}.[/green]")
+
+
+@funds_app.command("add")
+def funds_add_cmd(
+    amount: Annotated[float, typer.Argument(help="Top-up amount in rupees (> 0).")],
+    note: Annotated[str | None, typer.Option("--note", help="Optional label.")] = None,
+    as_of: Annotated[
+        str | None,
+        typer.Option("--date", help="Deposit date (YYYY-MM-DD). Defaults to today."),
+    ] = None,
+) -> None:
+    """Record a capital top-up and print the new balance breakdown."""
+    paths = get_paths()
+    deposit_date = as_of or date.today().isoformat()
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        try:
+            dep = add_funds(conn, amount=amount, date=deposit_date, note=note)
+        except ValueError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1) from exc
+        summary = compute_summary(conn, as_of=date.fromisoformat(deposit_date))
+    console.print(
+        f"[green]Added ₹{dep.amount:,.0f}[/green] on {dep.date}"
+        + (f" ({dep.note})" if dep.note else "")
+    )
+    console.print(
+        f"Total funds in ₹{INITIAL_CAPITAL + summary.funds_added:,.0f}  ·  "
+        f"Cash available ₹{summary.cash:,.0f}"
+    )
+
+
+@funds_app.command("list")
+def funds_list_cmd() -> None:
+    """List the initial capital and every recorded top-up."""
+    paths = get_paths()
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        deposits = list_funds(conn)
+        total_added = total_funds_added(conn, as_of=date.today())
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Date")
+    table.add_column("Amount", justify="right")
+    table.add_column("Note")
+    table.add_row("—", f"₹{INITIAL_CAPITAL:,.0f}", "Initial capital")
+    for d in deposits:
+        table.add_row(d.date, f"₹{d.amount:,.0f}", d.note or "")
+    console.print(table)
+    console.print(f"[bold]Total funds in ₹{INITIAL_CAPITAL + total_added:,.0f}[/bold]")
+
+
+@funds_app.command("balance")
+def funds_balance_cmd(
+    as_of: Annotated[
+        str | None,
+        typer.Option("--date", help="Balance date (YYYY-MM-DD). Defaults to today."),
+    ] = None,
+) -> None:
+    """Print total funds in, cash available, invested, holdings value, account value."""
+    paths = get_paths()
+    target = date.fromisoformat(as_of) if as_of else date.today()
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        summary = compute_summary(conn, as_of=target)
+    table = Table(show_header=False)
+    table.add_column("Metric")
+    table.add_column("Value", justify="right")
+    table.add_row("Total funds in", f"₹{INITIAL_CAPITAL + summary.funds_added:,.0f}")
+    table.add_row("Cash available", f"₹{summary.cash:,.0f}")
+    table.add_row("Invested (at cost)", f"₹{summary.invested:,.0f}")
+    table.add_row("Holdings value", f"₹{summary.current_value:,.0f}")
+    table.add_row("Account value", f"₹{summary.account_value:,.0f}")
+    console.print(table)
 
 
 @app.command("sector")
