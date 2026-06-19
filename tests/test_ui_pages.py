@@ -23,7 +23,7 @@ from trading.ui import data as ui_data
 # Page entry points (resolved at runtime so tests work from any cwd)
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 PAGE_APP = _REPO_ROOT / "src" / "trading" / "ui" / "Home.py"
-PAGE_PORTFOLIO = _REPO_ROOT / "src" / "trading" / "ui" / "pages" / "1_Portfolio.py"
+PAGE_PORTFOLIO = _REPO_ROOT / "src" / "trading" / "ui" / "pages" / "1_Kite_Portfolio.py"
 PAGE_SIGNALS = _REPO_ROOT / "src" / "trading" / "ui" / "pages" / "2_Today_Signals.py"
 PAGE_JOURNAL = _REPO_ROOT / "src" / "trading" / "ui" / "pages" / "3_Paper_Journal.py"
 

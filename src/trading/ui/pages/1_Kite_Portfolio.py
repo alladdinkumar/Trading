@@ -27,9 +27,9 @@ from trading.ui.components import (
     stale_quote_tag,
 )
 
-st.set_page_config(page_title="Portfolio · Trading", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Kite Portfolio · Trading", page_icon="📊", layout="wide")
 
-st.sidebar.title("📊 Portfolio")
+st.sidebar.title("📊 Kite Portfolio")
 as_of = sidebar_date_picker("As-of date")
 
 # Header
@@ -37,8 +37,8 @@ macro = data.load_macro_snapshot(as_of)
 regime = macro.get("regime") if macro else None
 c1, c2 = st.columns([3, 1])
 with c1:
-    st.markdown(f"## Portfolio · {as_of}")
-    st.caption("Live holdings, GTT viability, sector concentration.")
+    st.markdown(f"## Kite Portfolio · {as_of}")
+    st.caption("Your real Zerodha account — live holdings, GTT viability, sector concentration.")
 with c2:
     st.markdown("<div style='height:18px;'></div>", unsafe_allow_html=True)
     regime_badge(regime)

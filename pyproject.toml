@@ -105,7 +105,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # Streamlit multipage convention requires numbered prefixes on filenames
-# (e.g. `pages/1_Portfolio.py`) — N999 would reject those. The entry point
+# (e.g. `pages/1_Kite_Portfolio.py`) — N999 would reject those. The entry point
 # is `Home.py` (capitalised — Streamlit uses the filename as the sidebar
 # label), which also fails N999's snake_case rule.
 "src/trading/ui/pages/*.py" = ["N999"]
