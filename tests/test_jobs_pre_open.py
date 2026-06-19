@@ -520,9 +520,7 @@ def test_run_pre_open_unattended_writes_bundle_without_snapshot(paths, monkeypat
     monkeypatch.setattr("trading.jobs.pre_open._step_ohlcv", lambda p, d, w: 0)
     monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda c, p, d, w: [])
 
-    result = run_pre_open(
-        date(2026, 5, 15), paths=paths, skip_news=True, require_snapshot=False
-    )
+    result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=True, require_snapshot=False)
     assert result.bundle_path.is_file()
     assert result.holdings_scored == 0
     assert any("snapshot" in w.lower() for w in result.warnings)
@@ -917,3 +915,75 @@ def test_step_sector_returns_false_when_no_rows(
     ok = _step_sector(conn, date(2026, 5, 26), warnings)
     assert ok is False
     assert any("no sector rows fetched" in w for w in warnings)
+
+
+def test_build_scan_context_populates_fno_ban(tmp_path) -> None:
+    from datetime import date
+
+    from trading.jobs.pre_open import build_scan_context
+    from trading.store.db import get_conn
+    from trading.store.fno_ban_store import replace_fno_ban_list
+    from trading.store.migrations import run_migrations
+
+    db = tmp_path / "c.db"
+    with get_conn(db) as conn:
+        run_migrations(conn)
+        replace_fno_ban_list(conn, "2026-06-19", ["IDEA", "GNFC"])
+        ctx = build_scan_context(conn, date(2026, 6, 19))
+    assert ctx.fno_ban_symbols == frozenset({"IDEA", "GNFC"})
+
+
+def test_banned_symbol_fails_gate_via_context(tmp_path) -> None:
+    from datetime import date
+
+    from trading.jobs.pre_open import build_scan_context
+    from trading.store.db import get_conn
+    from trading.store.fno_ban_store import replace_fno_ban_list
+    from trading.store.migrations import run_migrations
+    from trading.strategy.rules import passes_not_fno_banned
+
+    db = tmp_path / "d.db"
+    with get_conn(db) as conn:
+        run_migrations(conn)
+        replace_fno_ban_list(conn, "2026-06-19", ["IDEA"])
+        ctx = build_scan_context(conn, date(2026, 6, 19))
+    assert passes_not_fno_banned("IDEA", ctx).passed is False
+    assert passes_not_fno_banned("RELIANCE", ctx).passed is True
+
+
+def test_step_fno_ban_persists_and_counts(tmp_path, monkeypatch) -> None:
+    from datetime import date
+
+    import trading.jobs.pre_open as po
+    from trading.store.db import get_conn
+    from trading.store.fno_ban_store import get_fno_ban_symbols
+    from trading.store.migrations import run_migrations
+
+    monkeypatch.setattr(po, "fetch_fno_ban_symbols", lambda: ["IDEA", "GNFC"])
+    db = tmp_path / "e.db"
+    warnings: list[str] = []
+    with get_conn(db) as conn:
+        run_migrations(conn)
+        n = po._step_fno_ban(conn, date(2026, 6, 19), warnings)
+        assert n == 2
+        assert get_fno_ban_symbols(conn, "2026-06-19") == ["GNFC", "IDEA"]
+    assert warnings == []
+
+
+def test_step_fno_ban_degrades_on_empty(tmp_path, monkeypatch) -> None:
+    from datetime import date
+
+    import trading.jobs.pre_open as po
+    from trading.store.db import get_conn
+    from trading.store.fno_ban_store import get_fno_ban_symbols
+    from trading.store.migrations import run_migrations
+
+    monkeypatch.setattr(po, "fetch_fno_ban_symbols", lambda: [])
+    db = tmp_path / "f.db"
+    warnings: list[str] = []
+    with get_conn(db) as conn:
+        run_migrations(conn)
+        n = po._step_fno_ban(conn, date(2026, 6, 19), warnings)
+        assert n == 0
+        assert get_fno_ban_symbols(conn, "2026-06-19") == []
+    assert any("ban list" in w.lower() for w in warnings)

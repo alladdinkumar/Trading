@@ -16,6 +16,7 @@ from datetime import date
 from pathlib import Path
 
 from trading.config import Paths, Settings, get_paths, get_settings
+from trading.data.fno_ban import fetch_fno_ban_symbols
 from trading.data.kite_snapshot import (
     KiteSnapshotMissingError,
     KiteSnapshotStaleError,
@@ -38,6 +39,7 @@ from trading.portfolio.health import (
 )
 from trading.portfolio.holding_context import build_holding_context
 from trading.store.db import get_conn
+from trading.store.fno_ban_store import get_fno_ban_symbols, replace_fno_ban_list
 from trading.store.macro_store import get_macro_snapshot, upsert_macro_snapshot
 from trading.store.migrations import run_migrations
 from trading.store.news_store import insert_news_items, list_critical_symbols
@@ -121,6 +123,7 @@ def run_pre_open(
 
         ohlcv_bars_added = _step_ohlcv(p, as_of, warnings)
 
+        _step_fno_ban(conn, as_of, warnings)
         candidates = _step_scan(conn, p, as_of, warnings)
         passing_candidates = passing(candidates)
         scored = _step_rank(conn, p, as_of, passing_candidates, warnings)
@@ -253,6 +256,21 @@ def _step_ohlcv(paths: Paths, as_of: date, warnings: list[str]) -> int:
     return result.bars_added
 
 
+def _step_fno_ban(conn: sqlite3.Connection, as_of: date, warnings: list[str]) -> int:
+    """Fetch the NSE F&O ban list and persist it for `as_of`. Best-effort.
+
+    `fetch_fno_ban_symbols` already swallows network errors (returns []). On an
+    empty result — a real no-ban day or a feed outage — we still overwrite the
+    date (clearing any stale rows) and warn that the gate degraded to a pass.
+    Returns the number of banned symbols persisted.
+    """
+    symbols = fetch_fno_ban_symbols()
+    replace_fno_ban_list(conn, as_of.isoformat(), symbols)
+    if not symbols:
+        warnings.append("F&O ban list empty/unavailable — ban gate degraded to pass")
+    return len(symbols)
+
+
 def build_scan_context(conn: sqlite3.Connection, as_of: date) -> ScanContext:
     """Assemble the Layer-A `ScanContext` from data already persisted this run.
 
@@ -263,16 +281,19 @@ def build_scan_context(conn: sqlite3.Connection, as_of: date) -> ScanContext:
       (drives the hard critical-news veto).
 
     `nifty200_drawdown_5d_pct` is left `None` (not yet computed/stored — the
-    regime rule degrades gracefully). `fno_ban_symbols` and `t2t_symbols` need
-    external NSE feeds (F-010) and stay empty until those land.
+    regime rule degrades gracefully). `fno_ban_symbols` ← today's `fno_ban_list`
+    rows (F-010), reviving the `passes_not_fno_banned` veto. `t2t_symbols` still
+    needs an NSE T2T feed (no table) and stays empty.
     """
     snap = get_macro_snapshot(conn, as_of.isoformat())
     india_vix = snap.vix if snap is not None else None
     critical = list_critical_symbols(conn, as_of.isoformat())
+    ban = get_fno_ban_symbols(conn, as_of.isoformat())
     return ScanContext(
         scan_date=as_of,
         india_vix=india_vix,
         critical_event_symbols=frozenset(critical),
+        fno_ban_symbols=frozenset(ban),
     )
 
 
