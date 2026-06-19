@@ -34,6 +34,7 @@ EXPECTED_TABLES = {
     "live_quotes",
     "event_calendar",
     "macro_reconciliation",
+    "cash_ledger",
 }
 
 
@@ -178,6 +179,22 @@ def test_macro_reconciliation_pk_composite_date_field(tmp_path: Path) -> None:
                 "INSERT INTO macro_reconciliation (date, field, status, checked_at) "
                 "VALUES ('2026-06-19', 'vix', 'mismatch', '2026-06-19T09:00:00')"
             )
+
+
+def test_migration_creates_cash_ledger_table(tmp_path: Path) -> None:
+    with get_conn(tmp_path / "cl.db") as conn:
+        version = run_migrations(conn)
+        assert version == CURRENT_VERSION
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(cash_ledger)").fetchall()}
+    assert cols == {"id", "date", "amount", "note", "created_at"}
+
+
+def test_cash_ledger_migration_is_idempotent(tmp_path: Path) -> None:
+    db = tmp_path / "cl2.db"
+    with get_conn(db) as conn:
+        run_migrations(conn)
+        # Re-running must be a no-op (no duplicate-table error).
+        assert run_migrations(conn) == CURRENT_VERSION
 
 
 def test_pk_composite_sentiment_daily(tmp_path: Path) -> None:

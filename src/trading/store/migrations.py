@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-CURRENT_VERSION = 4
+CURRENT_VERSION = 5
 
 
 SCHEMA_V1 = """
@@ -271,6 +271,21 @@ CREATE TABLE IF NOT EXISTS macro_reconciliation (
 """
 
 
+# v5: paper-trading funds ledger. Records capital top-ups on top of the
+# INITIAL_CAPITAL seed (which stays a constant, not a row). Additive — no
+# existing table is touched, so DBs at v4 need no data backfill.
+SCHEMA_V5 = """
+CREATE TABLE IF NOT EXISTS cash_ledger (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  date       TEXT NOT NULL,
+  amount     REAL NOT NULL,
+  note       TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cash_ledger_date ON cash_ledger(date);
+"""
+
+
 def _current_db_version(conn: sqlite3.Connection) -> int:
     """Return the highest applied version, or 0 if schema_version doesn't exist yet."""
     row = conn.execute(
@@ -313,5 +328,11 @@ def run_migrations(conn: sqlite3.Connection) -> int:
         conn.execute(
             "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
             (4, datetime.now(UTC).isoformat()),
+        )
+    if current < 5:
+        conn.executescript(SCHEMA_V5)
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (5, datetime.now(UTC).isoformat()),
         )
     return CURRENT_VERSION
