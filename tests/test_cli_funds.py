@@ -40,3 +40,32 @@ def test_funds_balance_reflects_topup(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     # Total funds in = 100,000 initial + 30,000 top-up = 130,000.
     assert "130,000" in result.output or "130000" in result.output
+
+
+def test_funds_top_up_deposits_gap_to_target(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    result = CliRunner().invoke(
+        app, ["funds", "top-up", "--to-available", "150000", "--date", "2026-06-19"]
+    )
+    assert result.exit_code == 0, result.output
+    # Fresh book: cash = 100k seed → deposits the 50k gap to reach 150k available.
+    balance = CliRunner().invoke(app, ["funds", "balance", "--date", "2026-06-19"])
+    assert "150,000" in balance.output or "150000" in balance.output
+
+
+def test_funds_top_up_idempotent_when_already_funded(tmp_path: Path, monkeypatch) -> None:
+    from trading.config import get_paths
+    from trading.store.db import get_conn
+    from trading.store.migrations import run_migrations
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    CliRunner().invoke(app, ["funds", "top-up", "--to-available", "150000", "--date", "2026-06-19"])
+    result = CliRunner().invoke(
+        app, ["funds", "top-up", "--to-available", "150000", "--date", "2026-06-19"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "already" in result.output.lower()
+    with get_conn(get_paths().db_path) as conn:
+        run_migrations(conn)
+        n = conn.execute("SELECT COUNT(*) FROM cash_ledger").fetchone()[0]
+    assert n == 1  # second call wrote nothing

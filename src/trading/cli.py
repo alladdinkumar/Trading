@@ -78,7 +78,7 @@ from trading.paper.funds import add_funds, list_funds, total_funds_added
 from trading.paper.ledger import log_signal_and_open_trade, open_trades
 from trading.paper.mtm import build_bars_from_history, mtm_open_trades
 from trading.paper.positions import compute_summary
-from trading.paper.reconcile import INITIAL_CAPITAL, reconcile_day
+from trading.paper.reconcile import INITIAL_CAPITAL, compute_paper_cash, reconcile_day
 from trading.portfolio.gtt import project_all_gtts
 from trading.portfolio.health import (
     HoldingContext,
@@ -902,6 +902,46 @@ def funds_add_cmd(
     console.print(
         f"Total funds in ₹{INITIAL_CAPITAL + summary.funds_added:,.0f}  ·  "
         f"Cash available ₹{summary.cash:,.0f}"
+    )
+
+
+@funds_app.command("top-up")
+def funds_top_up_cmd(
+    to_available: Annotated[
+        float, typer.Option("--to-available", help="Target available cash in rupees.")
+    ],
+    as_of: Annotated[
+        str | None,
+        typer.Option("--date", help="Deposit date (YYYY-MM-DD). Defaults to today."),
+    ] = None,
+) -> None:
+    """Deposit exactly enough to raise available cash to `--to-available`.
+
+    Idempotent: if cash is already at or above the target, writes nothing.
+    """
+    paths = get_paths()
+    deposit_date = as_of or date.today().isoformat()
+    target_day = date.fromisoformat(deposit_date)
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        cash = compute_paper_cash(conn, as_of=target_day)
+        gap = to_available - cash
+        if gap <= 0:
+            console.print(
+                f"[yellow]Already at/above ₹{to_available:,.0f} available "
+                f"(cash ₹{cash:,.0f}).[/yellow] Nothing deposited."
+            )
+            return
+        dep = add_funds(
+            conn,
+            amount=gap,
+            date=deposit_date,
+            note=f"top-up to ₹{to_available:,.0f} available",
+        )
+        summary = compute_summary(conn, as_of=target_day)
+    console.print(
+        f"[green]Deposited ₹{dep.amount:,.0f}[/green] on {dep.date} → "
+        f"cash available ₹{summary.cash:,.0f}"
     )
 
 
