@@ -22,6 +22,8 @@ from trading.config import Paths, get_paths
 from trading.data import kite_snapshot, quotes_snapshot
 from trading.data.kite import GttOrder, Holding
 from trading.features.technicals import add_indicators
+from trading.paper.funds import list_funds
+from trading.paper.positions import PortfolioSummary, compute_positions, compute_summary
 from trading.store.db import get_conn
 from trading.store.ohlcv import read_ohlcv
 
@@ -169,7 +171,7 @@ def load_paper_trades(*, open_only: bool = False) -> pd.DataFrame:
             f"""
             SELECT pt.*,
                    s.symbol, s.side, s.target, s.stop AS signal_stop,
-                   s.conviction
+                   s.conviction, s.horizon_days
               FROM paper_trades pt
               LEFT JOIN signals s ON s.id = pt.signal_id
               {where}
@@ -179,6 +181,42 @@ def load_paper_trades(*, open_only: bool = False) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame()
     return pd.DataFrame([dict(r) for r in rows])
+
+
+@st.cache_data(ttl=60)
+def load_cash_ledger() -> pd.DataFrame:
+    """Funds top-ups (date / amount / note), oldest first."""
+    with get_conn(paths().db_path) as conn:
+        deposits = list_funds(conn)
+    if not deposits:
+        return pd.DataFrame(columns=["date", "amount", "note"])
+    return pd.DataFrame(
+        [{"date": d.date, "amount": d.amount, "note": d.note or ""} for d in deposits]
+    )
+
+
+@st.cache_data(ttl=60)
+def load_paper_positions(as_of: str) -> pd.DataFrame:
+    """Per-symbol paper holdings as of `as_of` (one row per symbol)."""
+    with get_conn(paths().db_path) as conn:
+        positions = compute_positions(conn, as_of=_date_arg(as_of))
+    if not positions:
+        return pd.DataFrame(
+            columns=[
+                "symbol", "qty", "avg", "invested", "ltp",
+                "current_value", "pnl", "pnl_pct", "today_pnl",
+            ]
+        )
+    return pd.DataFrame([asdict(p) for p in positions])
+
+
+def load_paper_summary(as_of: str) -> PortfolioSummary:
+    """Portfolio summary (invested/current/P&L/cash/funds) as of `as_of`.
+
+    Uncached — returns a dataclass and is cheap; pages call it once per render.
+    """
+    with get_conn(paths().db_path) as conn:
+        return compute_summary(conn, as_of=_date_arg(as_of))
 
 
 @st.cache_data(ttl=60)
