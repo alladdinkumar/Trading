@@ -45,8 +45,10 @@ def add_funds(
         (date, amount, note, created_at),
     )
     conn.commit()
+    row_id = cur.lastrowid
+    assert row_id is not None  # guaranteed by a successful INSERT
     return FundsDeposit(
-        id=int(cur.lastrowid),
+        id=int(row_id),
         date=date,
         amount=amount,
         note=note,

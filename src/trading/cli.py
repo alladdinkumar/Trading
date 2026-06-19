@@ -74,9 +74,9 @@ from trading.ops.notify import notify as _notify
 from trading.ops.retention import DEFAULT_NEWS_KEEP_DAYS, DEFAULT_RAW_KEEP_DAYS
 from trading.ops.run_status import StepStatus, compute_status, has_due_failure
 from trading.ops.runner import SCHEDULE, _today_ist, fire_reminder
+from trading.paper.funds import add_funds, list_funds, total_funds_added
 from trading.paper.ledger import log_signal_and_open_trade, open_trades
 from trading.paper.mtm import build_bars_from_history, mtm_open_trades
-from trading.paper.funds import add_funds, list_funds, total_funds_added
 from trading.paper.positions import compute_summary
 from trading.paper.reconcile import INITIAL_CAPITAL, reconcile_day
 from trading.portfolio.gtt import project_all_gtts

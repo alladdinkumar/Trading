@@ -7,6 +7,7 @@ consistent with the engine's time-stop and `mtm._days_held`. No DB or network.
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import cast
 
 import numpy as np
 
@@ -20,7 +21,7 @@ def expected_target_date(entry_iso: str, horizon_days: int) -> date:
     """Bought date + `horizon_days` trading days (rolled forward off weekends)."""
     entry = _as_date(entry_iso)
     shifted = np.busday_offset(np.datetime64(entry, "D"), horizon_days, roll="forward")
-    return shifted.astype("datetime64[D]").astype(date)
+    return cast(date, shifted.astype("datetime64[D]").astype(date))
 
 
 def deviation_label(target: date, *, exit_iso: str | None, as_of: date) -> str:
