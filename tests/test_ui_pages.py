@@ -26,6 +26,7 @@ PAGE_APP = _REPO_ROOT / "src" / "trading" / "ui" / "Home.py"
 PAGE_PORTFOLIO = _REPO_ROOT / "src" / "trading" / "ui" / "pages" / "1_Kite_Portfolio.py"
 PAGE_SIGNALS = _REPO_ROOT / "src" / "trading" / "ui" / "pages" / "2_Today_Signals.py"
 PAGE_JOURNAL = _REPO_ROOT / "src" / "trading" / "ui" / "pages" / "3_Paper_Journal.py"
+PAGE_PAPER_PORTFOLIO = _REPO_ROOT / "src" / "trading" / "ui" / "pages" / "4_Paper_Portfolio.py"
 
 DEFAULT_TIMEOUT = 30  # seconds
 
@@ -39,6 +40,8 @@ def _clear_cache():
         "load_portfolio_snapshots",
         "load_signals_by_date",
         "load_paper_trades",
+        "load_cash_ledger",
+        "load_paper_positions",
         "load_predictions",
         "load_holdings",
         "load_gtts",
@@ -145,6 +148,45 @@ def test_portfolio_renders_with_seeded_kite_snapshot(seeded_project):
     assert not at.exception
     # KPI tiles should render
     assert any("Holdings value" in m.label for m in at.metric)
+
+
+# ---------------------------------------------------------------------------
+# Paper Portfolio
+# ---------------------------------------------------------------------------
+
+
+def test_paper_portfolio_renders_empty_state(empty_project):
+    at = AppTest.from_file(str(PAGE_PAPER_PORTFOLIO), default_timeout=DEFAULT_TIMEOUT).run()
+    assert not at.exception
+    markdown_text = " ".join(m.value or "" for m in at.markdown)
+    assert "Paper Portfolio" in markdown_text
+    assert "No open paper positions" in markdown_text
+
+
+def test_paper_portfolio_renders_with_seeded_position(empty_project):
+    from trading.paper.funds import add_funds
+    from trading.paper.ledger import log_signal_and_open_trade
+    from trading.store.repo import Signal
+
+    paths = empty_project
+    with get_conn(paths.db_path) as conn:
+        sig = Signal(
+            id=None, ts="2026-06-01T09:20:00", symbol="ACME", side="LONG",
+            entry=100.0, stop=90.0, target=120.0, horizon_days=15, created_by="auto",
+        )
+        log_signal_and_open_trade(
+            conn, signal=sig, entry_ts="2026-06-01T09:20:00",
+            entry_price=100.0, qty=10, atr_at_entry=2.0,
+        )
+        conn.execute(
+            "INSERT INTO portfolio_snapshots (date, cash, holdings_json, equity) VALUES (?,?,?,?)",
+            ("2026-06-02", 99000.0, '{"ACME": {"qty": 10, "value": 1300.0}}', 100300.0),
+        )
+        add_funds(conn, amount=20_000.0, date="2026-06-01")
+        conn.commit()
+    at = AppTest.from_file(str(PAGE_PAPER_PORTFOLIO), default_timeout=DEFAULT_TIMEOUT).run()
+    assert not at.exception
+    assert any("Invested" in m.label for m in at.metric)
 
 
 # ---------------------------------------------------------------------------
