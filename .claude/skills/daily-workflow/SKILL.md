@@ -55,10 +55,29 @@ stop. No block runs, no Slack, nothing written.
 
 | Step | Command | Kind | Writes |
 |---|---|---|---|
-| 1/4 | `/kite-snapshot` | MCP skill | `data/raw/<date>/holdings.json`, `gtts.json`, `_meta.json` |
-| 2/4 | `trading pre-open --date <date>` | CLI | `data/research/<date>/_context.md` |
-| 3/4 | `/analyst` | analysis skill | `data/research/<date>/macro_brief.md`, `sector_commentary.md`, `candidates/*.md` |
-| 4/4 | `trading brief compile --date <date>` | CLI | `data/research/<date>/brief.md` |
+| 1/5 | `/kite-snapshot` | MCP skill | `data/raw/<date>/holdings.json`, `gtts.json`, `_meta.json` |
+| 2/5 | `trading pre-open --date <date>` | CLI | `data/research/<date>/_context.md`, base `macro_snapshot` row |
+| 3/5 | `/macro-doctor` | MCP skill | `data/raw/<date>/macro_cross_HHMM.json`; gap-fills `macro_snapshot`, writes `macro_reconciliation` |
+| 4/5 | `/analyst` | analysis skill | `data/research/<date>/macro_brief.md`, `sector_commentary.md`, `candidates/*.md` |
+| 5/5 | `trading brief compile --date <date>` | CLI | `data/research/<date>/brief.md` |
+
+**Why `/macro-doctor` sits at step 3 (after pre-open, before the brief):** step 2
+(`trading pre-open`) writes a *single-source* (yfinance) `macro_snapshot`.
+`/macro-doctor` then pulls Kite read-only cross-source figures and runs
+`trading macro refresh --cross` (re-snapshots **with Kite gap-fill**, overwriting
+the base row) plus `trading macro verify --cross` (writes the `macro_reconciliation`
+rows the brief annotates). Running it *after* pre-open keeps the gap-filled snapshot
+and the reconciliation rows coherent — running it before would let pre-open's macro
+step clobber the gap-fill and strand the reconciliation rows against a stale
+snapshot. Both land before step 5 so the compiled brief reflects the gap-filled
+macro and shows F-036's `⚠ kite …` / `(unreconciled)` flags. Kite auth is already
+alive (step 1 passed), so no second login is expected here.
+
+**`/macro-doctor` is best-effort.** Unlike `/kite-snapshot`, it is *not* a halt
+point: if cross-source data is absent, `macro verify` reports a mismatch (exit 1),
+or the step otherwise fails, **warn and continue to `/analyst`** — the brief must
+still compile. Its done-marker for idempotency is any `data/raw/<date>/macro_cross_*.json`;
+if one exists for `<date>`, skip the step.
 
 ### IEP block — window 08:55–09:00 · done-marker: `pre-open-iep` ran (see note)
 
@@ -103,6 +122,13 @@ Why pause instead of skip: the snapshot is the whole point of the MCP steps.
 Skipping them silently would produce a hollow brief / a mid-day with no quotes.
 Better to do every pure-Python step possible, then halt visibly on the one
 thing only the human can unblock.
+
+**`/macro-doctor` is the exception to the pause rule.** It also uses Kite
+read-only, but auth is already established by `/kite-snapshot` at step 1, and its
+output (gap-fill + reconciliation) is an *enhancement*, not load-bearing for the
+brief. So treat it as best-effort: if it can't pull or reconcile, warn and move on
+to `/analyst` rather than halting or re-arming. Never let macro-doctor place an
+order — it is read-only by contract.
 
 ## Idempotency — never redo finished work
 
@@ -158,7 +184,12 @@ ceremony — this runs many times a day.
 
 - **Not a trading day** → re-arm for next morning, run nothing.
 - **Kite session dead on an MCP step** → present login link, stop, don't
-  re-arm. Resume on next manual `/daily-workflow` after login.
+  re-arm. Resume on next manual `/daily-workflow` after login. (Exception:
+  `/macro-doctor` is best-effort — if *it* alone can't reach Kite, warn and
+  continue to `/analyst`; don't halt the block on it.)
+- **`/macro-doctor` fails or `macro verify` reports a mismatch (exit 1)** → this
+  is informational, not fatal. Note it in the turn report and continue; the brief
+  still compiles and carries whatever reconciliation flags were written.
 - **A CLI step errors** (bad data, missing input) → stop the block, surface the
   error and the exact command, don't re-arm into a broken state. Don't paper
   over it by continuing to the next step.
