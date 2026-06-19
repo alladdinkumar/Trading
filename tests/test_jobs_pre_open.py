@@ -94,7 +94,7 @@ def test_run_pre_open_returns_result_with_bundle_path(paths, monkeypatch) -> Non
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_auto_open",
-        lambda conn, as_of, passing, regime, capital, risk_pct, warnings: 0,
+        lambda conn, as_of, scored, regime, pool_capital, daily_cap, risk_pct, warnings: 0,
     )
 
     result = run_pre_open(
@@ -536,7 +536,8 @@ def test_step_auto_open_creates_signal_and_paper_trade(
         date(2026, 5, 15),
         [_sc(cand)],
         "NEUTRAL",
-        capital=100_000.0,
+        pool_capital=100_000.0,
+        daily_cap=100_000.0,
         risk_pct=0.02,
         warnings=warnings,
     )
@@ -562,7 +563,8 @@ def test_step_auto_open_target_and_prediction_track_exit_engine(
         date(2026, 5, 15),
         [_sc(cand)],
         "NEUTRAL",
-        capital=100_000.0,
+        pool_capital=100_000.0,
+        daily_cap=100_000.0,
         risk_pct=0.02,
         warnings=warnings,
     )
@@ -584,7 +586,8 @@ def test_step_auto_open_idempotent_on_rerun(
         date(2026, 5, 15),
         [_sc(cand)],
         "NEUTRAL",
-        capital=100_000.0,
+        pool_capital=100_000.0,
+        daily_cap=100_000.0,
         risk_pct=0.02,
         warnings=warnings,
     )
@@ -593,7 +596,8 @@ def test_step_auto_open_idempotent_on_rerun(
         date(2026, 5, 15),
         [_sc(cand)],
         "NEUTRAL",
-        capital=100_000.0,
+        pool_capital=100_000.0,
+        daily_cap=100_000.0,
         risk_pct=0.02,
         warnings=warnings,
     )
@@ -614,7 +618,8 @@ def test_step_auto_open_non_selected_logs_signal_only(
         date(2026, 5, 15),
         [_sc(cand, ml_score=0.42, selected=False)],
         "NEUTRAL",
-        capital=100_000.0,
+        pool_capital=100_000.0,
+        daily_cap=100_000.0,
         risk_pct=0.02,
         warnings=warnings,
     )
@@ -625,6 +630,58 @@ def test_step_auto_open_non_selected_logs_signal_only(
     assert sig_count == 1
     assert pt_count == 0
     assert score == pytest.approx(0.42)
+
+
+def test_step_auto_open_respects_daily_cap_and_cash(
+    conn: sqlite3.Connection,
+) -> None:
+    """Two ₹100 candidates, daily_cap ₹150 → only ~1 share-worth opens;
+    total opened notional stays within the cap."""
+    warnings: list[str] = []
+    cands = [_sc(_candidate("RVNL", 10)), _sc(_candidate("NTPC", 10))]
+    opened = _step_auto_open(
+        conn,
+        date(2026, 5, 15),
+        cands,
+        "NEUTRAL",
+        pool_capital=100_000.0,
+        daily_cap=150.0,
+        risk_pct=0.02,
+        warnings=warnings,
+    )
+    assert opened == 1  # ₹150 cap / ₹100 entry = 1 share, one symbol
+    deployed = conn.execute(
+        "SELECT COALESCE(SUM(entry_price*qty),0) FROM paper_trades WHERE ts_exit IS NULL"
+    ).fetchone()[0]
+    assert deployed <= 150.0
+
+
+def test_step_auto_open_no_cash_opens_nothing(
+    conn: sqlite3.Connection,
+) -> None:
+    """available_cash ≤ 0 (a pre-existing huge deployed position) → no new opens."""
+    # Seed an open trade that overdraws cash far below zero.
+    cur = conn.execute(
+        "INSERT INTO signals (ts, symbol, side, entry, stop, target, horizon_days) "
+        "VALUES ('2026-05-01T08:30:00','TCS','LONG',100.0,95.0,120.0,25)"
+    )
+    conn.execute(
+        "INSERT INTO paper_trades (signal_id, ts_entry, entry_price, qty) VALUES (?,?,?,?)",
+        (cur.lastrowid, "2026-05-01T08:30:00", 100.0, 5000),  # ₹500k deployed
+    )
+    conn.commit()
+    warnings: list[str] = []
+    opened = _step_auto_open(
+        conn,
+        date(2026, 5, 15),
+        [_sc(_candidate("RVNL", 10))],
+        "NEUTRAL",
+        pool_capital=100_000.0,
+        daily_cap=7_000.0,
+        risk_pct=0.02,
+        warnings=warnings,
+    )
+    assert opened == 0
 
 
 def test_already_opened_today_detects_open_trade(
@@ -786,7 +843,9 @@ def test_pre_open_persists_ml_score_on_all_passing(paths, monkeypatch) -> None:
     result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=False)
     assert result.candidates_passing == 7
     assert result.candidates_selected == 5
-    assert result.paper_trades_opened == result.candidates_selected
+    # The ₹7k/day budget paces opens below the full selected set: each S* lists
+    # at ₹100, so ₹7k funds far fewer than 5 — at least one, at most all selected.
+    assert 1 <= result.paper_trades_opened <= result.candidates_selected
 
     db = _sql.connect(paths.db_path)
     db.row_factory = _sql.Row

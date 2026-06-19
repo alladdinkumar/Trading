@@ -32,6 +32,7 @@ from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.llm.context import ContextInputs, assemble_context
 from trading.ops.logging_setup import configure_logging
 from trading.paper.ledger import log_signal_and_open_trade
+from trading.paper.reconcile import compute_paper_cash
 from trading.portfolio.fundamentals import load_fundamentals_map
 from trading.portfolio.health import (
     HealthScore,
@@ -46,10 +47,10 @@ from trading.store.news_store import insert_news_items, list_critical_symbols
 from trading.store.ohlcv import read_ohlcv
 from trading.store.repo import Signal, insert_signal
 from trading.store.sector_store import upsert_sector_daily
+from trading.strategy.daily_budget import BudgetCandidate, plan_daily_entries
 from trading.strategy.exits import target_price
 from trading.strategy.ranker import ScoredCandidate, score_and_filter
 from trading.strategy.rules import Candidate, ScanContext, passing, scan
-from trading.strategy.sizing import SizingInput, position_size
 
 RANKER_TOP_K = 5
 
@@ -88,7 +89,8 @@ def run_pre_open(
     paths: Paths | None = None,
     settings: Settings | None = None,
     skip_news: bool = False,
-    capital_per_trade: float = 100_000.0,
+    pool_capital: float = 100_000.0,
+    daily_deploy_cap: float = 7_000.0,
     risk_pct: float = 0.02,
     require_snapshot: bool = True,
 ) -> PreOpenResult:
@@ -136,7 +138,8 @@ def run_pre_open(
             as_of,
             scored,
             regime,
-            capital_per_trade,
+            pool_capital,
+            daily_deploy_cap,
             risk_pct,
             warnings,
         )
@@ -382,45 +385,36 @@ def _step_auto_open(
     as_of: date,
     scored: list[ScoredCandidate],
     regime: Regime,
-    capital: float,
+    pool_capital: float,
+    daily_cap: float,
     risk_pct: float,
     warnings: list[str],
 ) -> int:
-    """Persist a signal for each scored candidate; open paper-trade for the
-    top-K (selected=True).
+    """Persist a signal for every scored candidate; open paper-trades for the
+    selected ones the daily-budget planner can fund.
 
-    Entry price = `cand.close` (D-1's close — the most recent bar in the
-    parquet at pre_open time, per spec §4.4 'limit order at close').
-    Skips if (a) idempotency guard finds an open trade for symbol+date,
-    or (b) sizing returns qty=0 (caps bound to zero).
-
-    Signals for non-selected candidates are still logged with ml_score so
-    they appear in the dashboard / brief — they just don't open trades.
+    Entry price = `cand.close` (D-1's close — the most recent bar in the parquet
+    at pre_open time, per spec §4.4 'limit order at close'). The planner caps
+    total new buys at `daily_cap` notional and at available cash, ranking by
+    expected value, so the book paces instead of deploying every top-K pick
+    against a fixed ₹1L (the over-deployment bug). Non-funded selected
+    candidates and non-selected ones are logged as visibility-only signals.
     """
-    opened = 0
+    available_cash = compute_paper_cash(conn, as_of=as_of)
+    deployed_by_symbol = _deployed_by_symbol(conn)
+
+    budget_cands: list[BudgetCandidate] = []
+    signal_by_symbol: dict[str, Signal] = {}
+    atr_by_symbol: dict[str, float] = {}
     for sc in scored:
         cand = sc.candidate
-        if sc.selected and _already_opened_today(conn, cand.symbol, as_of):
-            continue
         stop_price = cand.close - 1.5 * cand.atr_14
-        # Target = the exact price the exit engine aims for, min(+20%, 2.5R),
-        # so signal.target no longer disagrees with the exit logic (F-029).
-        signal_target = target_price(cand.close, stop_price)
         if cand.close <= stop_price:
             warnings.append(f"{cand.symbol}: ATR={cand.atr_14:.2f} ≥ close — skip")
             continue
-        sizing = position_size(
-            SizingInput(
-                capital=capital,
-                risk_pct=risk_pct,
-                entry=cand.close,
-                stop=stop_price,
-                regime=regime,
-            )
-        )
-        if sizing.qty == 0:
-            warnings.append(f"{cand.symbol}: sizing bound to zero ({', '.join(sizing.reasons)})")
-            continue
+        # Target = the exact price the exit engine aims for, min(+20%, 2.5R),
+        # so signal.target no longer disagrees with the exit logic (F-029).
+        signal_target = target_price(cand.close, stop_price)
         signal = Signal(
             id=None,
             ts=f"{as_of.isoformat()}T08:30:00",
@@ -434,24 +428,71 @@ def _step_auto_open(
             ml_score=sc.ml_score,
             created_by="pre_open",
         )
+        signal_by_symbol[cand.symbol] = signal
+        atr_by_symbol[cand.symbol] = cand.atr_14
         if not sc.selected:
-            # Visibility-only: log the signal (with ml_score) but don't
-            # open a paper-trade.
+            # Visibility-only: log the signal (with ml_score) but don't trade.
             insert_signal(conn, signal)
             continue
+        if _already_opened_today(conn, cand.symbol, as_of):
+            continue
+        budget_cands.append(
+            BudgetCandidate(
+                symbol=cand.symbol,
+                entry=cand.close,
+                stop=stop_price,
+                target=signal_target,
+                ml_score=sc.ml_score,
+            )
+        )
+
+    plan = plan_daily_entries(
+        budget_cands,
+        available_cash=available_cash,
+        deployed_by_symbol=deployed_by_symbol,
+        regime=regime,
+        pool_capital=pool_capital,
+        daily_cap=daily_cap,
+        risk_pct=risk_pct,
+    )
+
+    opened = 0
+    planned_symbols = {e.symbol for e in plan.entries}
+    for entry in plan.entries:
+        signal = signal_by_symbol[entry.symbol]
         log_signal_and_open_trade(
             conn,
             signal=signal,
             entry_ts=signal.ts,
-            entry_price=cand.close,
-            qty=sizing.qty,
-            atr_at_entry=cand.atr_14,
-            # Let predicted_return_pct default to the signal's implied target %
-            # ((target - entry)/entry); since signal.target is now min(+20%,2.5R)
-            # the prediction varies per signal instead of a constant +20% (F-029).
+            entry_price=entry.entry,
+            qty=entry.qty,
+            atr_at_entry=atr_by_symbol[entry.symbol],
+            # predicted_return_pct defaults to the signal's implied target %
+            # ((target - entry)/entry); signal.target is min(+20%, 2.5R) (F-029).
         )
         opened += 1
+
+    # Visibility-only: any selected candidate the planner skipped logs a signal
+    # plus its skip reason so the brief shows why it didn't open.
+    for symbol, reason in plan.skipped:
+        if symbol in planned_symbols:
+            continue
+        skip_signal = signal_by_symbol.get(symbol)
+        if skip_signal is not None:
+            insert_signal(conn, skip_signal)
+        warnings.append(f"{symbol}: not opened — {reason}")
+
     return opened
+
+
+def _deployed_by_symbol(conn: sqlite3.Connection) -> dict[str, float]:
+    """Cost-basis value of open paper positions, grouped by symbol."""
+    rows = conn.execute(
+        "SELECT s.symbol AS symbol, SUM(pt.entry_price * pt.qty) AS deployed "
+        "FROM paper_trades pt JOIN signals s ON s.id = pt.signal_id "
+        "WHERE pt.ts_exit IS NULL GROUP BY s.symbol"
+    ).fetchall()
+    return {r["symbol"]: float(r["deployed"]) for r in rows}
 
 
 def _already_opened_today(conn: sqlite3.Connection, symbol: str, as_of: date) -> bool:

@@ -1497,7 +1497,10 @@ def brief_compile_cmd(
 def pre_open_cmd(
     date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD")],
     skip_news: Annotated[bool, typer.Option("--skip-news")] = False,
-    capital: Annotated[float, typer.Option(help="Capital per trade.")] = 100_000.0,
+    capital: Annotated[float, typer.Option(help="Standing pool capital.")] = 100_000.0,
+    daily_cap: Annotated[
+        float, typer.Option(help="Max new buys per day (notional).")
+    ] = 7_000.0,
     risk_pct: Annotated[float, typer.Option(help="Risk per trade.")] = 0.02,
 ) -> None:
     """Phase 13 MVP — orchestrate Phases 1-12 and write the analyst bundle."""
@@ -1506,7 +1509,8 @@ def pre_open_cmd(
         result = run_pre_open(
             as_of,
             skip_news=skip_news,
-            capital_per_trade=capital,
+            pool_capital=capital,
+            daily_deploy_cap=daily_cap,
             risk_pct=risk_pct,
         )
     except PreOpenAborted as e:
