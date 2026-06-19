@@ -54,6 +54,28 @@ def _signal(symbol: str = "X", entry: float = 100.0, horizon: int = 15) -> Signa
 # ---------------------------------------------------------------------------
 
 
+def test_paper_cash_rises_by_top_up(conn: sqlite3.Connection) -> None:
+    from trading.paper.funds import add_funds
+
+    base = compute_paper_cash(conn, as_of=date(2026, 6, 19))
+    add_funds(conn, amount=40_000.0, date="2026-06-19")
+    after = compute_paper_cash(conn, as_of=date(2026, 6, 19))
+    assert after == pytest.approx(base + 40_000.0)
+
+
+def test_paper_cash_excludes_future_top_ups(conn: sqlite3.Connection) -> None:
+    from trading.paper.funds import add_funds
+
+    add_funds(conn, amount=40_000.0, date="2026-06-25")
+    # A top-up dated after as_of must not count yet.
+    assert compute_paper_cash(conn, as_of=date(2026, 6, 19)) == pytest.approx(100_000.0)
+
+
+def test_paper_cash_unchanged_with_empty_ledger(conn: sqlite3.Connection) -> None:
+    # Regression guard: no ledger rows ⇒ byte-identical to the seed.
+    assert compute_paper_cash(conn, as_of=date(2026, 6, 19)) == pytest.approx(100_000.0)
+
+
 def test_matured_predictions_from_closed_trade(conn: sqlite3.Connection) -> None:
     res = log_signal_and_open_trade(
         conn,

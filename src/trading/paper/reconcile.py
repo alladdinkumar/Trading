@@ -20,6 +20,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+from trading.paper.funds import total_funds_added
 from trading.paper.ledger import buy_side_cost, open_trades, sell_side_cost
 from trading.strategy.exits import Bar
 
@@ -148,6 +149,11 @@ def compute_paper_cash(
 ) -> float:
     """Paper-cash balance derived from the trade ledger as of `as_of`.
 
+    The seed is `initial_capital` plus any capital top-ups recorded in
+    `cash_ledger` with `date <= as_of` (see `trading.paper.funds`); an empty
+    ledger contributes 0.0, so behaviour is unchanged from before funds
+    tracking existed.
+
     Mirrors the backtest engine's cash handling: opening a trade debits
     `entry_price × qty`, closing it credits `exit_price × qty`. Cash is a
     pure function of `paper_trades`, so realised P&L compounds into the
@@ -164,7 +170,7 @@ def compute_paper_cash(
     and GST make them non-linear), so we iterate rather than SUM in SQL.
     """
     as_of_iso = as_of.isoformat()
-    cash = initial_capital
+    cash = initial_capital + total_funds_added(conn, as_of=as_of)
 
     open_rows = conn.execute(
         """SELECT entry_price, qty FROM paper_trades
