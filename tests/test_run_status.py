@@ -21,10 +21,13 @@ from trading.ops.run_status import compute_status, has_due_failure
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 
-# 2026-06-18 is a Thursday; 2026-06-17 a Wednesday — both ordinary weekdays.
-TODAY = date(2026, 6, 18)
-YESTERDAY = date(2026, 6, 17)
-TOMORROW = date(2026, 6, 19)
+# Anchored to the real current date so the CLI tests (which exercise the
+# command with the live wall clock, no `now=` override) stay deterministic
+# across day rollovers. Every test forces `is_trading_day → True` (autouse
+# `_trading_day` fixture), so the actual weekday never matters.
+TODAY = date.today()
+YESTERDAY = TODAY - timedelta(days=1)
+TOMORROW = TODAY + timedelta(days=1)
 
 
 def _ist(d: date, hh: int, mm: int) -> datetime:
