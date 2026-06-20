@@ -13,9 +13,20 @@ from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
 from trading.store.model_registry import RegistryRow, register, save_model
 from trading.store.ohlcv import write_ohlcv
-from trading.strategy.ranker import score_and_filter
+from trading.strategy.ranker import conviction_from_score, score_and_filter
 from trading.strategy.ranker_features import FEATURE_NAMES
 from trading.strategy.rules import Candidate, RuleResult
+
+
+def test_conviction_from_score_bands() -> None:
+    # F-038: ml_score (predict_proba 0..1) → HIGH/MEDIUM/LOW band.
+    assert conviction_from_score(0.72) == "HIGH"
+    assert conviction_from_score(0.60) == "HIGH"  # boundary inclusive
+    assert conviction_from_score(0.55) == "MEDIUM"
+    assert conviction_from_score(0.50) == "MEDIUM"  # boundary inclusive
+    assert conviction_from_score(0.40) == "LOW"
+    # Cold-start (no active model) → no conviction, not a fabricated LOW.
+    assert conviction_from_score(None) is None
 
 
 def _paths(tmp_path: Path) -> Paths:

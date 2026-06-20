@@ -44,6 +44,26 @@ _IST = timezone(timedelta(hours=5, minutes=30))
 TRAIN_WINDOW_YEARS = 3
 REVIEW_WINDOW_DAYS = 7
 
+# Walk-forward OOS validation needs more history than the final model's 3y train
+# window: each fold consumes train_years (3y) + test_months (6mo), and we want
+# several rolling folds for a trustworthy `oos_sharpe`. Passing only the 3y final
+# window produced **zero** folds → NaN Sharpe → no model ever promoted → the
+# ranker ran permanently cold-start (ml_score NULL on every signal). F-037.
+WF_LOOKBACK_YEARS = 5
+
+
+def walkforward_start(window_end: date) -> date:
+    """Start date for the walk-forward OOS folds — `window_end − WF_LOOKBACK_YEARS`.
+
+    Must precede `window_end − train_years` so `windows()` can fit ≥1 train+test
+    fold (F-037). The final production model still trains on the most-recent 3y
+    (computed inside `train_walkforward`, independent of this start), so widening
+    the OOS lookback does not change what gets shipped — only how it's validated.
+    Folds whose train window predates available parquet history are skipped
+    gracefully by `_build_xy_for_window`.
+    """
+    return (pd.Timestamp(window_end) - pd.DateOffset(years=WF_LOOKBACK_YEARS)).date()
+
 _NO_DATA = "_(no data)_"
 
 
@@ -323,7 +343,6 @@ def render_weekly_review(data: ReviewData, retrain: RetrainOutcome) -> str:
 def _step_retrain(
     paths: Paths,
     conn: sqlite3.Connection,
-    window_start: date,
     window_end: date,
     skip_train: bool,
 ) -> RetrainOutcome:
@@ -347,7 +366,10 @@ def _step_retrain(
             # F-031: feed the same 7d negative-news count inference uses, instead
             # of `{}`, so `negative_news_count_7d` isn't NaN-in-train/live-at-serve.
             negative_news_lookup=inputs.negative_news_lookup,
-            start=pd.Timestamp(window_start),
+            # F-037: widen the OOS-fold lookback so ≥1 train+test fold fits and a
+            # real oos_sharpe is produced (window_start alone — the 3y final-model
+            # window — yielded zero folds → NaN Sharpe → nothing ever promoted).
+            start=pd.Timestamp(walkforward_start(window_end)),
             end=pd.Timestamp(window_end),
         )
     except InsufficientDataError as e:
@@ -419,7 +441,7 @@ def run_weekly_train(
 
     with get_conn(p.db_path) as conn:
         run_migrations(conn)
-        retrain = _step_retrain(p, conn, window_start, d, skip_train)
+        retrain = _step_retrain(p, conn, d, skip_train)
         data = gather_review_data(conn, d)
         # Housekeeping: prune stale raw date-dirs + old news rows (F-013).
         retention = run_retention(p, conn, as_of=d, apply=True)

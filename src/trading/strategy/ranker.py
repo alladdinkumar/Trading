@@ -25,6 +25,7 @@ from trading.store.model_registry import (
 from trading.store.model_registry import active as load_active
 from trading.store.news_store import get_sentiment_daily, negative_news_count_7d
 from trading.store.ohlcv import read_ohlcv
+from trading.store.repo import Conviction
 from trading.strategy.ranker_features import (
     FEATURE_NAMES,
     LiveContext,
@@ -45,6 +46,25 @@ class ScoredCandidate:
     candidate: Candidate
     ml_score: float | None
     selected: bool
+
+
+# ml_score is a LightGBM `predict_proba` in [0, 1] (calibrated P(win)). These
+# bands turn it into the `signals.conviction` enum (F-038). Boundaries inclusive
+# at the lower edge. `None` (cold-start — no active model) stays `None` rather
+# than fabricating a LOW, so the dashboard shows "—" honestly.
+CONVICTION_HIGH_MIN = 0.60
+CONVICTION_MEDIUM_MIN = 0.50
+
+
+def conviction_from_score(ml_score: float | None) -> Conviction | None:
+    """Map an ml_score to a HIGH/MEDIUM/LOW conviction band (or None)."""
+    if ml_score is None:
+        return None
+    if ml_score >= CONVICTION_HIGH_MIN:
+        return "HIGH"
+    if ml_score >= CONVICTION_MEDIUM_MIN:
+        return "MEDIUM"
+    return "LOW"
 
 
 # ---------------------------------------------------------------------------

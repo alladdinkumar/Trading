@@ -49,7 +49,11 @@ from trading.store.repo import Signal, insert_signal
 from trading.store.sector_store import upsert_sector_daily
 from trading.strategy.daily_budget import BudgetCandidate, plan_daily_entries
 from trading.strategy.exits import target_price
-from trading.strategy.ranker import ScoredCandidate, score_and_filter
+from trading.strategy.ranker import (
+    ScoredCandidate,
+    conviction_from_score,
+    score_and_filter,
+)
 from trading.strategy.rules import Candidate, ScanContext, passing, scan
 
 RANKER_TOP_K = 5
@@ -426,6 +430,7 @@ def _step_auto_open(
             horizon_days=25,
             rules_passed_json=json.dumps([r.name for r in cand.rules if r.passed]),
             ml_score=sc.ml_score,
+            conviction=conviction_from_score(sc.ml_score),
             created_by="pre_open",
         )
         signal_by_symbol[cand.symbol] = signal

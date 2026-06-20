@@ -16,6 +16,24 @@ from trading.store.migrations import run_migrations
 AS_OF = date(2026, 6, 14)  # a Sunday
 
 
+def test_walkforward_start_leaves_room_for_oos_folds() -> None:
+    """F-037: the walk-forward start must precede `end − train_years` so at least
+    one train(3y)+test(6mo) fold fits. The old 3y span yielded zero folds, so
+    `oos_sharpe` was always NaN and no model ever promoted."""
+    from trading.backtest.walkforward import WalkForwardConfig, windows
+    from trading.jobs.weekly_train import walkforward_start
+
+    end = date(2026, 6, 16)
+    wf_start = walkforward_start(end)
+    folds = windows(pd.Timestamp(wf_start), pd.Timestamp(end), WalkForwardConfig())
+    assert len(folds) >= 1, "walk-forward start must leave room for >=1 OOS fold"
+
+    # Regression: the buggy 3y span produced exactly zero folds.
+    three_y = (pd.Timestamp(end) - pd.DateOffset(years=3)).date()
+    zero = windows(pd.Timestamp(three_y), pd.Timestamp(end), WalkForwardConfig())
+    assert len(zero) == 0
+
+
 @pytest.fixture
 def paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
@@ -136,9 +154,7 @@ def test_step_retrain_feeds_negative_news_lookup(paths, monkeypatch) -> None:
                 _neg("LONGSYM", "2024-03-05T10:00:00+00:00", -0.3),
             ],
         )
-        outcome = wt._step_retrain(
-            paths, conn, date(2024, 1, 1), date(2024, 12, 31), skip_train=False
-        )
+        outcome = wt._step_retrain(paths, conn, date(2024, 12, 31), skip_train=False)
 
     assert outcome.ran is False  # InsufficientDataError → graceful skip
     lookup = captured["negative_news_lookup"]
