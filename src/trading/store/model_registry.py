@@ -1,9 +1,10 @@
 """Phase 16 model registry — single CSV at `models/registry.csv`.
 
 One row per training run. Exactly one row may have `active=true`. Promotion
-is gated by a 0.05 walk-forward Sharpe deadband on the active row. Atomic
-write via temp-file + os.replace; pickle includes `feature_names` so
-inference can detect a stale model after FEATURE_NAMES evolves.
+is gated by an absolute OOS-Sharpe floor (F-043 — a model must show a positive
+out-of-sample edge to ever be served) *and* a 0.05 walk-forward Sharpe deadband
+over the active row. Atomic write via temp-file + os.replace; pickle includes
+`feature_names` so inference can detect a stale model after FEATURE_NAMES evolves.
 """
 
 from __future__ import annotations
@@ -25,6 +26,11 @@ if TYPE_CHECKING:
 
 REGISTRY_FILENAME = "registry.csv"
 SHARPE_PROMOTION_DEADBAND = 0.05
+# F-043: absolute floor a model must clear to be promoted *at all* — distinct from
+# the deadband (which only governs beating an incumbent). A model with a
+# non-positive OOS Sharpe has no demonstrated out-of-sample edge, so the live EV
+# planner must keep its `p_win=prior` rather than consume an unproven score.
+SHARPE_PROMOTION_FLOOR = 0.0
 REGISTRY_COLUMNS: tuple[str, ...] = (
     "version",
     "trained_at",
@@ -176,41 +182,62 @@ def _with_active(row: RegistryRow, active_flag: bool) -> RegistryRow:
     )
 
 
+def _clears_floor(oos_sharpe: float) -> bool:
+    """True iff `oos_sharpe` clears the absolute promotion floor (F-043).
+
+    NaN never clears it (an unmeasured model), and the floor is strict so a
+    non-positive Sharpe — no demonstrated edge — is rejected.
+    """
+    return not math.isnan(oos_sharpe) and oos_sharpe > SHARPE_PROMOTION_FLOOR
+
+
+def _demote_subfloor(rows: list[RegistryRow]) -> list[RegistryRow]:
+    """Flip any active row that no longer clears the floor back to inactive.
+
+    Guards against a model promoted *before* the floor existed (e.g. the live
+    −1.49 one) staying active and being served — the invariant is
+    ``active ⟹ clears floor``. Falls back to cold-start when none qualifies.
+    """
+    return [
+        _with_active(r, False) if (r.active and not _clears_floor(r.oos_sharpe)) else r
+        for r in rows
+    ]
+
+
 def register(paths: Paths, *, row: RegistryRow, promote: bool) -> bool:
     """Append `row` to registry.csv. Returns True iff this row became active.
 
     Promotion logic:
       - If `promote` is False → always write inactive.
-      - If `promote` is True and there's no current active row → activate
-        (unless `oos_sharpe` is NaN — never activate an unmeasured model).
-      - If `promote` is True and there is one → activate iff
-        `row.oos_sharpe > current.oos_sharpe + SHARPE_PROMOTION_DEADBAND`.
-        NaN comparisons are False, so NaN sharpe never promotes.
-      - When activating, the previous active row is flipped to inactive.
+      - A row must clear the absolute `SHARPE_PROMOTION_FLOOR` (F-043) before any
+        promotion is considered; NaN/non-positive Sharpe never promotes.
+      - If `promote` is True, the row clears the floor, and there's no current
+        active row → activate.
+      - If `promote` is True, the row clears the floor, and there is one → activate
+        iff `row.oos_sharpe > current.oos_sharpe + SHARPE_PROMOTION_DEADBAND`.
+      - Whenever this call does not promote `row`, any active row that itself no
+        longer clears the floor is demoted (so a pre-floor sub-floor model can't
+        keep being served). When activating, the previous active row is flipped to
+        inactive.
     """
     existing = all_rows(paths)
-    if not promote:
-        existing.append(_with_active(row, False))
-        _write_all_rows(paths, existing)
+    if not promote or not _clears_floor(row.oos_sharpe):
+        rows_out = _demote_subfloor(existing)
+        rows_out.append(_with_active(row, False))
+        _write_all_rows(paths, rows_out)
         return False
 
     current_active = next((r for r in existing if r.active), None)
     if current_active is None:
-        if math.isnan(row.oos_sharpe):
-            existing.append(_with_active(row, False))
-            _write_all_rows(paths, existing)
-            return False
         existing.append(_with_active(row, True))
         _write_all_rows(paths, existing)
         return True
 
-    improves = (
-        not math.isnan(row.oos_sharpe)
-        and row.oos_sharpe > current_active.oos_sharpe + SHARPE_PROMOTION_DEADBAND
-    )
+    improves = row.oos_sharpe > current_active.oos_sharpe + SHARPE_PROMOTION_DEADBAND
     if not improves:
-        existing.append(_with_active(row, False))
-        _write_all_rows(paths, existing)
+        rows_out = _demote_subfloor(existing)
+        rows_out.append(_with_active(row, False))
+        _write_all_rows(paths, rows_out)
         return False
 
     new_rows = [_with_active(r, False) if r.active else r for r in existing]

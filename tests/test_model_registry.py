@@ -11,6 +11,7 @@ import pytest
 from trading.config import Paths
 from trading.store.model_registry import (
     SHARPE_PROMOTION_DEADBAND,
+    SHARPE_PROMOTION_FLOOR,
     RegistryRow,
     active,
     all_rows,
@@ -145,6 +146,77 @@ def test_nan_oos_sharpe_blocks_promotion(tmp_path: Path) -> None:
     promoted = register(paths, row=_row("a", sharpe=math.nan), promote=True)
     assert promoted is False
     assert active(paths) is None
+
+
+def test_negative_sharpe_first_model_blocked_by_floor(tmp_path: Path) -> None:
+    # F-043: the first model to ever train must still clear an absolute OOS-Sharpe
+    # floor — a negative-Sharpe model has no demonstrated edge and must not promote
+    # (so the EV planner keeps its p_win=prior rather than consuming an unproven score).
+    paths = _paths(tmp_path)
+    paths.models_dir.mkdir(parents=True, exist_ok=True)
+    save_model(paths.models_dir / "ranker_a.pkl", _toy_model(), ("a",))
+    promoted = register(paths, row=_row("a", sharpe=-1.49), promote=True)
+    assert promoted is False
+    assert active(paths) is None
+    # The run is still recorded (inactive), so history/idempotency are preserved.
+    rows = all_rows(paths)
+    assert len(rows) == 1
+    assert rows[0].active is False
+
+
+def test_zero_sharpe_does_not_clear_floor(tmp_path: Path) -> None:
+    # The floor demands a *positive* OOS Sharpe; exactly-zero is no edge.
+    paths = _paths(tmp_path)
+    paths.models_dir.mkdir(parents=True, exist_ok=True)
+    save_model(paths.models_dir / "ranker_a.pkl", _toy_model(), ("a",))
+    promoted = register(paths, row=_row("a", sharpe=SHARPE_PROMOTION_FLOOR), promote=True)
+    assert promoted is False
+    assert active(paths) is None
+
+
+def test_positive_sharpe_above_floor_first_model_promotes(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    paths.models_dir.mkdir(parents=True, exist_ok=True)
+    save_model(paths.models_dir / "ranker_a.pkl", _toy_model(), ("a",))
+    promoted = register(paths, row=_row("a", sharpe=SHARPE_PROMOTION_FLOOR + 0.01), promote=True)
+    assert promoted is True
+    assert active(paths) is not None
+
+
+def test_register_demotes_preexisting_subfloor_active(tmp_path: Path) -> None:
+    # F-043: a model promoted *before* the floor existed (e.g. the live -1.49 one)
+    # may sit active in registry.csv. The next register call must demote it so we
+    # never keep serving a sub-floor score — even when the new model is also weak.
+    from trading.store.model_registry import _write_all_rows
+
+    paths = _paths(tmp_path)
+    paths.models_dir.mkdir(parents=True, exist_ok=True)
+    _write_all_rows(paths, [_row("2026-06-18", sharpe=-1.49, active_flag=True)])
+    assert sum(1 for r in all_rows(paths) if r.active) == 1
+
+    save_model(paths.models_dir / "ranker_2026-06-25.pkl", _toy_model(), ("a",))
+    promoted = register(paths, row=_row("2026-06-25", sharpe=-1.20), promote=True)
+
+    assert promoted is False
+    assert active(paths) is None  # cold-start: no model served
+    assert sum(1 for r in all_rows(paths) if r.active) == 0
+
+
+def test_positive_model_replaces_subfloor_active(tmp_path: Path) -> None:
+    from trading.store.model_registry import _write_all_rows
+
+    paths = _paths(tmp_path)
+    paths.models_dir.mkdir(parents=True, exist_ok=True)
+    _write_all_rows(paths, [_row("2026-06-18", sharpe=-1.49, active_flag=True)])
+    save_model(paths.models_dir / "ranker_2026-06-25.pkl", _toy_model(), ("a",))
+
+    promoted = register(paths, row=_row("2026-06-25", sharpe=0.80), promote=True)
+
+    assert promoted is True
+    rows = all_rows(paths)
+    active_row = next(r for r in rows if r.active)
+    assert active_row.version == "2026-06-25"
+    assert sum(1 for r in rows if r.active) == 1
 
 
 def test_has_row_for_train_end(tmp_path, monkeypatch):

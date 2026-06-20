@@ -8,10 +8,12 @@
 
 ## Executive summary
 
-The architecture review (docs 00–08) produced **35 active findings** (1 earlier
-finding superseded; F-035/F-036 spun off from F-026's self-healing follow-up).
-**22 are now fixed** (F-002, F-003, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036), leaving **13 open**. The system is **well-engineered at the
+The architecture review (docs 00–08) produced **43 active findings** (1 earlier
+finding superseded; F-035/F-036 spun off from F-026's self-healing follow-up;
+F-037–F-042 added 2026-06-20 from the self-learning / outcome-feedback review;
+F-043/F-044 added 2026-06-20 — residual model-quality caveats the F-037/F-041 fixes
+surfaced but did not resolve; F-043 since fixed). **30 are now fixed** (F-002, F-003, F-010, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043), leaving **13 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -40,17 +42,17 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 1 | F-005† |
-| Med | 5 | F-001, F-006, F-007, F-008, F-020 |
+| Med | 6 | F-001, F-006, F-007, F-008, F-020, F-044 |
 | Low | 6 | F-004, F-009, F-017, F-027, F-028, F-030 |
-| ✅ Fixed | 23 | F-002, F-003, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036 |
+| ✅ Fixed | 30 | F-002, F-003, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
 
 | Category | Count |
 |---|---:|
-| VULN (correctness/data-integrity) | 7 (F-019 ✅, F-022 ✅, F-023 ✅, F-024 ✅, F-029 ✅, F-033 ✅, F-034 ✅) |
-| GAP (missing functionality/guardrail) | 11 (F-003 ✅, F-010 ✅, F-013 ✅, F-015 ✅, F-032 ✅) |
+| VULN (correctness/data-integrity) | 11 (all ✅: F-019, F-022, F-023, F-024, F-029, F-033, F-034, F-037, F-041, F-042, F-043) |
+| GAP (missing functionality/guardrail) | 12 (F-003 ✅, F-010 ✅, F-013 ✅, F-015 ✅, F-032 ✅; F-044 open) |
 | INACC (code ≠ spec/docstring) | 7 (F-021 ✅, F-031 ✅) |
 | DEBT (cleanup) | 8 |
 
@@ -109,6 +111,7 @@ constant + spanning test), F-028 (docstring), F-030 (guard visibility signals).
 ### Separate track — needs a decision
 F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 18.5 outcome; needs its own spec before any code.
+User comment - Don't involve real money logic now , need proper evident profit booking with paper trading then only this stage will be implemented . till then it is suspended indefinitely.
 
 > **Suggested first PR:** ~~F-014 + F-012 (Nifty-50 ingest).~~ ✅ **Shipped
 > 2026-06-16.** F-018 (OHLCV freshness guard), F-019 (ScanContext wiring),
@@ -193,6 +196,14 @@ F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
 | F-033 | VULN | Med | 6 | Candidate-symbol regex `[A-Z0-9_]+` excludes `-`/`&`, so hyphen/ampersand tickers (BAJAJ-AUTO, M&M) are silently dropped from `brief.md` and deleted from `_context.md` by `pre_open_iep` | ✅ Fixed (2026-06-17) |
 | ~~F-035~~ | GAP | Med | 6 | ~~No self-healing: a stale/missing macro snapshot only refuses (F-026) or degrades — nothing auto re-pulls it. The remedy is a manual `assemble-context` re-run. Belongs in the data layer (re-ingestion), not the LLM~~ | ✅ Fixed 2026-06-19 — `trading macro refresh` deterministically re-pulls + upserts the snapshot; `--cross <kite file>` gap-fills still-missing VIX/USDINR from a validated Kite MCP second source with `macro_reconciliation` provenance (migration v4). `/macro-doctor` skill orchestration + cross-verify → F-036 |
 | ~~F-036~~ | GAP | Med | 6 | ~~Macro figures (VIX/USDINR/FII/DII) come from a single provider with no cross-source reconciliation; a wrong upstream value flows through unflagged. F-026 can only check the brief against the bundle, not the bundle against reality~~ | ✅ Fixed 2026-06-19 — pure `reconcile_macro` (VIX abs≤0.5, USDINR rel≤0.5%, FII/DII→`unreconciled`) + `trading macro verify` (exit-1 on mismatch) writes `macro_reconciliation`; `context._render_macro` annotates flagged figures inline (`⚠ kite …`, `(unreconciled)`) so the bundle — and F-026's brief check — carries the reconciliation state. `/macro-doctor` skill pulls the Kite second source read-only |
+| ~~F-037~~ | VULN | High | 16/18 | ~~ML ranker dead: no model ever promoted, so every signal gets `ml_score=NULL` — `weekly_train` fed `train_walkforward` a 3y span but each fold needs 3y train + 6mo test, so `windows()` yielded 0 folds → `oos_sharpe=NaN` → promotion refused every model~~ | ✅ Fixed 2026-06-20 — `WF_LOOKBACK_YEARS`/`walkforward_start()` widens the OOS lookback so folds form; a model now promotes and `ml_score`/`conviction` populate (verified end-to-end) |
+| ~~F-038~~ | GAP | Med | 7 | ~~`signals.conviction` (HIGH/MEDIUM/LOW) has no writer anywhere; column always NULL~~ | ✅ Fixed 2026-06-20 — `conviction_from_score()` (≥0.60 HIGH / ≥0.50 MEDIUM / else LOW; None→None) set on auto-opened signals |
+| ~~F-039~~ | GAP | Med | 11/15 | ~~No in-flight "on-track toward target" signal for open trades — only exit-fired + maturity-error endpoints and a calendar-only `deviation_label`~~ | ✅ Fixed 2026-06-20 — pure `strategy/trajectory.py` (progress-to-target, time-elapsed, pace, AHEAD/ON_TRACK/STALLING/LAGGING) wired into the MTM loop + post-close/mid-day "track" column |
+| ~~F-040~~ | GAP | Med | 18 | ~~No lag/loss attribution: entry-time features never snapshotted onto predictions nor sliced post-hoc~~ | ✅ Fixed 2026-06-20 — migration v6 adds regime/sector/ml_score/conviction/atr_pct/neg_news_7d to predictions (populated via `EntryAttribution`); weekly review "Lag attribution" slices matured predictions by conviction band + regime |
+| ~~F-041~~ | VULN | High | 16/18 | ~~Learning loop never consumes the live book; weekly calibration error shown to a human but never corrects the EV planner's `p_win`~~ | ✅ Fixed 2026-06-20 — pure `strategy/calibration.py` maps `ml_score → realised hit-rate` from matured predictions; `plan_daily_entries` corrects `p_win` (min-N gated, falls back to raw score). *(Outcome-based training labels remain a deeper follow-up.)* |
+| ~~F-042~~ | VULN | Med | 18 | ~~Calibration `GROUP BY` a continuous REAL → singleton buckets → realized_hit_rate is 0%/100% noise~~ | ✅ Fixed 2026-06-20 — `gather_review_data` bands `predicted_return_pct` into 2% buckets |
+| ~~F-043~~ | VULN | Med | 16/18 | ~~The model F-037 made promotable has a **negative OOS Sharpe (−1.49)**; promotion only requires clearing a Sharpe *deadband* vs the incumbent, not a positive edge — so the live planner consumes ml_score from a model with no demonstrated out-of-sample skill~~ | ✅ Fixed 2026-06-20 — `SHARPE_PROMOTION_FLOOR=0.0` gates promotion on a positive OOS Sharpe (both paths) + `active ⟹ clears floor` invariant demotes sub-floor models; live −1.49 row flipped inactive → planner reverts to `p_win=prior`. Model *quality* (labels) still [[F-044]] |
+| F-044 | GAP | Med | 16 | Training labels remain **synthetic**: `ranker_labels.label_candidate` replays the exit engine on historical parquet bars; the learner still never trains on the realised `paper_trades`/`predictions` outcomes. F-041 closed the loop into the EV planner's `p_win` (calibration) but **not** into the model's own training signal | Open |
 
 ---
 
@@ -882,7 +893,189 @@ value enters the bundle unflagged. F-026's figure check only verifies the
 
 ---
 
-_Counts: 13 open · 1 superseded · 22 fixed (F-002, F-003, F-012, F-013, F-014,
+## Self-learning / outcome-feedback cluster (F-037 — F-042)
+
+> Surfaced 2026-06-20 from the question *"do we have a self-learning mechanism to
+> check whether previously-traded stocks are leaning toward the path/target we
+> intended — and if not, why are they lagging?"* The honest answer is **partial**:
+> the system **records** outcomes (predictions matured to `actual_return_at_horizon`,
+> a closed-trade track record, a weekly review) but it does **not** (a) watch a
+> trade's *trajectory* toward target in-flight, (b) *attribute* why a laggard
+> lagged, or (c) *feed any of it back* into the model or the EV planner. The two
+> concrete bugs (F-037, F-038) are why the symptom — "ml_score and conviction are
+> zero on the 2026-06-19 signals" — is visible today.
+
+### F-037 — ML ranker dead: zero OOS folds → no model ever promoted (`VULN`, High, Phase 16/18)
+**Symptom:** every signal on 2026-06-19 (DRREDDY, NTPC, POWERGRID) has
+`ml_score=NULL`, `conviction=NULL`. The dashboard renders NULL as `0`.
+
+**Root cause (confirmed, deterministic):**
+- `models/registry.csv` has 4 rows, **all `active=false`** with a **blank
+  `oos_sharpe`**. `model_registry.active()` returns `None` → `ranker.score_and_filter`
+  takes its by-design **cold-start** path (`ml_score=None, selected=True` for all).
+- *Why no model is active:* `register(..., promote=True)` never activates a model
+  whose `oos_sharpe` is NaN (`math.isnan(...)` → `False` comparison). Every retrain
+  produces NaN.
+- *Why every OOS Sharpe is NaN:* `weekly_train.run_weekly_train` sets
+  `window_start = end − 3y` (`TRAIN_WINDOW_YEARS=3`) and calls
+  `train_walkforward(start=window_start, end=window_end)`. But each walk-forward
+  fold needs **`train_years` (3y) + `test_months` (6mo)** of span. So
+  `walkforward.windows(start, end)` returns **0 folds** (first fold's `test_end =
+  start + 3.5y > end` → loop breaks immediately). With no folds, `non_skipped` is
+  empty → `oos_sharpe_mean = NaN`. **Every weekly run, regardless of data.**
+  Verified: `windows(2023-06-16, 2026-06-16, WalkForwardConfig())` → `len == 0`;
+  widening the start to `end − 3.5y`/`4y` yields 1/3 folds.
+- **Not a data problem:** parquet spans **2021-01-01 → 2026-06-18 (~5.46y)** — ample
+  for several rolling OOS folds. The window arithmetic, not the history, is the bug.
+
+**Blast radius:** the entire Layer-B ranker is inert; top-K "selection" is
+arbitrary (cold-start marks all selected); and the just-built EV planner's
+`p_win = ml_score or 0.5` **always** uses the 0.5 prior, so EV ranking degrades to
+rules-only. This silently defeats Phase 16's whole purpose and the Phase-18.5
+go/no-go.
+
+**Fix idea (minimal, low-risk):** widen the walk-forward `start` passed to
+`train_walkforward` (e.g. a `WF_LOOKBACK_YEARS ≈ 5` constant, clamped to available
+history) so ≥ several OOS folds form and a real `oos_sharpe_mean` is produced; the
+final production model still trains on the last 3y (computed *inside*
+`train_walkforward`, independent of `start`). Then retrain to promote a model and
+confirm `ml_score` populates. Add a regression test asserting the walk-forward
+start leaves room for ≥1 fold. *(Being fixed under this finding.)*
+
+### F-038 — `conviction` has no writer (`GAP`, Med, Phase 7)
+`signals.conviction` (`CHECK IN ('HIGH','MEDIUM','LOW')`) is defined and read (UI,
+allocator priority, `ui/data` join) but **never written**: `Signal.conviction`
+defaults to `None`, `_step_auto_open` constructs signals without it, and no code
+maps a score to a conviction band. So conviction is NULL for every signal —
+independent of F-037 (it would stay NULL even with a live model).
+- **Fix idea:** add a pure `conviction_from_score(ml_score) -> Conviction | None`
+  (e.g. ≥0.60 HIGH, ≥0.50 MEDIUM, else LOW; `None`-in → `None`-out for cold-start)
+  and set it on auto-opened signals. TDD. *(Being fixed under this finding.)*
+
+### F-039 — No in-flight trajectory / "leaning toward target" signal (`GAP`, Med, Phase 11/15)
+The system answers "did an exit fire?" (MTM exit machine) and, at horizon/close,
+"how wrong was the prediction?" (`reconcile.evaluate_matured_predictions`). The
+Paper Journal's `deviation_label` adds only a **calendar** read — "Nd left / +Nd
+overdue" from `expected_target_date` — which says nothing about whether *price* is
+progressing. A trade can read "2d left" while sitting at −8% (clearly not going to
+make target) and nothing flags it as off-track.
+- **Missing:** a per-open-trade progress metric — e.g. `progress_to_target =
+  (mark − entry)/(target − entry)`, max-favourable / max-adverse excursion
+  (MFE/MAE), and an on-track/stalling/lagging classification that combines
+  price-progress **and** elapsed horizon. This is the literal "are previously-traded
+  stocks leaning toward the path we intended" view the question asks for.
+- **Why not built before:** the design optimised for the backtest's clean
+  stop/target/time exits and a **binary** win/loss label; "trajectory quality" was
+  never needed for backtesting, so the live monitor only checks for exits.
+
+### F-040 — No lag/loss attribution (`GAP`, Med, Phase 18)
+When a prediction lags (large negative `error_pct`), nothing records the *reason*.
+The entry-time features that would explain it — regime, `ml_score`, conviction,
+sector, ATR/volatility, negative-news count, which rules passed — exist at signal
+time but are **not** snapshotted onto the prediction nor sliced post-hoc. The
+weekly review reports only aggregate hit-rate/PF/expectancy, never "trades opened
+in RISK_OFF with ml_score<0.55 are the consistent laggards." So the question
+*"why is it lagging, and why wasn't that considered before?"* is unanswerable from
+stored data.
+- **Why not built before:** `predictions` stores only `(predicted, actual, error)`;
+  the feature vector lived only in the transient scoring step. No join key ties a
+  matured outcome back to its entry conditions for cohort analysis.
+
+### F-041 — Learning loop ignores the live book; calibration never closes (`VULN`, High, Phase 16/18)
+Two open loops:
+1. **Training labels are synthetic.** `ranker_labels.label_candidate` manufactures
+   the binary label by **replaying the exit engine on historical parquet bars** —
+   the model never trains on the actual `paper_trades`/`predictions` outcomes the
+   live book produces. The real track record is invisible to the learner.
+2. **Calibration is observed but not applied.** The weekly review *measures*
+   predicted-vs-actual (the calibration table) yet nothing folds that error back
+   into the model or into the EV planner's `p_win` (still raw `ml_score or 0.5`).
+   A demonstrably mis-calibrated score is consumed at face value.
+- **Effect:** the system is a *record-keeper*, not *self-healing*. "Self-healing"
+  requires a feedback edge: a calibration map (realized hit-rate per score band)
+  that corrects `p_win`, and/or training that incorporates realized outcomes.
+- **Depends on [[F-042]]** (a usable calibration curve) and is the core of the
+  self-healing patch request.
+
+### F-042 — Calibration buckets are singletons (`VULN`, Med, Phase 18)
+`weekly_train.gather_review_data` aggregates with
+`GROUP BY predicted_return_pct` — a **continuous REAL**. Since `predicted_return_pct`
+is `(target−entry)/entry` (effectively unique per signal), each "bucket" holds ≈1
+row, so `realized_hit_rate` is 0% or 100% and `actual_mean_pct` averages a single
+sample. The calibration curve that is supposed to tell us whether predictions are
+reliable is statistical noise. This is the same class of defect as the fixed
+[[F-029]] (which collapsed buckets to one), one layer down — and it is exactly the
+input [[F-041]]'s `p_win` correction would consume, so it must be fixed first.
+- **Fix idea:** bucket into bands (e.g. round to 2% or fixed `[0,5),[5,10),…`),
+  `GROUP BY` the band, and require a minimum N before a band is trusted.
+
+### F-043 — Promoted model has negative OOS Sharpe (`VULN`, Med, Phase 16/18) — ✅ Fixed 2026-06-20
+**Was:** [[F-037]] fixed the *wiring* — `walkforward_start()` widens the lookback so
+folds form, a model promotes, and `ml_score`/`conviction` populate end-to-end. But
+the model that promoted had an **OOS Sharpe of −1.49** (verified at fix time, on
+2302 examples). Promotion was gated only by a Sharpe *deadband* against the
+incumbent, not by an absolute floor, so the **first** model to ever train promoted
+regardless of sign — and the live EV planner consumed its `ml_score`. The system
+went from "no model (`p_win=0.5`)" to "a model with no demonstrated out-of-sample
+edge", which is not strictly an improvement until the score is shown to beat the
+prior.
+
+**Resolution (absolute promotion floor + invariant + live correction):**
+- New `SHARPE_PROMOTION_FLOOR = 0.0` in `store/model_registry.py`. A model must
+  clear it (strict `>`, so a **positive** OOS Sharpe — demonstrated edge) before any
+  promotion is even considered, in **both** the first-model and challenger paths.
+  `_clears_floor` folds in the old NaN guard (NaN never clears it). Distinct from
+  the deadband, which still governs *beating an incumbent*.
+- **Invariant `active ⟹ clears floor`.** `register` now demotes any active row that
+  no longer clears the floor (`_demote_subfloor`) whenever the call doesn't promote
+  the new row — so a model promoted *before* the floor existed can't keep being
+  served; it falls back to cold-start (`p_win=prior`).
+- **Live correction:** flipped the −1.49 `2026-06-18` row in `models/registry.csv`
+  to `active=false` now, so `active()` returns `None` today and the planner reverts
+  to the prior immediately instead of waiting for the next weekly retrain. Verified
+  live: `active(get_paths()) is None`.
+- **Intended consequence:** if every model stays sub-floor (likely while labels are
+  synthetic — [[F-044]]), nothing promotes and the system honestly runs rules +
+  `p_win=0.5`. The ranker goes dormant *by measurement*, not by the old NaN
+  accident.
+- **Still complementary:** [[F-041]]'s calibration map remains the downstream guard
+  once a model *does* clear the floor but proves mis-calibrated in the live book.
+- TDD: `test_model_registry.py` — negative-Sharpe first model blocked, zero doesn't
+  clear, positive promotes, pre-floor sub-floor active demoted to cold-start, and a
+  positive model replaces a sub-floor active. Full suite green (1026), ruff + mypy
+  clean.
+- **Not fixed here (→ [[F-044]]):** *why* the Sharpe is negative — the synthetic
+  exit-replay labels. A floor guards the planner; it doesn't make the model good.
+
+### F-044 — Training labels still synthetic; outcomes never feed the learner (`GAP`, Med, Phase 16)
+[[F-041]] closed the feedback loop into the **EV planner** (`p_win` corrected by
+realised hit-rate) but explicitly left the **model's own training signal**
+untouched — this is part 1 of the original F-041 write-up, broken out so it isn't
+mistaken for done. `ranker_labels.label_candidate` still manufactures the binary
+label by **replaying the exit engine on historical parquet bars**; the model never
+trains on the actual `paper_trades`/`predictions` the live book produces. The real
+track record is visible to the *planner* (via calibration) but invisible to the
+*learner*.
+- **Effect:** the model can only ever be as good as the exit-replay proxy; a
+  systematic gap between replayed and realised outcomes (slippage, fills, the
+  costs now netted by F-025) is never learned away. Likely a contributor to
+  [[F-043]]'s negative Sharpe.
+- **Fix idea:** add a label source that joins matured `predictions`
+  (`actual_return_at_horizon`) back onto the training frame, and either blend it
+  with or replace the replay label once the live book has enough closed trades to
+  train on. Deeper than the calibration loop — needs its own spec.
+
+---
+
+_Counts: 13 open · 1 superseded · 30 fixed. Updated 2026-06-20 (F-043 fixed —
+`SHARPE_PROMOTION_FLOOR=0.0` gates promotion on a positive OOS Sharpe in both the
+first-model and challenger paths, an `active ⟹ clears floor` invariant demotes
+sub-floor models, and the live −1.49 row was flipped inactive so the planner
+reverts to `p_win=prior`; model-quality root cause stays open as F-044). Earlier
+2026-06-20 (F-043/F-044 added —
+residual model-quality caveats: F-037 promoted a model with negative OOS Sharpe
+[absolute-floor gap, now F-043], and F-041 closed the planner loop but training labels stay
+synthetic [outcome-based labels still a follow-up, F-044]). Prior fixed set (22, F-002, F-003, F-012, F-013, F-014,
 F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029,
 F-031, F-032, F-033, F-034, F-035, F-036). Updated 2026-06-19 (F-035/F-036 — macro
 self-healing: `trading macro refresh` re-pulls/upserts + `--cross` gap-fills from a
