@@ -36,6 +36,7 @@ from trading.strategy.exits import (
     TradeState,
     evaluate_exit,
 )
+from trading.strategy.trajectory import trade_trajectory
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,9 @@ class MtmResult:
     exit_price: float | None
     reason: str
     note: str | None = None  # set on SKIP
+    # F-039 in-flight trajectory (None on SKIP — no mark to measure against).
+    progress_to_target: float | None = None
+    trajectory_status: str | None = None
 
 
 def _signal_symbol(conn: sqlite3.Connection, signal_id: int) -> tuple[str, Signal | None]:
@@ -140,6 +144,13 @@ def mtm_open_trades(
                 current_stop=decision.new_stop,
                 days_held=days_held,
             )
+            traj = trade_trajectory(
+                entry=trade.entry_price,
+                target=sig.target,
+                mark=bar.close,
+                days_held=days_held,
+                horizon_days=sig.horizon_days,
+            )
             results.append(
                 MtmResult(
                     paper_trade_id=trade_id,
@@ -148,6 +159,8 @@ def mtm_open_trades(
                     new_stop=decision.new_stop,
                     exit_price=None,
                     reason=decision.reason,
+                    progress_to_target=traj.progress_to_target,
+                    trajectory_status=traj.status,
                 )
             )
             continue

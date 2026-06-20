@@ -28,6 +28,13 @@ from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
 
 
+def _fmt_track(r: MtmResult) -> str:
+    """Trajectory cell for the MTM table — e.g. 'AHEAD +50%' or '—' (F-039)."""
+    if r.trajectory_status is None or r.progress_to_target is None:
+        return "—"
+    return f"{r.trajectory_status} {r.progress_to_target:+.0%}"
+
+
 class PostCloseAborted(RuntimeError):  # noqa: N818 — "Aborted" is a state
     """Raised when run_post_close cannot proceed (analogue of MidDayAborted)."""
 
@@ -152,13 +159,16 @@ def _render_post_close_summary(
         "",
         f"### Final MTM ({len(mtm_results)} open trades evaluated)",
         "",
-        "| symbol | action | exit price | reason | new stop |",
-        "|---|---|---|---|---|",
+        "| symbol | action | exit price | reason | new stop | track |",
+        "|---|---|---|---|---|---|",
     ]
     for r in mtm_results:
         ep = f"{r.exit_price:.2f}" if r.exit_price is not None else "—"
         ns = f"{r.new_stop:.2f}" if r.new_stop is not None else "—"
-        lines.append(f"| {r.symbol} | {r.action} | {ep} | {r.reason or '—'} | {ns} |")
+        tk = _fmt_track(r)
+        lines.append(
+            f"| {r.symbol} | {r.action} | {ep} | {r.reason or '—'} | {ns} | {tk} |"
+        )
 
     open_positions = sum(1 for r in mtm_results if r.action == "HOLD")
     drawdown = f"{snap.drawdown_pct:+.2f}%" if snap.drawdown_pct is not None else "—"

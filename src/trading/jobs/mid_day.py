@@ -161,13 +161,20 @@ def _render_mid_day_update(capture_ts: datetime, results: list[MtmResult]) -> st
     lines = [
         f"## Mid-day update — captured {capture_ts.isoformat(timespec='seconds')}",
         "",
-        "| symbol | action | exit price | reason | new stop |",
-        "|---|---|---|---|---|",
+        "| symbol | action | exit price | reason | new stop | track |",
+        "|---|---|---|---|---|---|",
     ]
     for r in results:
         ep = f"{r.exit_price:.2f}" if r.exit_price is not None else "—"
         ns = f"{r.new_stop:.2f}" if r.new_stop is not None else "—"
-        lines.append(f"| {r.symbol} | {r.action} | {ep} | {r.reason or '—'} | {ns} |")
+        tk = (
+            f"{r.trajectory_status} {r.progress_to_target:+.0%}"
+            if r.trajectory_status is not None and r.progress_to_target is not None
+            else "—"
+        )
+        lines.append(
+            f"| {r.symbol} | {r.action} | {ep} | {r.reason or '—'} | {ns} | {tk} |"
+        )
     lines.append("")
     lines.append(
         f"{len(results)} open trades evaluated; "

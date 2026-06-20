@@ -141,6 +141,28 @@ def test_mtm_hold_persists_ratcheted_stop_and_days(conn: sqlite3.Connection) -> 
     assert trade.ts_exit is None  # still open
 
 
+def test_mtm_hold_carries_trajectory(conn: sqlite3.Connection) -> None:
+    """F-039: a HOLD result reports progress-to-target + on-track status."""
+    _open(conn, entry=100, stop=90, target=120, qty=10, atr=2.0)
+    bars = {"X": Bar(open=108, high=111, low=107, close=110)}
+    results = mtm_open_trades(conn, bars, as_of=datetime(2026, 5, 20, 15, 30))
+
+    assert results[0].action == "HOLD"
+    # mark 110 → 50% of the way from entry 100 to target 120.
+    assert results[0].progress_to_target == pytest.approx(0.5)
+    # 50% of the move in 3/20 of the horizon → well ahead of the clock.
+    assert results[0].trajectory_status == "AHEAD"
+
+
+def test_mtm_skip_has_no_trajectory(conn: sqlite3.Connection) -> None:
+    """No bar → SKIP → trajectory stays None (nothing to mark against)."""
+    _open(conn, entry=100, stop=90, qty=10, atr=2.0)
+    results = mtm_open_trades(conn, bars={}, as_of=datetime(2026, 5, 20, 15, 30))
+    assert results[0].action == "SKIP"
+    assert results[0].progress_to_target is None
+    assert results[0].trajectory_status is None
+
+
 def test_mtm_trail_ratchets_across_runs(conn: sqlite3.Connection) -> None:
     """Two consecutive MTM passes should ratchet the stop higher each time."""
     trade_id = _open(conn, entry=100, stop=90, qty=10, atr=2.0)
