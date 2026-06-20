@@ -162,6 +162,36 @@ def test_step_retrain_feeds_negative_news_lookup(paths, monkeypatch) -> None:
     assert lookup[("2024-03-06", "LONGSYM")] == 2
 
 
+def test_lag_attribution_groups_by_conviction_and_regime() -> None:
+    """F-040: matured predictions are sliced by entry-condition cohort so the
+    laggard cohorts (low hit rate / negative mean error) are visible."""
+    import pytest
+
+    from trading.jobs.weekly_train import gather_lag_attribution
+
+    conn = _memdb()
+    conn.execute(
+        "INSERT INTO predictions (ts, symbol, predicted_return_pct, predicted_horizon_days, "
+        "actual_return_at_horizon, error_pct, evaluated_at, regime, conviction) VALUES "
+        "('2026-05-01','A',10,25, 5.0, -5.0, '2026-06-01','RISK_OFF','LOW'),"
+        "('2026-05-02','B',10,25, -3.0, -13.0, '2026-06-02','RISK_OFF','LOW')"
+    )
+    # An un-matured (evaluated_at NULL) row must be ignored.
+    conn.execute(
+        "INSERT INTO predictions (ts, symbol, predicted_return_pct, predicted_horizon_days, "
+        "regime, conviction) VALUES ('2026-06-10','C',10,25,'RISK_ON','HIGH')"
+    )
+    cohorts = {(c.dimension, c.value): c for c in gather_lag_attribution(conn)}
+
+    conv = cohorts[("conviction", "LOW")]
+    assert conv.n == 2
+    assert conv.hit_rate == pytest.approx(0.5)  # one +ve actual, one -ve
+    reg = cohorts[("regime", "RISK_OFF")]
+    assert reg.n == 2
+    assert reg.mean_error_pct == pytest.approx(-9.0)
+    assert ("conviction", "HIGH") not in cohorts  # not yet matured
+
+
 def test_gather_review_data_empty() -> None:
     from trading.jobs.weekly_train import gather_review_data
 

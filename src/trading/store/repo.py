@@ -80,6 +80,28 @@ class Prediction:
     actual_return_at_horizon: float | None = None
     error_pct: float | None = None
     evaluated_at: str | None = None
+    # F-040 entry-condition snapshot — attribute a matured outcome to *why* it opened.
+    regime: str | None = None
+    sector: str | None = None
+    ml_score: float | None = None
+    conviction: Conviction | None = None
+    atr_pct: float | None = None
+    neg_news_7d: int | None = None
+
+
+@dataclass(frozen=True)
+class EntryAttribution:
+    """Entry-condition snapshot threaded into the prediction at trade-open (F-040).
+
+    `ml_score`, `conviction` and `atr_pct` are derived from the signal/fill inside
+    `log_signal_and_open_trade`; only the context fields the ledger can't see —
+    market `regime`, the symbol's `sector`, and the trailing negative-news count —
+    are supplied here.
+    """
+
+    regime: str | None = None
+    sector: str | None = None
+    neg_news_7d: int | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +156,13 @@ def _row_to_prediction(row: sqlite3.Row) -> Prediction:
         actual_return_at_horizon=row["actual_return_at_horizon"],
         error_pct=row["error_pct"],
         evaluated_at=row["evaluated_at"],
+        # Always present post-migration-v6 (SELECT * callers); NULL for pre-v6 rows.
+        regime=row["regime"],
+        sector=row["sector"],
+        ml_score=row["ml_score"],
+        conviction=row["conviction"],
+        atr_pct=row["atr_pct"],
+        neg_news_7d=row["neg_news_7d"],
     )
 
 
@@ -279,8 +308,9 @@ def insert_prediction(conn: sqlite3.Connection, pred: Prediction) -> int:
         """
         INSERT INTO predictions (
           ts, symbol, predicted_return_pct, predicted_horizon_days,
-          actual_return_at_horizon, error_pct, evaluated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          actual_return_at_horizon, error_pct, evaluated_at,
+          regime, sector, ml_score, conviction, atr_pct, neg_news_7d
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             pred.ts,
@@ -290,6 +320,12 @@ def insert_prediction(conn: sqlite3.Connection, pred: Prediction) -> int:
             pred.actual_return_at_horizon,
             pred.error_pct,
             pred.evaluated_at,
+            pred.regime,
+            pred.sector,
+            pred.ml_score,
+            pred.conviction,
+            pred.atr_pct,
+            pred.neg_news_7d,
         ),
     )
     rowid = cur.lastrowid

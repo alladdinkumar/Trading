@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -108,6 +108,17 @@ class CalibrationBucket:
 
 
 @dataclass(frozen=True)
+class LagCohort:
+    """One entry-condition cohort of matured predictions (F-040)."""
+
+    dimension: str  # 'conviction' | 'regime'
+    value: str
+    n: int
+    hit_rate: float  # fraction with actual_return_at_horizon > 0
+    mean_error_pct: float  # mean (actual − predicted); negative = lagging
+
+
+@dataclass(frozen=True)
 class ReviewData:
     week_start: date
     as_of: date
@@ -116,6 +127,7 @@ class ReviewData:
     open_trades: list[OpenTradeRow]
     equity: pd.Series
     calibration: list[CalibrationBucket]
+    lag_attribution: list[LagCohort] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -229,7 +241,47 @@ def gather_review_data(conn: sqlite3.Connection, as_of: date) -> ReviewData:
         open_trades=open_trades,
         equity=equity,
         calibration=calibration,
+        lag_attribution=gather_lag_attribution(conn),
     )
+
+
+def gather_lag_attribution(conn: sqlite3.Connection) -> list[LagCohort]:
+    """Slice matured predictions by entry-condition cohort (F-040).
+
+    Surfaces *why* outcomes lag: cohorts (by conviction band, by market regime)
+    with a low hit rate or a strongly-negative mean error are the laggards. Only
+    evaluated predictions with a non-NULL attribution value are counted. Pure read.
+    """
+    # Two fixed queries (one per dimension) rather than a dynamic column name —
+    # keeps the SQL literal and the column allowlist explicit.
+    by_conviction = conn.execute(
+        "SELECT conviction AS value, COUNT(*) AS n, "
+        "       AVG(CASE WHEN actual_return_at_horizon > 0 THEN 1.0 ELSE 0.0 END) AS hit, "
+        "       AVG(error_pct) AS mean_err "
+        "FROM predictions WHERE evaluated_at IS NOT NULL AND conviction IS NOT NULL "
+        "GROUP BY conviction ORDER BY hit, conviction"
+    ).fetchall()
+    by_regime = conn.execute(
+        "SELECT regime AS value, COUNT(*) AS n, "
+        "       AVG(CASE WHEN actual_return_at_horizon > 0 THEN 1.0 ELSE 0.0 END) AS hit, "
+        "       AVG(error_pct) AS mean_err "
+        "FROM predictions WHERE evaluated_at IS NOT NULL AND regime IS NOT NULL "
+        "GROUP BY regime ORDER BY hit, regime"
+    ).fetchall()
+
+    cohorts: list[LagCohort] = []
+    for dimension, rows in (("conviction", by_conviction), ("regime", by_regime)):
+        cohorts += [
+            LagCohort(
+                dimension=dimension,
+                value=str(r["value"]),
+                n=int(r["n"]),
+                hit_rate=float(r["hit"]),
+                mean_error_pct=float(r["mean_err"]) if r["mean_err"] is not None else 0.0,
+            )
+            for r in rows
+        ]
+    return cohorts
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +366,20 @@ def render_weekly_review(data: ReviewData, retrain: RetrainOutcome) -> str:
                 f"| {b.predicted_pct:+.1f} | {b.n} | {actual} | {b.realized_hit_rate:.0%} |"
             )
         lines += ["", "_Scatter plot: dashboard → Paper Journal → calibration._"]
+    else:
+        lines.append(_NO_DATA)
+
+    lines += ["", "## Lag attribution", ""]
+    if data.lag_attribution:
+        lines += [
+            "| Cohort | N | Hit rate | Mean error % |",
+            "|---|---|---|---|",
+        ]
+        lines += [
+            f"| {c.dimension}={c.value} | {c.n} | {c.hit_rate:.0%} | {c.mean_error_pct:+.2f} |"
+            for c in data.lag_attribution
+        ]
+        lines += ["", "_Low hit rate / strongly-negative mean error ⇒ a laggard cohort._"]
     else:
         lines.append(_NO_DATA)
 

@@ -45,6 +45,14 @@ def _table_names(conn: sqlite3.Connection) -> set[str]:
     return {r["name"] for r in rows}
 
 
+def test_predictions_has_attribution_columns(tmp_path: Path) -> None:
+    """F-040: predictions snapshots entry-condition features for lag attribution."""
+    with get_conn(tmp_path / "t.db") as conn:
+        run_migrations(conn)
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(predictions)")}
+    assert {"regime", "sector", "ml_score", "conviction", "atr_pct", "neg_news_7d"} <= cols
+
+
 def test_run_migrations_creates_all_tables(tmp_path: Path) -> None:
     with get_conn(tmp_path / "m.db") as conn:
         version = run_migrations(conn)

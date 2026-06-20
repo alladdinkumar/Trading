@@ -25,7 +25,7 @@ from trading.data.kite_snapshot import (
 from trading.data.macro import snapshot_and_classify
 from trading.data.news import default_aliases, fetch_all_news
 from trading.data.ohlcv_refresh import cross_check_closes, refresh_ohlcv
-from trading.data.sector import fetch_all_sectors
+from trading.data.sector import fetch_all_sectors, load_sector_map
 from trading.data.universe import load_candidate_universe
 from trading.features.regime import Regime
 from trading.features.sentiment import aggregate_daily, score_news_items
@@ -43,9 +43,13 @@ from trading.store.db import get_conn
 from trading.store.fno_ban_store import get_fno_ban_symbols, replace_fno_ban_list
 from trading.store.macro_store import get_macro_snapshot, upsert_macro_snapshot
 from trading.store.migrations import run_migrations
-from trading.store.news_store import insert_news_items, list_critical_symbols
+from trading.store.news_store import (
+    insert_news_items,
+    list_critical_symbols,
+    negative_news_count_7d,
+)
 from trading.store.ohlcv import read_ohlcv
-from trading.store.repo import Signal, insert_signal
+from trading.store.repo import EntryAttribution, Signal, insert_signal
 from trading.store.sector_store import upsert_sector_daily
 from trading.strategy.daily_budget import BudgetCandidate, plan_daily_entries
 from trading.strategy.exits import target_price
@@ -463,6 +467,7 @@ def _step_auto_open(
 
     opened = 0
     planned_symbols = {e.symbol for e in plan.entries}
+    sector_map = load_sector_map()
     for entry in plan.entries:
         signal = signal_by_symbol[entry.symbol]
         log_signal_and_open_trade(
@@ -474,6 +479,13 @@ def _step_auto_open(
             atr_at_entry=atr_by_symbol[entry.symbol],
             # predicted_return_pct defaults to the signal's implied target %
             # ((target - entry)/entry); signal.target is min(+20%, 2.5R) (F-029).
+            # F-040: snapshot entry conditions so a matured outcome can be
+            # attributed to *why* it opened (regime/sector/news cohorts).
+            attribution=EntryAttribution(
+                regime=regime,
+                sector=sector_map.get(entry.symbol),
+                neg_news_7d=negative_news_count_7d(conn, entry.symbol, as_of),
+            ),
         )
         opened += 1
 

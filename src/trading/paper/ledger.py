@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 
 from trading.backtest.costs import CostConfig, buy_charges, sell_charges
 from trading.store.repo import (
+    EntryAttribution,
     ExitReason,
     PaperTrade,
     Prediction,
@@ -74,6 +75,7 @@ def log_signal_and_open_trade(
     qty: int,
     atr_at_entry: float | None,
     predicted_return_pct: float | None = None,
+    attribution: EntryAttribution | None = None,
 ) -> TradeOpenResult:
     """Atomic: log a signal, open the paper trade, record the prediction.
 
@@ -81,7 +83,9 @@ def log_signal_and_open_trade(
     `current_stop` on the trade initialises to `signal.stop` — MTM
     ratchets it from there. `predicted_return_pct` defaults to the
     signal's implied target % so the ranker can later score
-    actual-vs-expected.
+    actual-vs-expected. `attribution` snapshots the entry conditions
+    (regime/sector/news) onto the prediction for later lag attribution
+    (F-040); ml_score/conviction/atr_pct are derived from the signal/fill.
     """
     signal_id = insert_signal(conn, signal)
 
@@ -102,6 +106,12 @@ def log_signal_and_open_trade(
         if predicted_return_pct is not None
         else ((signal.target - signal.entry) / signal.entry * 100.0)
     )
+    attr = attribution or EntryAttribution()
+    atr_pct = (
+        atr_at_entry / entry_price
+        if atr_at_entry is not None and entry_price > 0
+        else None
+    )
     prediction_id = insert_prediction(
         conn,
         Prediction(
@@ -110,6 +120,12 @@ def log_signal_and_open_trade(
             symbol=signal.symbol,
             predicted_return_pct=implied_return,
             predicted_horizon_days=signal.horizon_days,
+            regime=attr.regime,
+            sector=attr.sector,
+            ml_score=signal.ml_score,
+            conviction=signal.conviction,
+            atr_pct=atr_pct,
+            neg_news_7d=attr.neg_news_7d,
         ),
     )
 

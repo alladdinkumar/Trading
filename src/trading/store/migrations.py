@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-CURRENT_VERSION = 5
+CURRENT_VERSION = 6
 
 
 SCHEMA_V1 = """
@@ -285,6 +285,18 @@ CREATE TABLE IF NOT EXISTS cash_ledger (
 CREATE INDEX IF NOT EXISTS idx_cash_ledger_date ON cash_ledger(date);
 """
 
+# F-040: snapshot the entry-condition feature vector onto each prediction so a
+# matured outcome can be attributed to *why* it was opened (cohort analysis of
+# laggards). All nullable — pre-existing rows and cold-start signals carry NULL.
+SCHEMA_V6 = """
+ALTER TABLE predictions ADD COLUMN regime      TEXT;
+ALTER TABLE predictions ADD COLUMN sector      TEXT;
+ALTER TABLE predictions ADD COLUMN ml_score    REAL;
+ALTER TABLE predictions ADD COLUMN conviction  TEXT;
+ALTER TABLE predictions ADD COLUMN atr_pct     REAL;
+ALTER TABLE predictions ADD COLUMN neg_news_7d INTEGER;
+"""
+
 
 def _current_db_version(conn: sqlite3.Connection) -> int:
     """Return the highest applied version, or 0 if schema_version doesn't exist yet."""
@@ -334,5 +346,11 @@ def run_migrations(conn: sqlite3.Connection) -> int:
         conn.execute(
             "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
             (5, datetime.now(UTC).isoformat()),
+        )
+    if current < 6:
+        conn.executescript(SCHEMA_V6)
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (6, datetime.now(UTC).isoformat()),
         )
     return CURRENT_VERSION
