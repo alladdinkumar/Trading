@@ -168,6 +168,33 @@ def test_run_post_close_apply_aborts_when_quotes_missing(paths) -> None:
     assert "/kite-quotes-snapshot" in str(exc.value)
 
 
+@freeze_time("2026-05-17T10:00:00")
+def test_run_post_close_apply_honors_max_age_for_backfill(paths) -> None:
+    """Next-day backfill: quotes captured 2026-05-16 16:01, run on 2026-05-17.
+
+    The default 30-min freshness ceiling rejects the ~18h-old snapshot, but an
+    explicit large max_age_minutes lifts the ceiling so the backfill proceeds.
+    """
+    paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with get_conn(paths.db_path) as file_conn:
+        run_migrations(file_conn)
+        _seed_open_trade_at_time_stop(file_conn)
+    _write_quotes(paths, date(2026, 5, 16), "1601", [_QUOTE_ROW_RVNL_TIME])
+
+    # Default ceiling rejects the stale snapshot.
+    with pytest.raises(PostCloseAborted) as exc:
+        run_post_close(date(2026, 5, 16), paths=paths, apply=True)
+    assert "stale" in str(exc.value)
+
+    # Explicit override lifts the ceiling for the backfill.
+    result = run_post_close(
+        date(2026, 5, 16), paths=paths, apply=True, max_age_minutes=100_000
+    )
+    assert result.quotes_capture_ts == _dt(2026, 5, 16, 16, 1)
+    assert result.trades_closed == 1
+    assert result.summary_path is not None
+
+
 @freeze_time("2026-05-16T16:01:23")
 def test_run_post_close_apply_idempotent_on_rerun(paths) -> None:
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)

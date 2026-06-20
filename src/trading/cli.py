@@ -1638,11 +1638,21 @@ def post_close_cmd(
         float,
         typer.Option(help="Starting paper capital; live cash is derived from the trade ledger."),
     ] = INITIAL_CAPITAL,
+    max_age: Annotated[
+        int,
+        typer.Option(
+            "--max-age",
+            help="Quotes freshness ceiling in minutes (default 30). Raise it for a "
+            "deliberate next-day/weekend backfill against an older snapshot.",
+        ),
+    ] = 30,
 ) -> None:
     """Phase 14.B — end-of-day MTM + reconcile + summary."""
     as_of = date.fromisoformat(date_str)
     try:
-        result = run_post_close(as_of, apply=apply, initial_capital=capital)
+        result = run_post_close(
+            as_of, apply=apply, initial_capital=capital, max_age_minutes=max_age
+        )
     except PostCloseAborted as e:
         console.print(f"[red]Post-close aborted:[/red] {e}")
         raise typer.Exit(code=2) from e

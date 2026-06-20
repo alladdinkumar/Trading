@@ -55,12 +55,17 @@ def run_post_close(
     paths: Paths | None = None,
     apply: bool = False,
     initial_capital: float = INITIAL_CAPITAL,
+    max_age_minutes: int = 30,
 ) -> PostCloseResult:
     """Orchestrate post_close. apply=False → prepare mode. apply=True → MTM
     + reconcile + write summary.
 
     `initial_capital` only seeds the paper-cash ledger; the snapshot's cash
-    and equity are derived from the trade history (F-023)."""
+    and equity are derived from the trade history (F-023).
+
+    `max_age_minutes` is the freshness ceiling for the quotes snapshot (default
+    30, matching a live post-close run). Raise it for a deliberate next-day or
+    weekend backfill, where the snapshot is legitimately hours old."""
     p = paths if paths is not None else get_paths()
     warnings: list[str] = []
 
@@ -91,7 +96,7 @@ def run_post_close(
 
         # apply mode
         try:
-            quotes, capture_ts = read_latest_quotes(p, as_of)
+            quotes, capture_ts = read_latest_quotes(p, as_of, max_age_minutes=max_age_minutes)
         except (QuoteSnapshotMissingError, QuoteSnapshotStaleError) as e:
             raise PostCloseAborted(str(e)) from e
 

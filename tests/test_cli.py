@@ -638,6 +638,53 @@ def test_post_close_cli_apply_happy_path(tmp_path: Path, monkeypatch) -> None:
     assert "post_close_summary.md" in result.stdout
 
 
+def test_post_close_cli_max_age_flag_threads_through(tmp_path: Path, monkeypatch) -> None:
+    """--max-age <N> is passed to run_post_close as max_age_minutes; default is 30."""
+    from datetime import date as _d
+    from datetime import datetime as _dt
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+
+    from trading.jobs import post_close as pc_mod
+
+    fake_result = pc_mod.PostCloseResult(
+        as_of=_d(2026, 5, 16),
+        quotes_capture_ts=_dt(2026, 5, 16, 16, 1),
+        bars_built=1,
+        trades_evaluated=0,
+        trades_closed=0,
+        trades_held=0,
+        trades_skipped=0,
+        predictions_matured=0,
+        equity=100_000.0,
+        drawdown_pct=0.0,
+        summary_path=None,
+        symbols_path=None,
+        warnings=[],
+    )
+    captured: dict = {}
+
+    def fake_run(*a, **kw):
+        captured.update(kw)
+        return fake_result
+
+    monkeypatch.setattr("trading.cli.run_post_close", fake_run)
+
+    # Explicit flag is forwarded.
+    result = runner.invoke(
+        app, ["post-close", "--date", "2026-05-16", "--apply", "--max-age", "100000"]
+    )
+    assert result.exit_code == 0, result.stdout
+    assert captured["max_age_minutes"] == 100000
+
+    # Absent flag defaults to the 30-min live-session ceiling.
+    captured.clear()
+    result = runner.invoke(app, ["post-close", "--date", "2026-05-16", "--apply"])
+    assert result.exit_code == 0, result.stdout
+    assert captured["max_age_minutes"] == 30
+
+
 def test_cli_remind_happy_path(monkeypatch):
     from trading.ops import runner as runner_mod
 
