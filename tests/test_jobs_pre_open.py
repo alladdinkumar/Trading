@@ -35,8 +35,8 @@ from trading.strategy.ranker import ScoredCandidate
 from trading.strategy.rules import (
     Candidate,
     RuleResult,
+    passes_market_filter,
     passes_no_critical_event,
-    passes_regime,
 )
 
 
@@ -334,7 +334,7 @@ def test_build_scan_context_empty_when_no_data(conn) -> None:
     assert ctx.india_vix is None
     assert ctx.critical_event_symbols == frozenset()
     # No macro/sentiment ⇒ gates degrade to passing (indicator-only).
-    assert passes_regime(ctx).passed
+    assert passes_market_filter(ctx).passed
     assert passes_no_critical_event("ANY", ctx).passed
 
 

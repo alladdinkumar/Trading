@@ -19,12 +19,12 @@ from trading.strategy.rules import (
     ScanContext,
     evaluate_symbol,
     passes_liquidity,
+    passes_market_filter,
     passes_no_critical_event,
     passes_no_recent_breakdown,
     passes_not_fno_banned,
     passes_not_t2t,
     passes_pullback,
-    passes_regime,
     passes_rsi_band,
     passes_uptrend,
     passes_volume_exhaustion,
@@ -233,28 +233,29 @@ def test_no_recent_breakdown_fails_large_drop() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_regime_passes_when_context_empty() -> None:
+def test_market_filter_passes_when_context_empty() -> None:
     ctx = ScanContext(scan_date=date(2026, 5, 11))
-    r = passes_regime(ctx)
+    r = passes_market_filter(ctx)
     assert r.passed
+    assert r.name == "market_filter"
 
 
-def test_regime_fails_on_high_vix() -> None:
+def test_market_filter_fails_on_high_vix() -> None:
     ctx = ScanContext(scan_date=date(2026, 5, 11), india_vix=28.0)
-    r = passes_regime(ctx)
+    r = passes_market_filter(ctx)
     assert not r.passed
     assert "VIX" in r.reason
 
 
-def test_regime_fails_on_index_drawdown() -> None:
+def test_market_filter_fails_on_index_drawdown() -> None:
     ctx = ScanContext(scan_date=date(2026, 5, 11), nifty200_drawdown_5d_pct=-7.0)
-    r = passes_regime(ctx)
+    r = passes_market_filter(ctx)
     assert not r.passed
 
 
-def test_regime_passes_when_below_thresholds() -> None:
+def test_market_filter_passes_when_below_thresholds() -> None:
     ctx = ScanContext(scan_date=date(2026, 5, 11), india_vix=18.0, nifty200_drawdown_5d_pct=-1.0)
-    r = passes_regime(ctx)
+    r = passes_market_filter(ctx)
     assert r.passed
 
 
@@ -304,7 +305,7 @@ def test_evaluate_symbol_returns_full_candidate() -> None:
         "volume_exhaustion",
         "liquidity",
         "no_recent_breakdown",
-        "regime",
+        "market_filter",
         "not_fno_banned",
         "not_t2t",
         "no_critical_event",

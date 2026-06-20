@@ -85,11 +85,13 @@ A pure classifier over four axes, each voting −1/0/+1:
 votes + reasons (the brief renders them). `position_size_multiplier` maps
 RISK_ON/NEUTRAL/RISK_OFF → 1.0 / 0.75 / 0.5.
 
-> **Two different "regime" concepts coexist** and shouldn't be confused: this
-> 4-axis voter (feeds *sizing*) vs. the Layer-A `passes_regime` *rule* (a gate
-> using VIX < 25 AND Nifty-200 5d drawdown > −5%, different thresholds, different
-> inputs). The names collide; the rule version is now **live** (F-019, §3.4),
-> which makes the collision more important to resolve. → F-020.
+> **Two distinct concepts, now distinctly named** (F-020, fixed): this 4-axis
+> voter is the **`regime`** classifier (feeds *sizing*). The Layer-A gate that
+> uses VIX ≥ 25 OR Nifty-200 5d drawdown ≤ −5% — a different, extreme-stress
+> *hard veto* with different thresholds/inputs — was renamed **`passes_market_filter`**
+> (rule name `market_filter`) so the two no longer collide. They are kept
+> separate on purpose: the voter *scales* exposure in mild risk-off; the gate only
+> *blocks* on extreme stress.
 
 ## 3. `strategy/` — decision logic
 
@@ -105,7 +107,7 @@ RISK_ON/NEUTRAL/RISK_OFF → 1.0 / 0.75 / 0.5.
 | 4 | `volume_exhaustion` | on a down day, vol < 20d avg (up days pass) | indicators |
 | 5 | `liquidity` | 20d avg turnover ≥ ₹10 cr | indicators |
 | 6 | `no_recent_breakdown` | not > 15% below its 30d high | indicators |
-| 7 | `regime` | VIX < 25 **and** Nifty200 5d dd > −5% | **`ScanContext`** |
+| 7 | `market_filter` | VIX < 25 **and** Nifty200 5d dd > −5% (extreme-stress veto; renamed from `regime`, F-020) | **`ScanContext`** |
 | 8 | `not_fno_banned` | symbol ∉ F&O ban list | **`ScanContext`** |
 | 9 | `not_t2t` | symbol ∉ trade-to-trade segment | **`ScanContext`** |
 | 10 | `no_critical_event` | symbol ∉ critical-event set (30d) | **`ScanContext`** |
@@ -167,8 +169,8 @@ ctx = build_scan_context(conn, as_of)
 #   critical_event_symbols ← sentiment_daily.has_critical (list_critical_symbols)
 ```
 
-- **`regime` (rule 7)** → now reads the live `india_vix`; the VIX<25 gate fires
-  (Nifty200 5d drawdown stays `None` until stored — degrades gracefully).
+- **`market_filter` (rule 7)** → now reads the live `india_vix`; the VIX<25 gate
+  fires (Nifty200 5d drawdown stays `None` until stored — degrades gracefully).
 - **`no_critical_event` (10)** → reads `sentiment_daily.has_critical`, so the
   FinBERT critical-news hard veto fires.
 - **`not_fno_banned` (8)** / **`not_t2t` (9)** → still empty sets; they await the

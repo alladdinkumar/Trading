@@ -183,18 +183,28 @@ def passes_no_recent_breakdown(
 # ---------------------------------------------------------------------------
 
 
-def passes_regime(ctx: ScanContext) -> RuleResult:
-    """India VIX < 25 AND Nifty 200 5-day drawdown > -5%."""
+def passes_market_filter(ctx: ScanContext) -> RuleResult:
+    """Extreme-stress hard veto: fail iff India VIX ≥ 25 OR Nifty 200 5-day
+    drawdown ≤ -5%.
+
+    Named ``market_filter`` (F-020) to avoid colliding with
+    :func:`trading.features.regime.classify_regime`, which is a *different*
+    concept: a graded 4-axis RISK_ON/NEUTRAL/RISK_OFF voter (VIX 14/20 +
+    futures/FII/USDINR) that drives a continuous position-size multiplier. The
+    two deliberately use different thresholds for different jobs — the voter
+    *scales* exposure in mild risk-off, this gate only *blocks* on extreme
+    stress — so they are kept separate, not merged.
+    """
     reasons: list[str] = []
     if ctx.india_vix is not None and ctx.india_vix >= 25:
         reasons.append(f"VIX={ctx.india_vix:.1f} >= 25")
     if ctx.nifty200_drawdown_5d_pct is not None and ctx.nifty200_drawdown_5d_pct <= -5:
         reasons.append(f"Nifty200 5d {ctx.nifty200_drawdown_5d_pct:.1f}% <= -5")
     if reasons:
-        return RuleResult("regime", False, "; ".join(reasons))
+        return RuleResult("market_filter", False, "; ".join(reasons))
     if ctx.india_vix is None and ctx.nifty200_drawdown_5d_pct is None:
-        return RuleResult("regime", True, "no macro data — passing by default")
-    return RuleResult("regime", True, "OK")
+        return RuleResult("market_filter", True, "no macro data — passing by default")
+    return RuleResult("market_filter", True, "OK")
 
 
 def passes_not_fno_banned(symbol: str, ctx: ScanContext) -> RuleResult:
@@ -231,7 +241,7 @@ LAYER_A_RULE_NAMES: tuple[str, ...] = (
     "volume_exhaustion",
     "liquidity",
     "no_recent_breakdown",
-    "regime",
+    "market_filter",
     "not_fno_banned",
     "not_t2t",
     "no_critical_event",
@@ -257,7 +267,7 @@ def evaluate_symbol(symbol: str, df: pd.DataFrame, ctx: ScanContext) -> Candidat
         passes_volume_exhaustion(df),
         passes_liquidity(df),
         passes_no_recent_breakdown(df),
-        passes_regime(ctx),
+        passes_market_filter(ctx),
         passes_not_fno_banned(symbol, ctx),
         passes_not_t2t(symbol, ctx),
         passes_no_critical_event(symbol, ctx),

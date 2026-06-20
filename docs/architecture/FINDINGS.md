@@ -12,8 +12,8 @@ The architecture review (docs 00–08) produced **43 active findings** (1 earlie
 finding superseded; F-035/F-036 spun off from F-026's self-healing follow-up;
 F-037–F-042 added 2026-06-20 from the self-learning / outcome-feedback review;
 F-043/F-044 added 2026-06-20 — residual model-quality caveats the F-037/F-041 fixes
-surfaced but did not resolve; F-043 since fixed). **30 are now fixed** (F-002, F-003, F-010, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043), leaving **13 open**. The system is **well-engineered at the
+surfaced but did not resolve; F-043 since fixed). **31 are now fixed** (F-002, F-003, F-010, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043), leaving **12 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -42,9 +42,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 1 | F-005† |
-| Med | 6 | F-001, F-006, F-007, F-008, F-020, F-044 |
+| Med | 5 | F-001, F-006, F-007, F-008, F-044 |
 | Low | 6 | F-004, F-009, F-017, F-027, F-028, F-030 |
-| ✅ Fixed | 30 | F-002, F-003, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043 |
+| ✅ Fixed | 31 | F-002, F-003, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -53,7 +53,7 @@ future Phase 19 — out of scope for hardening the paper run.
 |---|---:|
 | VULN (correctness/data-integrity) | 11 (all ✅: F-019, F-022, F-023, F-024, F-029, F-033, F-034, F-037, F-041, F-042, F-043) |
 | GAP (missing functionality/guardrail) | 12 (F-003 ✅, F-010 ✅, F-013 ✅, F-015 ✅, F-032 ✅; F-044 open) |
-| INACC (code ≠ spec/docstring) | 7 (F-021 ✅, F-031 ✅) |
+| INACC (code ≠ spec/docstring) | 7 (F-020 ✅, F-021 ✅, F-031 ✅) |
 | DEBT (cleanup) | 8 |
 
 ## Remediation roadmap
@@ -105,8 +105,9 @@ reserved.
 ### Wave 4 — Structural & cleanup (low-risk, alongside)
 F-001 (prune unused deps), F-004 (canonical IST clock), F-006/F-007/F-008/F-009
 (layering: domain module, fetch/classify split, break cycle, import-linter),
-F-017 (macro column labels), F-020 (regime name collision), F-027 (heading
-constant + spanning test), F-028 (docstring), F-030 (guard visibility signals).
+F-017 (macro column labels), ~~F-020 (regime name collision)~~ ✅ **Done
+2026-06-20** (renamed `passes_market_filter`), F-027 (heading constant + spanning
+test), F-028 (docstring), F-030 (guard visibility signals).
 
 ### Separate track — needs a decision
 F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
@@ -180,7 +181,7 @@ User comment - Don't involve real money logic now , need proper evident profit b
 | F-017 | INACC | Low | 3 | `macro_snapshot.dow_fut`/`nasdaq_fut` store spot index closes not futures; `sgx_nifty` always NULL | Open |
 | F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | ✅ Fixed (2026-06-16) — refresh step + scan staleness guard + Kite close cross-check; IST-clock centralisation ([[F-004]]) still open |
 | F-019 | VULN | High | 4 | 4 of 10 Layer-A rules (regime, fno_banned, t2t, critical_event) are unconditional passes — `pre_open`/`scan` build `ScanContext` with all defaults; risk vetoes + regime gate are dead despite the data being available | ✅ Fixed (2026-06-16) — `build_scan_context` wires regime/VIX + critical-news gates; `fno_banned`/`t2t` still await NSE feeds ([[F-010]]) |
-| F-020 | INACC | Med | 4 | Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate) — different thresholds/inputs (the rule is now live as of F-019, sharpening the naming-collision risk) | Open |
+| ~~F-020~~ | INACC | Med | 4 | ~~Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate)~~ | ✅ Fixed 2026-06-20 — Layer-A rule renamed `passes_regime`→`passes_market_filter` (rule name `market_filter`); voter keeps `regime`; logic unchanged (kept as a distinct extreme-stress veto, not merged into RISK_OFF); legacy `regime` alias keeps old signals rendering |
 | ~~F-021~~ | INACC | Med | 5 | ~~`BacktestResult.total_costs` omits buy-side charges (only sell-side accumulated); aggregate cost-drag understated (per-trade `costs_paid` is correct)~~ | ✅ Fixed 2026-06-17 — `total_costs = sum(t.costs_paid)` (buy + sell) |
 | ~~F-022~~ | VULN | Med | 5 | ~~Health scorer structurally TRIM-biased: fundamentals AND sentiment never wired (pre_open/monthly_sip pass empty snapshots) → technicals-only + critical-news EXIT veto dead; docstring claims vote-count scaling not implemented (fixed ±3)~~ | ✅ Fixed 2026-06-16 — votes_cast scaling in `score_holding`; sentiment + static-CSV fundamentals wired into both jobs via `build_holding_context`; critical-news EXIT veto live |
 | ~~F-023~~ | VULN | High | 5 | ~~Paper equity curve never compounds realised P&L — cash is a constant; closing a winner drops its gain from `portfolio_snapshots.equity`. Equity/drawdown are not a true track record~~ | ✅ Fixed 2026-06-16 — `compute_paper_cash` derives cash from the ledger; equity = derived cash + open MTM, so realised P&L compounds |
@@ -506,8 +507,8 @@ preview when no snapshot exists. `nifty200_drawdown_5d_pct` stays `None` (not ye
 stored; the rule degrades gracefully). `fno_ban_symbols` is now populated from `fno_ban_list` ([[F-010]]); `t2t_symbols`
 remains empty until an NSE T2T feed lands. Tests assert a critical
 symbol is vetoed and that an empty DB degrades to passing. Supersedes [[F-011]].
-*Naming caveat:* `passes_regime` is now live, which makes the [[F-020]] name
-collision worth resolving next.
+*Naming caveat:* `passes_regime` is now live, which made the [[F-020]] name
+collision worth resolving — done 2026-06-20 (renamed to `passes_market_filter`).
 
 *Original finding:*
 `jobs/pre_open.py::_step_scan` and `cli.py::scan_cmd` both construct
@@ -522,13 +523,30 @@ Effect: only the 6 indicator rules filter; 3 risk vetoes + the regime gate are
 dead. Supersedes [[F-011]].
 - **Doc to revisit:** `04-analysis-strategy.md` §3.4; `07-jobs-workflows.md`.
 
-### F-020 — "regime" name collision (`INACC`, Med, Phase 4)
-`features.regime.classify_regime` (4-axis voter, VIX 14/20 thresholds, feeds
-sizing multiplier) vs `strategy.rules.passes_regime` (gate: VIX<25 AND Nifty-200
-5d dd>−5%). Same word, different logic; the rule one is also unused (F-019).
-- **Fix idea:** Rename the Layer-A rule (e.g. `passes_market_filter`) and, when
-  wiring F-019, decide whether the gate should reuse the macro voter's RISK_OFF
-  classification instead of its own thresholds.
+### F-020 — "regime" name collision (`INACC`, Med, Phase 4) — ✅ Fixed 2026-06-20
+**Was:** `features.regime.classify_regime` (4-axis voter, VIX 14/20 thresholds,
+feeds the sizing multiplier) and `strategy.rules.passes_regime` (gate: VIX≥25 OR
+Nifty-200 5d dd≤−5%) shared the word "regime" despite being different concepts —
+sharpened once F-019/F-043 made the rule-gate live and the dashboard rendered a
+"regime" rule chip next to the macro regime badge.
+
+**Resolution (rename to disambiguate; logic deliberately unchanged):**
+- `strategy.rules.passes_regime` → **`passes_market_filter`**, emitting rule-name
+  **`market_filter`**; `LAYER_A_RULE_NAMES` + `evaluate_symbol` + the order-lock
+  test updated. The macro voter keeps the name `regime` (its natural owner).
+- **Decision — not merged.** The gate keeps its own VIX≥25/dd≤−5% *extreme-stress
+  hard veto* rather than reusing the voter's RISK_OFF. The two serve different
+  jobs (the voter *scales* exposure in mild risk-off via the size multiplier; the
+  gate only *blocks* on extreme stress); merging would double-count and change
+  backtest behaviour. A docstring on `passes_market_filter` records this.
+- **Back-compat:** `ui/components._LEGACY_RULE_ALIASES` maps a persisted
+  `regime` → `market_filter` so the existing signals' `rules_passed_json` (which
+  stored the old name) still render correctly in the dashboard rule grid.
+- **Docs:** `04-analysis-strategy.md` §2 collision note + rule table (#7) + §3.4
+  wiring note updated.
+- TDD: new `test_rule_chip_items_aliases_legacy_regime_name` (watched RED) + the
+  renamed `test_market_filter_*` rule tests + `evaluate_symbol` name-set + the
+  order-lock test. Full suite green, ruff + mypy clean.
 
 ---
 
@@ -1067,7 +1085,11 @@ track record is visible to the *planner* (via calibration) but invisible to the
 
 ---
 
-_Counts: 13 open · 1 superseded · 30 fixed. Updated 2026-06-20 (F-043 fixed —
+_Counts: 12 open · 1 superseded · 31 fixed. Updated 2026-06-20 (F-020 fixed —
+Layer-A rule `passes_regime` renamed `passes_market_filter` (rule name
+`market_filter`) to stop colliding with the `features.regime` voter; logic kept as
+a distinct extreme-stress veto, legacy `regime` alias preserves old signal
+rendering). Earlier 2026-06-20 (F-043 fixed —
 `SHARPE_PROMOTION_FLOOR=0.0` gates promotion on a positive OOS Sharpe in both the
 first-model and challenger paths, an `active ⟹ clears floor` invariant demotes
 sub-floor models, and the live −1.49 row was flipped inactive so the planner

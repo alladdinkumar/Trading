@@ -31,6 +31,16 @@ def test_rule_chip_items_all_passed_list() -> None:
     assert all(ok for _, ok in items)
 
 
+def test_rule_chip_items_aliases_legacy_regime_name() -> None:
+    # F-020: the Layer-A gate was renamed "regime" -> "market_filter". Historical
+    # signals persisted "regime" in rules_passed_json; the legacy name must still
+    # mark the renamed rule as passed so old rows render correctly.
+    items = dict(_rule_chip_items(["regime"]))
+    assert "market_filter" in items
+    assert items["market_filter"] is True
+    assert "regime" not in items  # the legacy name isn't rendered as its own chip
+
+
 def test_rule_chip_items_rejects_unexpected_type() -> None:
     with pytest.raises(TypeError):
         _rule_chip_items(42)

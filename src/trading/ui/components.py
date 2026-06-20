@@ -78,9 +78,15 @@ def health_chip(verdict: str | None, score: int | None = None) -> str:
     body = verdict if score is None else f"{verdict} · {score}"
     return (
         f'<span style="padding:2px 8px; background:{color}22;'
-        f' border:1px solid {color}; border-radius:10px;'
+        f" border:1px solid {color}; border-radius:10px;"
         f' color:{color}; font-weight:600; font-size:0.8rem;">{body}</span>'
     )
+
+
+# Legacy rule-name aliases — map a name persisted under an old identity onto the
+# current canonical name (F-020: the Layer-A "regime" gate was renamed
+# "market_filter" to stop colliding with the macro regime classifier).
+_LEGACY_RULE_ALIASES: dict[str, str] = {"regime": "market_filter"}
 
 
 def _rule_chip_items(parsed: object) -> list[tuple[str, bool]]:
@@ -93,12 +99,19 @@ def _rule_chip_items(parsed: object) -> list[tuple[str, bool]]:
       the *passed* rule names. Failed rules are absent, so we cross-reference
       :data:`LAYER_A_RULE_NAMES` to render the full grid (absent ⇒ failed).
 
+    Legacy rule-name aliases (F-020: ``regime`` → ``market_filter``) are applied
+    so signals persisted before a rule rename still render against the current
+    canonical set.
+
     Raises ``TypeError`` on any other shape so the caller can show a fallback.
     """
     if isinstance(parsed, dict):
-        return [(str(name), bool(ok)) for name, ok in parsed.items()]
+        return [
+            (_LEGACY_RULE_ALIASES.get(str(name), str(name)), bool(ok))
+            for name, ok in parsed.items()
+        ]
     if isinstance(parsed, list):
-        passed = {str(name) for name in parsed}
+        passed = {_LEGACY_RULE_ALIASES.get(str(name), str(name)) for name in parsed}
         return [(name, name in passed) for name in LAYER_A_RULE_NAMES]
     raise TypeError(f"unexpected rules_passed payload: {type(parsed).__name__}")
 
@@ -128,9 +141,9 @@ def rule_chip_grid(rules_passed_json: str | None) -> None:
         short = name.replace("passes_", "").replace("_", " ")
         chips.append(
             f'<span style="margin:2px 4px 2px 0; padding:2px 8px;'
-            f' background:{color}22; border:1px solid {color};'
+            f" background:{color}22; border:1px solid {color};"
             f' border-radius:8px; color:{color}; font-size:0.75rem;">'
-            f'{glyph} {short}</span>'
+            f"{glyph} {short}</span>"
         )
     st.markdown("".join(chips), unsafe_allow_html=True)
 
@@ -141,7 +154,7 @@ def empty_state(title: str, hint: str | None = None) -> None:
         f'<div style="padding:32px; border:1px dashed {COLOR_MUTED};'
         f' border-radius:8px; text-align:center; color:{COLOR_MUTED};">'
         f'<div style="font-size:1.1rem; font-weight:600; margin-bottom:8px;">'
-        f'{title}</div>'
+        f"{title}</div>"
     )
     if hint:
         body += f'<div style="font-size:0.9rem;">{hint}</div>'
@@ -161,8 +174,7 @@ def stale_quote_tag(capture_iso: str | None) -> None:
     color = COLOR_NEUTRAL if age_min > 30 else COLOR_MUTED
     label = f"quote captured {captured.strftime('%H:%M')} ({age_min} min ago)"
     st.markdown(
-        f'<div style="color:{color}; font-style:italic; font-size:0.8rem;">'
-        f'{label}</div>',
+        f'<div style="color:{color}; font-style:italic; font-size:0.8rem;">{label}</div>',
         unsafe_allow_html=True,
     )
 
