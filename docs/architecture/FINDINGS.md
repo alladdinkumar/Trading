@@ -12,8 +12,8 @@ The architecture review (docs 00–08) produced **43 active findings** (1 earlie
 finding superseded; F-035/F-036 spun off from F-026's self-healing follow-up;
 F-037–F-042 added 2026-06-20 from the self-learning / outcome-feedback review;
 F-043/F-044 added 2026-06-20 — residual model-quality caveats the F-037/F-041 fixes
-surfaced but did not resolve; F-043 since fixed). **31 are now fixed** (F-002, F-003, F-010, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043), leaving **12 open**. The system is **well-engineered at the
+surfaced but did not resolve; F-043 since fixed). **32 are now fixed** (F-001, F-002, F-003, F-010, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043), leaving **11 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -42,9 +42,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 1 | F-005† |
-| Med | 5 | F-001, F-006, F-007, F-008, F-044 |
+| Med | 4 | F-006, F-007, F-008, F-044 |
 | Low | 6 | F-004, F-009, F-017, F-027, F-028, F-030 |
-| ✅ Fixed | 31 | F-002, F-003, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043 |
+| ✅ Fixed | 32 | F-001, F-002, F-003, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -53,7 +53,7 @@ future Phase 19 — out of scope for hardening the paper run.
 |---|---:|
 | VULN (correctness/data-integrity) | 11 (all ✅: F-019, F-022, F-023, F-024, F-029, F-033, F-034, F-037, F-041, F-042, F-043) |
 | GAP (missing functionality/guardrail) | 12 (F-003 ✅, F-010 ✅, F-013 ✅, F-015 ✅, F-032 ✅; F-044 open) |
-| INACC (code ≠ spec/docstring) | 7 (F-020 ✅, F-021 ✅, F-031 ✅) |
+| INACC (code ≠ spec/docstring) | 7 (F-001 ✅, F-020 ✅, F-021 ✅, F-031 ✅) |
 | DEBT (cleanup) | 8 |
 
 ## Remediation roadmap
@@ -103,7 +103,8 @@ macro reconciliation). F-010 (decide each dormant table) ✅ **Done 2026-06-19**
 reserved.
 
 ### Wave 4 — Structural & cleanup (low-risk, alongside)
-F-001 (prune unused deps), F-004 (canonical IST clock), F-006/F-007/F-008/F-009
+~~F-001 (prune unused deps)~~ ✅ **Done 2026-06-20** (removed `vectorbt`/`anthropic`
++ breadcrumb note), F-004 (canonical IST clock), F-006/F-007/F-008/F-009
 (layering: domain module, fetch/classify split, break cycle, import-linter),
 F-017 (macro column labels), ~~F-020 (regime name collision)~~ ✅ **Done
 2026-06-20** (renamed `passes_market_filter`), F-027 (heading constant + spanning
@@ -162,7 +163,7 @@ User comment - Don't involve real money logic now , need proper evident profit b
 
 | ID | Cat | Sev | Phase | Title | Status |
 |---|---|---|---|---|---|
-| F-001 | INACC | Med | 0 | `vectorbt` + `anthropic` declared deps but unused in production paths | Open |
+| ~~F-001~~ | INACC | Med | 0 | ~~`vectorbt` + `anthropic` declared deps but unused in production paths~~ | ✅ Fixed 2026-06-20 — both pruned from `pyproject.toml` (+ `uv.lock` transitive tail: numba/llvmlite/matplotlib/ipython/jiter…); manifest now carries a breadcrumb note for the custom-engine / Claude-Code-skill deviations |
 | ~~F-002~~ | GAP | High | 0 | ~~No schema validation on broker/quote JSON contract between `/kite-*` skills and `data/*_snapshot.py`~~ | ✅ Fixed 2026-06-17 — `data/snapshot_schema.py` validates each row at the read boundary (type/exchange/missing/extra), readers raise `SnapshotSchemaError` |
 | ~~F-003~~ | GAP | Med | 0 | ~~Daily flow is ~13 manually-sequenced commands with no half-run/missed-step detection~~ | ✅ Fixed 2026-06-18 — `ops/run_status.py` + `trading status` infer per-step completion from on-disk artifacts (time-aware; exit 1 on a due-step miss) |
 | F-004 | DEBT | Low | 0 | Each job re-derives "today" in IST independently; no single canonical clock | Open |
@@ -210,15 +211,21 @@ User comment - Don't involve real money logic now , need proper evident profit b
 
 ## Detail
 
-### F-001 — Unused declared dependencies (`INACC`, Med, Phase 0)
-`pyproject.toml` declares `vectorbt>=0.26` and `anthropic>=0.40`, but the
+### F-001 — Unused declared dependencies (`INACC`, Med, Phase 0) — ✅ Fixed 2026-06-20
+**Was:** `pyproject.toml` declared `vectorbt>=0.26` and `anthropic>=0.40`, but the
 backtester is a hand-rolled event loop (Phase 7 deviation) and the LLM runs via
 Claude Code skills (Phase 12 deviation, no API credits). A reader could mistake
 the manifest for the architecture.
-- **Fix idea:** Remove both, or move to an `optional`/commented block with a
-  one-line note pointing at the deviation specs. Confirm nothing imports them
-  (`grep -r "import vectorbt\|import anthropic"`).
-- **Doc to revisit after fix:** `00-overview.md` §3 tech-stack note.
+
+**Resolution:** Verified zero imports of either package across `src/` and `tests/`
+(`import (vectorbt|anthropic)` → no matches), then removed both from
+`pyproject.toml`. `uv sync` dropped them and their transitive tail (numba,
+llvmlite, matplotlib, ipython/jupyter widgets, jiter, distro, schedule…) from the
+lock. In their place the dependency list carries a short breadcrumb comment
+recording *why* there is no backtest/LLM-SDK package (custom engine + Claude Code
+skills), so the deviation is self-documenting rather than re-confusing. Full suite
+green (1027 passed, 1 skipped); ruff clean. `00-overview.md` §3 tech-stack note +
+design-tension bullet updated to match.
 
 ### F-002 — No validation of the broker JSON contract (`GAP`, High, Phase 0) — ✅ Fixed 2026-06-17
 **Was:** `/kite-snapshot` and `/kite-quotes-snapshot` write JSON that

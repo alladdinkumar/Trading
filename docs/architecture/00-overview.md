@@ -97,17 +97,17 @@ Scheduler import, troubleshooting) lives in [`docs/operations.md`](../operations
 | Storage | SQLite (`data/app.db`) + Parquet (per-symbol OHLCV) |
 | Sources | `kiteconnect` (fallback), `yfinance`, `nsepython`, `feedparser` |
 | ML / sentiment | `lightgbm`, `scikit-learn`, `joblib`, `transformers` + `torch` (FinBERT) |
-| Backtest | event-loop engine (custom; `vectorbt` is a dep but the engine is hand-rolled) |
-| LLM | Claude Code skills (the `anthropic` SDK is a dep but the production path uses skills, not API calls) |
+| Backtest | event-loop engine (custom, hand-rolled — no backtest library) |
+| LLM | Claude Code skills (no LLM SDK — the production path uses skills, not API calls) |
 | UI | `streamlit` + `plotly` |
 | CLI / output | `typer`, `rich` |
 | Ops | `loguru` (logging), `plyer` (Windows toast), Slack webhook |
 
-> Note for reviewers: `vectorbt` and `anthropic` are declared dependencies but
-> the **production paths deliberately don't use them** — the backtester is a
-> custom event loop (Phase 7 deviation) and the LLM is invoked via Claude Code
-> skills (Phase 12 deviation, no API credits). Flagged here so the dependency
-> list isn't mistaken for the architecture.
+> Note for reviewers: there are deliberately **no backtest or LLM-SDK packages**
+> in the manifest — the backtester is a custom event loop (Phase 7 deviation) and
+> the LLM is invoked via Claude Code skills (Phase 12 deviation, no API credits).
+> The earlier `vectorbt`/`anthropic` placeholders were dropped per finding F-001
+> so the dependency list isn't mistaken for the architecture.
 
 ## 4. Repository map
 
@@ -225,9 +225,10 @@ Surfaced here at the overview level; each is expanded in its layer doc.
   contract between the `/kite-*` skills and `data/*_snapshot.py` is enforced only
   by the skill following its `SKILL.md`. A malformed write (wrong exchange,
   missing field) is caught only partially by readers. Worth a schema validator.
-- **Dependency vs. reality drift.** `vectorbt`/`anthropic` are installed but
-  unused in production; conversely the real engine is custom. New contributors
-  could be misled. Consider pruning or commenting the manifest.
+- **Dependency vs. reality drift.** ~~`vectorbt`/`anthropic` are installed but
+  unused in production; conversely the real engine is custom.~~ Resolved by F-001:
+  both placeholder deps were pruned and the manifest now carries a breadcrumb note
+  for the custom-engine / skills deviations.
 - **Paper-only, no execution path.** Nothing here places orders. The jump to
   Phase 19 (real money) is gated on ≥3 months OOS Sharpe > 1.0 and will need its
   own risk/kill-switch design — currently absent.

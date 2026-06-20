@@ -32,11 +32,10 @@ dependencies = [
     "transformers>=4.40",
     "torch>=2.2",
 
-    # --- Backtest ---
-    "vectorbt>=0.26",
-
-    # --- LLM ---
-    "anthropic>=0.40",
+    # NOTE: no backtest or LLM-SDK packages here by design.
+    # - Backtesting is a hand-rolled event loop (Phase 7 deviation), not vectorbt.
+    # - The analyst/LLM layer runs via Claude Code skills (Phase 12 deviation),
+    #   not the `anthropic` SDK. Both were dropped per finding F-001.
 
     # --- UI ---
     "streamlit>=1.35",
