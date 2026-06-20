@@ -218,19 +218,22 @@ def gather_review_data(conn: sqlite3.Connection, as_of: date) -> ReviewData:
         index=pd.to_datetime([r["date"] for r in eq_rows]),
         dtype=float,
     )
+    # F-042: band predicted_return_pct into 2% buckets. Grouping by the raw
+    # continuous REAL gave ~one row per prediction (singleton buckets → 0%/100%
+    # hit-rate noise); flooring to a band makes the calibration curve usable.
     calibration = [
         CalibrationBucket(
-            predicted_pct=r["predicted_return_pct"],
+            predicted_pct=r["band"],
             n=r["n"],
             actual_mean_pct=r["avg_actual"],
             realized_hit_rate=r["hit"],
         )
         for r in conn.execute(
-            "SELECT predicted_return_pct, COUNT(*) AS n, "
+            "SELECT CAST(predicted_return_pct / 2.0 AS INT) * 2.0 AS band, COUNT(*) AS n, "
             "       AVG(actual_return_at_horizon) AS avg_actual, "
             "       AVG(CASE WHEN actual_return_at_horizon > 0 THEN 1.0 ELSE 0.0 END) AS hit "
             "FROM predictions WHERE evaluated_at IS NOT NULL "
-            "GROUP BY predicted_return_pct ORDER BY predicted_return_pct"
+            "GROUP BY band ORDER BY band"
         )
     ]
     return ReviewData(

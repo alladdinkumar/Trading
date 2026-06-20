@@ -49,8 +49,14 @@ from trading.store.news_store import (
     negative_news_count_7d,
 )
 from trading.store.ohlcv import read_ohlcv
-from trading.store.repo import EntryAttribution, Signal, insert_signal
+from trading.store.repo import (
+    EntryAttribution,
+    Signal,
+    insert_signal,
+    matured_score_outcomes,
+)
 from trading.store.sector_store import upsert_sector_daily
+from trading.strategy.calibration import build_score_calibration
 from trading.strategy.daily_budget import BudgetCandidate, plan_daily_entries
 from trading.strategy.exits import target_price
 from trading.strategy.ranker import (
@@ -455,6 +461,8 @@ def _step_auto_open(
             )
         )
 
+    # F-041: correct p_win with realised win-rate per ml_score band (self-healing).
+    p_win_calibration = build_score_calibration(matured_score_outcomes(conn))
     plan = plan_daily_entries(
         budget_cands,
         available_cash=available_cash,
@@ -463,6 +471,7 @@ def _step_auto_open(
         pool_capital=pool_capital,
         daily_cap=daily_cap,
         risk_pct=risk_pct,
+        p_win_calibration=p_win_calibration,
     )
 
     opened = 0

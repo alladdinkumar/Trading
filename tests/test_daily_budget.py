@@ -17,6 +17,37 @@ def _cand(symbol: str, *, entry: float, target: float, ml: float | None, stop_fr
     )
 
 
+def test_calibration_corrects_optimistic_p_win() -> None:
+    """F-041: a band the model is over-confident about is pulled to its realised
+    hit-rate, so EV reflects reality instead of the raw ml_score."""
+    import pytest
+
+    from trading.strategy.calibration import build_score_calibration
+
+    # Model says ~0.72 for this band, but only 2 of 10 actually won.
+    cal = build_score_calibration([(0.72, i < 2) for i in range(10)], n_bins=5, min_n=5)
+    c = _cand("AAA", entry=100.0, target=110.0, ml=0.72)  # implied_return 0.10
+    plan = plan_daily_entries(
+        [c],
+        available_cash=1_000_000.0,
+        deployed_by_symbol={},
+        regime="RISK_ON",
+        p_win_calibration=cal,
+    )
+    # p_win corrected 0.72 → 0.20; ev = 0.20 * 0.10 = 0.02 (not 0.072).
+    assert plan.entries[0].ev_score == pytest.approx(0.02)
+
+
+def test_calibration_none_keeps_raw_score() -> None:
+    import pytest
+
+    c = _cand("AAA", entry=100.0, target=110.0, ml=0.72)
+    plan = plan_daily_entries(
+        [c], available_cash=1_000_000.0, deployed_by_symbol={}, regime="RISK_ON"
+    )
+    assert plan.entries[0].ev_score == pytest.approx(0.072)
+
+
 def test_ev_ordering_best_first() -> None:
     # B has higher ev (0.8 * 0.20) than A (0.5 * 0.05). B must be sized first.
     a = _cand("AAA", entry=100.0, target=105.0, ml=0.5)

@@ -192,6 +192,25 @@ def test_lag_attribution_groups_by_conviction_and_regime() -> None:
     assert ("conviction", "HIGH") not in cohorts  # not yet matured
 
 
+def test_calibration_buckets_are_banded_not_singletons() -> None:
+    """F-042: near-equal predicted returns collapse into one band instead of
+    one row each (GROUP BY a continuous float gave singleton, useless buckets)."""
+    from trading.jobs.weekly_train import gather_review_data
+
+    conn = _memdb()
+    # Three distinct continuous predicted returns within the same 2% band [20,22).
+    for i, pred in enumerate((20.3, 20.9, 21.6)):
+        conn.execute(
+            "INSERT INTO predictions (ts, symbol, predicted_return_pct, predicted_horizon_days, "
+            "actual_return_at_horizon, error_pct, evaluated_at) "
+            f"VALUES ('2026-05-0{i + 1}', 'S{i}', ?, 25, 5.0, -15.0, '2026-06-01')",
+            (pred,),
+        )
+    cal = gather_review_data(conn, AS_OF).calibration
+    assert len(cal) == 1  # all three land in the [20, 22) band, not 3 singletons
+    assert cal[0].n == 3
+
+
 def test_gather_review_data_empty() -> None:
     from trading.jobs.weekly_train import gather_review_data
 

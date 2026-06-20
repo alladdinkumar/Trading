@@ -12,6 +12,7 @@ import math
 from dataclasses import dataclass
 
 from trading.paper.ledger import buy_side_cost
+from trading.strategy.calibration import ScoreCalibration, calibrated_p_win
 from trading.strategy.sizing import Regime, SizingInput, position_size
 
 DEFAULT_POOL_CAPITAL = 100_000.0
@@ -55,8 +56,10 @@ class DailyPlan:
     cash_before: float
 
 
-def _ev(c: BudgetCandidate) -> float:
-    p_win = c.ml_score if c.ml_score is not None else DEFAULT_PWIN_PRIOR
+def _ev(c: BudgetCandidate, cal: ScoreCalibration | None) -> float:
+    # F-041: correct the model score with realised hit-rate where there's enough
+    # evidence; otherwise fall back to the raw ml_score (or the 0.5 prior).
+    p_win = calibrated_p_win(cal, c.ml_score, prior=DEFAULT_PWIN_PRIOR)
     implied_return = (c.target - c.entry) / c.entry
     return p_win * implied_return
 
@@ -70,10 +73,16 @@ def plan_daily_entries(
     pool_capital: float = DEFAULT_POOL_CAPITAL,
     daily_cap: float = DEFAULT_DAILY_DEPLOY_CAP,
     risk_pct: float = 0.02,
+    p_win_calibration: ScoreCalibration | None = None,
 ) -> DailyPlan:
-    """Plan today's entries: EV-ranked, greedy-filled within ₹daily_cap and cash."""
+    """Plan today's entries: EV-ranked, greedy-filled within ₹daily_cap and cash.
+
+    `p_win_calibration` (F-041), when supplied, replaces a candidate's raw
+    `ml_score` with the realised hit-rate of its score band — closing the loop
+    between the weekly calibration measurement and the planner's EV ranking.
+    """
     budget_cap = min(daily_cap, max(0.0, available_cash))
-    ranked = sorted(candidates, key=lambda c: (-_ev(c), c.symbol))
+    ranked = sorted(candidates, key=lambda c: (-_ev(c, p_win_calibration), c.symbol))
 
     entries: list[PlannedEntry] = []
     skipped: list[tuple[str, str]] = []
@@ -81,7 +90,7 @@ def plan_daily_entries(
     running_cash = available_cash
 
     for c in ranked:
-        ev = _ev(c)
+        ev = _ev(c, p_win_calibration)
         if running_budget <= 0:
             skipped.append((c.symbol, "daily budget exhausted"))
             continue

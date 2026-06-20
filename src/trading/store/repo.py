@@ -344,3 +344,17 @@ def list_predictions_by_symbol(conn: sqlite3.Connection, symbol: str) -> list[Pr
         (symbol,),
     ).fetchall()
     return [_row_to_prediction(r) for r in rows]
+
+
+def matured_score_outcomes(conn: sqlite3.Connection) -> list[tuple[float, bool]]:
+    """`(ml_score, won)` pairs for every matured, ml-scored prediction (F-041).
+
+    Feeds `strategy.calibration.build_score_calibration` so the planner can
+    correct `p_win` with realised win-rate. `won` is `actual_return_at_horizon > 0`.
+    """
+    rows = conn.execute(
+        "SELECT ml_score, actual_return_at_horizon FROM predictions "
+        "WHERE evaluated_at IS NOT NULL AND ml_score IS NOT NULL "
+        "AND actual_return_at_horizon IS NOT NULL"
+    ).fetchall()
+    return [(float(r["ml_score"]), float(r["actual_return_at_horizon"]) > 0) for r in rows]
