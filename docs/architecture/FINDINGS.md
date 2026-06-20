@@ -12,8 +12,8 @@ The architecture review (docs 00–08) produced **43 active findings** (1 earlie
 finding superseded; F-035/F-036 spun off from F-026's self-healing follow-up;
 F-037–F-042 added 2026-06-20 from the self-learning / outcome-feedback review;
 F-043/F-044 added 2026-06-20 — residual model-quality caveats the F-037/F-041 fixes
-surfaced but did not resolve; F-043 since fixed). **32 are now fixed** (F-001, F-002, F-003, F-010, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043), leaving **11 open**. The system is **well-engineered at the
+surfaced but did not resolve; F-043 since fixed). **33 are now fixed** (F-001, F-002, F-003, F-004, F-010, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043), leaving **10 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -43,8 +43,8 @@ and *how its results are measured*. Both are fixable with localized changes.
 |---|---:|---|
 | **High** | 1 | F-005† |
 | Med | 4 | F-006, F-007, F-008, F-044 |
-| Low | 6 | F-004, F-009, F-017, F-027, F-028, F-030 |
-| ✅ Fixed | 32 | F-001, F-002, F-003, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043 |
+| Low | 5 | F-009, F-017, F-027, F-028, F-030 |
+| ✅ Fixed | 33 | F-001, F-002, F-003, F-004, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -54,7 +54,7 @@ future Phase 19 — out of scope for hardening the paper run.
 | VULN (correctness/data-integrity) | 11 (all ✅: F-019, F-022, F-023, F-024, F-029, F-033, F-034, F-037, F-041, F-042, F-043) |
 | GAP (missing functionality/guardrail) | 12 (F-003 ✅, F-010 ✅, F-013 ✅, F-015 ✅, F-032 ✅; F-044 open) |
 | INACC (code ≠ spec/docstring) | 7 (F-001 ✅, F-020 ✅, F-021 ✅, F-031 ✅) |
-| DEBT (cleanup) | 8 |
+| DEBT (cleanup) | 8 (F-004 ✅) |
 
 ## Remediation roadmap
 
@@ -104,7 +104,8 @@ reserved.
 
 ### Wave 4 — Structural & cleanup (low-risk, alongside)
 ~~F-001 (prune unused deps)~~ ✅ **Done 2026-06-20** (removed `vectorbt`/`anthropic`
-+ breadcrumb note), F-004 (canonical IST clock), F-006/F-007/F-008/F-009
++ breadcrumb note), ~~F-004 (canonical IST clock)~~ ✅ **Done 2026-06-20**
+(`trading/clock.py`: `IST`/`now_ist`/`today_ist`), F-006/F-007/F-008/F-009
 (layering: domain module, fetch/classify split, break cycle, import-linter),
 F-017 (macro column labels), ~~F-020 (regime name collision)~~ ✅ **Done
 2026-06-20** (renamed `passes_market_filter`), F-027 (heading constant + spanning
@@ -166,7 +167,7 @@ User comment - Don't involve real money logic now , need proper evident profit b
 | ~~F-001~~ | INACC | Med | 0 | ~~`vectorbt` + `anthropic` declared deps but unused in production paths~~ | ✅ Fixed 2026-06-20 — both pruned from `pyproject.toml` (+ `uv.lock` transitive tail: numba/llvmlite/matplotlib/ipython/jiter…); manifest now carries a breadcrumb note for the custom-engine / Claude-Code-skill deviations |
 | ~~F-002~~ | GAP | High | 0 | ~~No schema validation on broker/quote JSON contract between `/kite-*` skills and `data/*_snapshot.py`~~ | ✅ Fixed 2026-06-17 — `data/snapshot_schema.py` validates each row at the read boundary (type/exchange/missing/extra), readers raise `SnapshotSchemaError` |
 | ~~F-003~~ | GAP | Med | 0 | ~~Daily flow is ~13 manually-sequenced commands with no half-run/missed-step detection~~ | ✅ Fixed 2026-06-18 — `ops/run_status.py` + `trading status` infer per-step completion from on-disk artifacts (time-aware; exit 1 on a due-step miss) |
-| F-004 | DEBT | Low | 0 | Each job re-derives "today" in IST independently; no single canonical clock | Open |
+| ~~F-004~~ | DEBT | Low | 0 | ~~Each job re-derives "today" in IST independently; no single canonical clock~~ | ✅ Fixed 2026-06-20 — new `trading/clock.py` (`IST`, `now_ist`, `today_ist`); the 4 modules that hand-rolled `timezone(+5:30)` + `_today_ist` now import it |
 | F-005 | GAP | High | 0 | No real-money execution path, kill-switch, or risk-halt design (gated to future Phase 19, tracked here so it isn't forgotten) | Needs decision |
 | F-006 | DEBT | Med | 1 | Domain DTOs live in `data/` so `store` depends "up" into the ingestion layer | Open |
 | F-007 | DEBT | Med | 1 | `data.macro.snapshot_and_classify` puts a decision concern (regime classify) in the data layer (upward back-edge into `features`) | Open |
@@ -180,7 +181,7 @@ User comment - Don't involve real money logic now , need proper evident profit b
 | ~~F-015~~ | GAP | Med | 3 | ~~News symbol-attribution alias map covers only 12 symbols → sparse `sentiment_daily`, near-empty per-symbol sentiment/critical inputs~~ | ✅ Fixed 2026-06-17 — `data/static/aliases.csv` covers all 58 ingest symbols; attribution + rollup watch-list both read it |
 | ~~F-016~~ | DEBT | Med | 3 | ~~News dedup is URL-only and single-run; daily event/headline re-fetch creates duplicate `news_items` rows (no DB-level uniqueness)~~ | ✅ Fixed 2026-06-17 — v3 `idx_news_dedup` UNIQUE + `INSERT OR IGNORE`; NSE events get per-event URLs so distinct events stop colliding |
 | F-017 | INACC | Low | 3 | `macro_snapshot.dow_fut`/`nasdaq_fut` store spot index closes not futures; `sgx_nifty` always NULL | Open |
-| F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | ✅ Fixed (2026-06-16) — refresh step + scan staleness guard + Kite close cross-check; IST-clock centralisation ([[F-004]]) still open |
+| F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | ✅ Fixed (2026-06-16) — refresh step + scan staleness guard + Kite close cross-check; IST-clock centralisation ([[F-004]]) ✅ done 2026-06-20 |
 | F-019 | VULN | High | 4 | 4 of 10 Layer-A rules (regime, fno_banned, t2t, critical_event) are unconditional passes — `pre_open`/`scan` build `ScanContext` with all defaults; risk vetoes + regime gate are dead despite the data being available | ✅ Fixed (2026-06-16) — `build_scan_context` wires regime/VIX + critical-news gates; `fno_banned`/`t2t` still await NSE feeds ([[F-010]]) |
 | ~~F-020~~ | INACC | Med | 4 | ~~Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate)~~ | ✅ Fixed 2026-06-20 — Layer-A rule renamed `passes_regime`→`passes_market_filter` (rule name `market_filter`); voter keeps `regime`; logic unchanged (kept as a distinct extreme-stress veto, not merged into RISK_OFF); legacy `regime` alias keeps old signals rendering |
 | ~~F-021~~ | INACC | Med | 5 | ~~`BacktestResult.total_costs` omits buy-side charges (only sell-side accumulated); aggregate cost-drag understated (per-trade `costs_paid` is correct)~~ | ✅ Fixed 2026-06-17 — `total_costs = sum(t.costs_paid)` (buy + sell) |
@@ -283,9 +284,22 @@ out of order) silently left the bundle un-reranked or stale. Nothing reconciled
   two CLI smoke tests (exit 1 half-run / exit 0 nothing-due). Full suite green
   (864 passed), ruff + mypy clean.
 
-### F-004 — No canonical clock (`DEBT`, Low, Phase 0)
-"Today in IST" is re-derived in several places (`ops/runner._today_ist`, jobs,
-skills). Centralising would reduce drift and make freezegun-based tests simpler.
+### F-004 — No canonical clock (`DEBT`, Low, Phase 0) — ✅ Fixed 2026-06-20
+**Was:** "Today in IST" was re-derived in several places — `ops/runner`,
+`ops/retention`, `ops/run_status`, and `jobs/weekly_train` each declared their
+own `_IST = timezone(timedelta(hours=5, minutes=30))`, and three of them an
+identical `_today_ist()`. `config.TIMEZONE = "Asia/Kolkata"` existed but no
+clock actually used it. Drift waiting to happen.
+
+**Resolution:** Added `trading/clock.py` — one module exposing `IST` (the fixed
++05:30 offset; India has no DST, so this is exact and needs no `tzdata`),
+`now_ist()`, and `today_ist()`. The four modules now import from it; the local
+offset/`_today_ist` definitions are gone. `runner` keeps a thin
+`from trading.clock import today_ist as _today_ist` alias so the existing
+`test_ops_runner` monkeypatch seam still works. New `tests/test_clock.py`
+pins the offset and — the property that actually matters — that `today_ist()`
+rolls on the *IST* calendar boundary, not the host/UTC one. Full suite green
+(1030 passed, 1 skipped); ruff + mypy clean.
 
 ### F-005 — No execution / kill-switch design (`GAP`, High → Needs decision, Phase 0)
 The system is paper-only. The Phase 18.5 gate (≥3 months OOS Sharpe > 1.0)
@@ -489,7 +503,7 @@ always NULL. Logic unaffected (regime uses values by key), naming misleads.
 - New `trading refresh-ohlcv [--date] [--symbols]` CLI for manual runs.
 
 The failure mode changed from "silent stale brief" to "visible degraded run".
-*Still open:* centralising the IST clock for quote staleness ([[F-004]]).
+Centralising the IST clock ([[F-004]]) is now done (`trading/clock.py`).
 
 *Original finding:*
 History is refreshed only via manual `ingest-history`; no daily re-pull, no

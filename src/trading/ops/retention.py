@@ -20,11 +20,10 @@ from __future__ import annotations
 import shutil
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 
+from trading.clock import today_ist
 from trading.config import Paths
-
-_IST = timezone(timedelta(hours=5, minutes=30))
 
 DEFAULT_RAW_KEEP_DAYS = 30
 DEFAULT_NEWS_KEEP_DAYS = 365
@@ -38,10 +37,6 @@ class RetentionResult:
     raw_dirs_deleted: list[str]
     news_rows_deleted: int
     applied: bool
-
-
-def _today_ist() -> date:
-    return datetime.now(_IST).date()
 
 
 def _parse_date_dirname(name: str) -> date | None:
@@ -101,7 +96,7 @@ def run_retention(
     apply: bool = False,
 ) -> RetentionResult:
     """Prune raw date-dirs and old news rows. Dry-run unless `apply=True`."""
-    d = as_of or _today_ist()
+    d = as_of or today_ist()
     raw_deleted = prune_raw_dirs(paths, keep_days=raw_keep_days, now=d, apply=apply)
     news_deleted = prune_news(conn, keep_days=news_keep_days, now=d, apply=apply)
     return RetentionResult(

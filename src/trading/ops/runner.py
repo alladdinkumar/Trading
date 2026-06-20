@@ -12,15 +12,14 @@ command `trading remind --slot <name>` calls `fire_reminder` which:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import date
 from typing import Final
 
 from loguru import logger
 
+from trading.clock import today_ist as _today_ist
 from trading.ops.calendar import is_trading_day
 from trading.ops.notify import notify
-
-_IST = timezone(timedelta(hours=5, minutes=30))
 
 
 @dataclass(frozen=True)
@@ -81,11 +80,6 @@ SCHEDULE: Final[dict[str, ReminderSlot]] = {
         "16:15", "\U0001f514 Post-close step 3/3", "Then `trading post-close <date> --apply`"
     ),
 }
-
-
-def _today_ist() -> date:
-    """Today's date in Asia/Kolkata."""
-    return datetime.now(_IST).date()
 
 
 def fire_reminder(slot: str, today: date | None = None) -> None:

@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -24,6 +24,7 @@ from trading.backtest.metrics import (
     profit_factor,
     sharpe,
 )
+from trading.clock import today_ist
 from trading.config import Paths, get_paths
 from trading.ops.notify import notify
 from trading.ops.retention import RetentionResult, run_retention
@@ -38,8 +39,6 @@ from trading.store.model_registry import (
 from trading.strategy.ranker_features import FEATURE_NAMES
 from trading.strategy.ranker_io import load_training_inputs
 from trading.strategy.ranker_train import InsufficientDataError, train_walkforward
-
-_IST = timezone(timedelta(hours=5, minutes=30))
 
 TRAIN_WINDOW_YEARS = 3
 REVIEW_WINDOW_DAYS = 7
@@ -471,10 +470,6 @@ def _step_retrain(
 # ---------------------------------------------------------------------------
 
 
-def _today_ist() -> date:
-    return datetime.now(_IST).date()
-
-
 def _slack_body(data: ReviewData, retrain: RetrainOutcome) -> str:
     week_pnl = sum(t.net_pnl for t in data.closed_week)
     lines = [f"Week: {len(data.closed_week)} closed, P&L ₹{week_pnl:,.0f}"]
@@ -505,7 +500,7 @@ def run_weekly_train(
     + Slack summary. The review is always written, even when the retrain
     is skipped or fails on insufficient data."""
     p = paths if paths is not None else get_paths()
-    d = as_of or _today_ist()
+    d = as_of or today_ist()
     window_start = (pd.Timestamp(d) - pd.DateOffset(years=TRAIN_WINDOW_YEARS)).date()
 
     with get_conn(p.db_path) as conn:

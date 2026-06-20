@@ -23,13 +23,12 @@ import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time
 from pathlib import Path
 
+from trading.clock import IST, now_ist
 from trading.config import Paths
 from trading.ops.calendar import is_trading_day
-
-_IST = timezone(timedelta(hours=5, minutes=30))
 
 # Quote snapshots are written as `quotes_HHMM.json`. The IEP block fires before
 # market open, so an IEP-band capture is anything stamped before 10:30 IST;
@@ -167,13 +166,13 @@ _CHECKS: list[tuple[_Check, Callable[[_DayContext], tuple[bool, str]]]] = [
 def _resolve_state(ran: bool, when: time, as_of: date, now: datetime) -> str:
     if ran:
         return "done"
-    today_ist = now.astimezone(_IST).date()
-    if as_of > today_ist:
+    today = now.astimezone(IST).date()
+    if as_of > today:
         return "pending"  # whole day still in the future
-    if as_of < today_ist:
+    if as_of < today:
         return "missing"  # day is over; it never ran
-    due_at = datetime.combine(as_of, when, tzinfo=_IST)
-    return "missing" if now.astimezone(_IST) >= due_at else "pending"
+    due_at = datetime.combine(as_of, when, tzinfo=IST)
+    return "missing" if now.astimezone(IST) >= due_at else "pending"
 
 
 def compute_status(
@@ -188,7 +187,7 @@ def compute_status(
     `now` (default: current IST time) drives the due/pending split. `conn`, if
     given, lets the post-close probe fall back to a `portfolio_snapshots` row.
     """
-    now = now or datetime.now(_IST)
+    now = now or now_ist()
     trading = is_trading_day(as_of)
     ctx = _DayContext(paths=paths, as_of=as_of, conn=conn)
     out: list[StepStatus] = []
