@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from trading.data.macro import MacroSnapshot
 from trading.data.macro_cross import MacroCrossSource
 from trading.data.reconcile import reconcile_macro
+from trading.domain import MacroSnapshot
 
 
 def _snap(**over: object) -> MacroSnapshot:

@@ -13,7 +13,7 @@ from datetime import date
 import pytest
 
 from trading.config import get_paths
-from trading.data.news import NewsItem
+from trading.domain import NewsItem
 from trading.ops.retention import (
     DEFAULT_NEWS_KEEP_DAYS,
     DEFAULT_RAW_KEEP_DAYS,

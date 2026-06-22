@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from trading.data.macro import MacroSnapshot
+from trading.domain import MacroSnapshot
 from trading.store.news_store import SentimentDailyRow
 
 FEATURE_NAMES: tuple[str, ...] = (

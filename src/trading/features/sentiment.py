@@ -24,7 +24,7 @@ from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from trading.config import get_paths
-from trading.data.news import NewsItem
+from trading.domain import NewsItem
 from trading.store.news_store import (
     SentimentDailyRow,
     list_news_for_symbol,

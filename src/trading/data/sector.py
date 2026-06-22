@@ -9,7 +9,6 @@ difference between sector and benchmark returns over a window. Per-row
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -18,6 +17,7 @@ import pandas as pd
 import yfinance as yf
 
 from trading.config import Paths, get_paths
+from trading.domain import SectorRow
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -43,24 +43,6 @@ BENCHMARK_TICKER = "^NSEI"  # Nifty 50
 RS_WINDOWS: tuple[int, int, int] = (5, 20, 60)
 LEADING_THRESHOLD = 0.02
 LAGGING_THRESHOLD = -0.02
-
-
-# ---------------------------------------------------------------------------
-# Datatypes
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class SectorRow:
-    """One row of `sector_daily`."""
-
-    date: str  # YYYY-MM-DD
-    sector: str
-    close: float
-    rs_5d: float | None
-    rs_20d: float | None
-    rs_60d: float | None
-    regime: str | None  # 'LEADING' | 'NEUTRAL' | 'LAGGING' | None
 
 
 # ---------------------------------------------------------------------------

@@ -27,8 +27,9 @@ flowchart TD
         LLM["llm/ — context, briefing"]
     end
     subgraph L3["L3 · Decision"]
-        STRAT["strategy/ — rules, sizing, exits, ranker*"]
+        STRAT["strategy/ — rules, sizing, exits,<br/>calibration, daily_budget, trajectory"]
         BT["backtest/ — costs, engine, walkforward, metrics"]
+        RANK["ranking/ — ranker, ranker_train,<br/>ranker_labels, ranker_io, ranker_features"]
     end
     subgraph L2["L2 · Analysis"]
         FEAT["features/ — technicals, sentiment, regime"]
@@ -39,21 +40,23 @@ flowchart TD
     end
     subgraph L0["L0 · Foundation"]
         CFG["config.py — Paths, Settings"]
+        DOM["domain.py — DTOs + constants"]
     end
     XC["ops/ — logging, notify, calendar, runner<br/>(cross-cutting)"]
 
-    CLI --> JOBS & STRAT & BT & PORT & PAPER & LLM & DATA & STORE & FEAT
+    CLI --> JOBS & STRAT & BT & RANK & PORT & PAPER & LLM & DATA & STORE & FEAT
     UI --> DATA & STORE & FEAT & PORT
-    JOBS --> STRAT & BT & PORT & PAPER & LLM & FEAT & DATA & STORE & XC
-    PORT --> DATA
-    PAPER --> STORE & STRAT
-    LLM --> PORT & STRAT & STORE & DATA
-    STRAT <--> BT
-    STRAT --> FEAT & STORE & DATA
+    JOBS --> STRAT & BT & RANK & PORT & PAPER & LLM & FEAT & DATA & STORE & XC
+    PORT --> DATA & STORE
+    PAPER --> STORE & STRAT & BT
+    LLM --> PORT & STRAT & RANK & STORE & DATA & DOM
+    RANK --> BT & STRAT & FEAT & STORE & DATA & DOM
     BT --> STRAT
-    FEAT --> DATA & STORE
-    DATA --> CFG
-    STORE --> CFG & DATA
+    STRAT --> FEAT & STORE & DATA & DOM
+    STRAT -. "buy_side_cost (F-045)" .-> PAPER
+    FEAT --> DATA & STORE & DOM
+    DATA --> CFG & STORE & DOM
+    STORE --> CFG & DOM
     FEAT --> CFG
     XC --> CFG
 ```
@@ -62,11 +65,11 @@ flowchart TD
 
 | Layer | Packages | Responsibility | Depends on |
 |---|---|---|---|
-| L0 Foundation | `config` | Frozen `Paths` + `Settings`, `.env` loading | nothing |
-| L1 Ingestion | `data` | Fetch from external sources → typed DTOs | `config` (+ `features.regime` back-edge, §3) |
-| L1 Persistence | `store` | SQLite (db/migrations/repos) + parquet + model registry | `config`, `data` (for DTO types, §3) |
-| L2 Analysis | `features` | Indicators, FinBERT sentiment, regime voting | `config`, `data`, `store` |
-| L3 Decision | `strategy`, `backtest` | Rules, sizing, exits, ML ranker; cost-accurate backtester | each other (§3), `features`, `store`, `data` |
+| L0 Foundation | `config`, `domain` | Frozen `Paths` + `Settings`, `.env` loading; neutral cross-layer DTOs + constants (§3.1) | nothing |
+| L1 Ingestion | `data` | Fetch from external sources → typed DTOs | `config`, `domain`, `store` |
+| L1 Persistence | `store` | SQLite (db/migrations/repos) + parquet + model registry | `config`, `domain` |
+| L2 Analysis | `features` | Indicators, FinBERT sentiment, regime voting | `config`, `domain`, `data`, `store` |
+| L3 Decision | `strategy`, `backtest`, `ranking` | Rules, sizing, exits; cost-accurate backtester; ML ranker | `strategy < backtest < ranking` (§3.3), `features`, `store`, `data` |
 | L4 Services | `portfolio`, `paper`, `llm` | Holdings health/GTT/SIP; paper ledger/MTM; context+brief | `strategy`, `store`, `portfolio`, `data` |
 | L5 Orchestration | `jobs` | Wire a whole block end-to-end with graceful degradation | nearly everything |
 | L6 Interfaces | `cli`, `ui` | Operator command surface; dashboard | `jobs` + most layers |
@@ -82,28 +85,41 @@ flowchart LR
 
     config --> data
     config --> store
-    data --> store
-    data -. "snapshot_and_classify (lazy)" .-> features
     config --> features
-    data --> features
-    store --> features
-    features --> strategy
-    store --> strategy
-    data --> strategy
-    strategy <--> backtest
-    data --> portfolio
-    store --> paper
-    strategy --> paper
-    portfolio --> llm
-    strategy --> llm
-    store --> llm
-    data --> llm
     config --> ops
+    domain --> data
+    domain --> store
+    domain --> features
+    domain --> strategy
+    domain --> ranking
+    domain --> llm
+    store --> data
+    store --> features
+    store --> strategy
+    store --> portfolio
+    store --> paper
+    store --> llm
+    data --> features
+    data --> strategy
+    data --> portfolio
+    data --> llm
+    features --> strategy
+    strategy --> backtest
+    strategy --> ranking
+    strategy --> paper
+    strategy --> llm
+    backtest --> ranking
+    backtest --> paper
+    features --> ranking
+    portfolio --> llm
+    ranking --> llm
+    paper -. "buy_side_cost (F-045)" .-> strategy
 
     data --> jobs
     features --> jobs
     strategy --> jobs
     backtest --> jobs
+    ranking --> jobs
     portfolio --> jobs
     paper --> jobs
     llm --> jobs
@@ -126,37 +142,38 @@ These are the few places the clean layering bends. Each is intentional but
 worth a reviewer's eye (the actionable ones are filed in
 [FINDINGS.md](./FINDINGS.md)).
 
-### 3.1 `store` → `data` for shared DTO types
-The persistence layer imports domain dataclasses from the ingestion layer:
-`store/ohlcv.py` ← `data.yfinance` (column constants), `store/macro_store.py` ←
-`data.macro.MacroSnapshot`, `store/news_store.py` ← `data.news.NewsItem`,
-`store/sector_store.py` ← `data.sector.SectorRow`. The row *shape* is owned by
-`data`, and `store` persists that shape. This works, but it means "what a macro
-snapshot is" lives in the fetcher, not in a neutral domain module — so `store`
-(lower layer) depends on `data` (same layer, but logically its producer).
-→ **F-006**.
+### 3.1 ~~`store` → `data` for shared DTO types~~ ✅ resolved (F-006)
+**Resolved 2026-06-22.** The cross-layer DTOs now live in a neutral foundation
+module `trading/domain.py` (`SectorRow`, `MacroSnapshot`, `NewsItem`, plus the
+`NSE_SUFFIX`/`REQUIRED_COLUMNS` constants). Both `data` and `store` import them
+*down* from `trading.domain`, so `store` no longer imports `data` at all.
+*Previously:* `store/{ohlcv,macro_store,news_store,sector_store}.py` imported their
+row shapes from `data/{yfinance,macro,news,sector}.py`, so persistence depended on
+the fetcher for "what a row is." → **F-006**.
 
-### 3.2 `data.macro` → `features.regime` (the one upward back-edge)
-`data/macro.py::snapshot_and_classify` fetches the macro snapshot *and* runs the
-regime classifier, so it lazily imports `features.regime` (under
-`TYPE_CHECKING` + inside the function). This is the single place ingestion
-reaches up into analysis. It's convenient (one call returns a classified
-snapshot) but it puts a decision concern in the data layer. → **F-007**.
+### 3.2 ~~`data.macro` → `features.regime` (the one upward back-edge)~~ ✅ resolved (F-007)
+**Resolved 2026-06-22.** `snapshot_and_classify` moved up into `features.regime`
+(the analysis layer), where composing fetch + classify belongs. `data.macro` is
+now fetch-only and imports nothing from `features` — the single ingestion→analysis
+back-edge is gone. The relocated orchestrator imports `data.macro` *function-locally*
+(the §3.4 startup-cost pattern; no cycle, since `data.macro` only imports
+`domain` + `yfinance`). *Previously:* `data/macro.py::snapshot_and_classify` lazily
+imported `features.regime`, putting a decision concern in the data layer. → **F-007**.
 
-### 3.3 `strategy` ⇄ `backtest` entanglement
-These two are mutually dependent at the package level:
+### 3.3 ~~`strategy` ⇄ `backtest` entanglement~~ ✅ resolved (F-008)
+**Resolved 2026-06-22.** The cycle was only ever the `ranker*` files —
+`strategy.{rules,exits,sizing}` never import `backtest`. All five ranker modules
+moved into a new top-level `trading/ranking/` package, making the graph a clean
+DAG: `strategy < backtest < ranking`.
 - `backtest.engine` imports `strategy.{rules, exits, sizing}` — the backtester
   *runs* the strategy.
-- `strategy.ranker` / `ranker_train` / `ranker_labels` import
-  `backtest.{engine, costs, metrics, walkforward}` — the ML layer *reuses* the
-  backtest machinery to label training examples (replay Phase-6 exits) and to
-  score OOS folds.
+- `ranking.{ranker, ranker_train, ranker_labels}` import `backtest.*` (engine,
+  costs, metrics, walkforward) — the ML layer *reuses* the backtest machinery to
+  label training examples (replay Phase-6 exits) and score OOS folds.
 
-The cycle is real but broken at import time by `TYPE_CHECKING`/function-local
-imports (e.g. `ranker.py` imports `BacktestConfig, Signal` only under
-`TYPE_CHECKING`). It reflects a genuine truth — labels are *defined* by the
-backtest's exit replay — but it makes the two packages hard to reason about
-independently. → **F-008**.
+`backtest` never imports `ranking`, so there is no package-level cycle left (the
+`TYPE_CHECKING`/function-local imports inside `ranker.py` now serve only
+startup-cost and annotation needs, not cycle-breaking). → **F-008**.
 
 ### 3.4 Deferred / lazy imports as a tool
 Lazy imports are used deliberately for two reasons, and a reviewer should know
@@ -164,8 +181,22 @@ which is which:
 
 | Where | Reason |
 |---|---|
-| `cli.py` function-local imports of `ranker_*`, `weekly_train`, `monthly_sip` | **Startup cost** — avoid importing `lightgbm`/`torch` for unrelated commands |
-| `data.macro` → `features.regime`, `ranker` → `backtest.engine`, `backtest.metrics` → `engine`, `portfolio.gtt` → `data.kite` | **Cycle / type-only** — needed only for annotations or to break §3.3 |
+| `cli.py` function-local imports of `ranking.ranker_*`, `weekly_train`, `monthly_sip`; `features.regime.snapshot_and_classify` → `data.macro` | **Startup cost** — avoid importing `lightgbm`/`torch`/`yfinance` for unrelated commands |
+| `ranking.ranker` → `backtest.engine`, `backtest.metrics` → `engine`, `portfolio.gtt` → `data.kite` | **Type-only / annotation** — needed only for `TYPE_CHECKING` annotations (no longer cycle-breaking after §3.2/§3.3 resolved) |
+
+### 3.5 The layering is now machine-enforced (F-009)
+The downward-dependency rule above is no longer convention-only: an
+[`import-linter`](https://import-linter.readthedocs.io) `layers` contract in
+`pyproject.toml` (`[tool.importlinter]`) encodes the L0–L6 order, and
+`tests/test_architecture.py` runs it in the normal `pytest` gate — any new
+back-edge fails the suite. The contract ordering reflects the *actual* import DAG:
+`data > store` (data's `ohlcv_refresh`/`reconcile` persist via store; store is
+DTO-neutral), `ranking > backtest > strategy`, with `ops`/`config`/`domain`/`clock`
+as foundation leaves. It is **KEPT** with a single documented exemption —
+`strategy.daily_budget → paper.ledger` (for `buy_side_cost`, a thin wrapper over
+the pure `backtest.costs` model) — tracked as **F-045**; the fix is to relocate
+the pure cost model into a neutral foundation module, after which the exemption is
+removed.
 
 ## 4. Cross-cutting patterns
 
@@ -194,7 +225,7 @@ The logic that *decides* anything is a pure function taking a dataclass and
 returning a dataclass — no IO, no globals:
 `rules.passes_*` / `evaluate_symbol`, `sizing.position_size`, `exits.evaluate_exit`,
 `regime.classify_regime`, `health` scorer, `gtt.simulate_target_hit`,
-`allocator.allocate_sip`. This is why the test suite is large and fast (56 test
+`allocator.allocate_sip`. This is why the test suite is large and fast (84 test
 files) and why these cores can be reasoned about in isolation.
 
 ### 4.4 Frozen dataclass DTOs as the inter-layer contract
@@ -216,7 +247,7 @@ SignalProvider = Callable[
 ```
 
 `run_backtest(..., signal_provider=None)` defaults to `rule_signal_provider`
-(Layer A only). Phase 16 supplies `RankerSignalProvider` (`strategy/ranker.py`)
+(Layer A only). Phase 16 supplies `RankerSignalProvider` (`ranking/ranker.py`)
 to run the *same engine* with Layer-B scoring. This single seam is what lets the
 ranker be trained and evaluated against the exact fill/exit/cost model the live
 system uses.

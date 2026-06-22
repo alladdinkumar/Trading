@@ -1,4 +1,4 @@
-"""Tests for trading.strategy.ranker_io — shared training-input loader."""
+"""Tests for trading.ranking.ranker_io — shared training-input loader."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def _frame(n: int) -> pd.DataFrame:
 
 
 def test_load_training_inputs_filters_short_history(paths, conn) -> None:
-    from trading.strategy.ranker_io import load_training_inputs
+    from trading.ranking.ranker_io import load_training_inputs
 
     write_ohlcv(_frame(250), "LONGSYM", paths)
     write_ohlcv(_frame(50), "SHORTSYM", paths)
@@ -57,9 +57,9 @@ def test_load_training_inputs_filters_short_history(paths, conn) -> None:
 
 
 def test_load_training_inputs_builds_macro_and_sentiment(paths, conn) -> None:
-    from trading.data.macro import MacroSnapshot
+    from trading.domain import MacroSnapshot
+    from trading.ranking.ranker_io import load_training_inputs
     from trading.store.macro_store import upsert_macro_snapshot
-    from trading.strategy.ranker_io import load_training_inputs
 
     write_ohlcv(_frame(250), "LONGSYM", paths)
     upsert_macro_snapshot(
@@ -93,7 +93,7 @@ def test_load_training_inputs_builds_macro_and_sentiment(paths, conn) -> None:
 
 
 def test_load_training_inputs_empty_universe(paths, conn) -> None:
-    from trading.strategy.ranker_io import load_training_inputs
+    from trading.ranking.ranker_io import load_training_inputs
 
     inputs = load_training_inputs(paths, conn)
     assert inputs.enriched == {}
@@ -103,7 +103,7 @@ def test_load_training_inputs_empty_universe(paths, conn) -> None:
 
 
 def _news_row(symbol: str, ts: str, sentiment: float):
-    from trading.data.news import NewsItem
+    from trading.domain import NewsItem
 
     return NewsItem(
         ts=ts,
@@ -119,8 +119,8 @@ def test_load_training_inputs_builds_negative_news_lookup(paths, conn) -> None:
     """F-031: the training-input loader populates negative_news_lookup using the
     same 7d query as inference, keyed (date_iso, symbol) over each symbol's
     trading-date index — so weekly_train no longer starves the feature."""
+    from trading.ranking.ranker_io import load_training_inputs
     from trading.store.news_store import insert_news_items, negative_news_count_7d
-    from trading.strategy.ranker_io import load_training_inputs
 
     # OHLCV index spans 2025-01-01 .. (250 business days). Put two negative news
     # items a few days before a known in-range trading date.
@@ -146,7 +146,7 @@ def test_load_training_inputs_builds_negative_news_lookup(paths, conn) -> None:
 
 
 def test_load_training_inputs_negative_news_lookup_empty_without_news(paths, conn) -> None:
-    from trading.strategy.ranker_io import load_training_inputs
+    from trading.ranking.ranker_io import load_training_inputs
 
     write_ohlcv(_frame(250), "LONGSYM", paths)
     inputs = load_training_inputs(paths, conn)

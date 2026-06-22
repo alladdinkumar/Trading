@@ -29,7 +29,7 @@ expensive, statistical one:
 - **Layer A — Rule scanner** (`strategy/rules.py`): ten hard pass/fail filters
   (uptrend, pullback, RSI band, liquidity, no critical news, regime, F&O-ban,
   etc.). A stock must pass to be considered at all. This is fully transparent.
-- **Layer B — LightGBM ranker** (`strategy/ranker.py`): scores the Layer-A
+- **Layer B — LightGBM ranker** (`ranking/ranker.py`): scores the Layer-A
   survivors and selects the top-K. It is *advisory* and **cold-starts safely** —
   with no trained/active model, every rules-passing candidate is kept, so the
   system degrades to pure Layer A.
@@ -92,7 +92,7 @@ Scheduler import, troubleshooting) lives in [`docs/operations.md`](../operations
 | Package manager | `uv` |
 | Lint / format | `ruff` (line length 100, broad rule set) |
 | Type checking | `mypy --strict` on `src/trading` |
-| Tests | `pytest` (markers: `live`, `integration`, `slow`); 56 test files |
+| Tests | `pytest` (markers: `live`, `integration`, `slow`); 84 test files |
 | Data / numerics | `pandas`, `polars`, `pyarrow`, `numpy`, `ta` |
 | Storage | SQLite (`data/app.db`) + Parquet (per-symbol OHLCV) |
 | Sources | `kiteconnect` (fallback), `yfinance`, `nsepython`, `feedparser` |

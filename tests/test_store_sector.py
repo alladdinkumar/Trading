@@ -7,7 +7,7 @@ from datetime import date
 
 import pytest
 
-from trading.data.sector import SectorRow
+from trading.domain import SectorRow
 from trading.store.migrations import run_migrations
 from trading.store.sector_store import get_sector_daily, upsert_sector_daily
 

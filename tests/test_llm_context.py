@@ -212,7 +212,7 @@ def test_assemble_context_candidates_no_data_when_empty(conn: sqlite3.Connection
 def test_context_includes_ranker_section_when_scored_supplied(
     conn: sqlite3.Connection, paths
 ) -> None:
-    from trading.strategy.ranker import ScoredCandidate
+    from trading.ranking.ranker import ScoredCandidate
 
     cand_a = _candidate("A", n_passed=10)
     cand_b = _candidate("B", n_passed=10)
@@ -469,7 +469,7 @@ def test_assemble_context_excludes_future_dated_news(conn: sqlite3.Connection, p
 
 
 def _seed_sector(conn: sqlite3.Connection) -> None:
-    from trading.data.sector import SectorRow
+    from trading.domain import SectorRow
     from trading.store.sector_store import upsert_sector_daily
 
     upsert_sector_daily(

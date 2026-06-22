@@ -16,10 +16,11 @@ from pathlib import Path
 from typing import Literal
 
 from trading.config import Paths
-from trading.data.sector import SectorRow, load_sector_map
+from trading.data.sector import load_sector_map
+from trading.domain import SectorRow
 from trading.portfolio.health import HealthScore
+from trading.ranking.ranker import ScoredCandidate
 from trading.store.sector_store import get_sector_daily
-from trading.strategy.ranker import ScoredCandidate
 from trading.strategy.rules import Candidate
 
 Mode = Literal["pre_open", "mid_day", "post_close"]

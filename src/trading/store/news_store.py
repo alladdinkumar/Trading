@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from trading.data.news import NewsItem
+from trading.domain import NewsItem
 
 # Sentiment at or below this is "negative" for the news-veto / ranker feature.
 NEGATIVE_SENTIMENT_THRESHOLD = -0.20
@@ -129,8 +129,8 @@ def negative_news_count_7d(
     """Count negative-sentiment news (sentiment < -0.20) in the trailing 7 days.
 
     The single source of truth for the `negative_news_count_7d` ranker feature,
-    used by **both** inference (`strategy.ranker`) and training-input assembly
-    (`strategy.ranker_io`) so the two paths compute it identically (F-031).
+    used by **both** inference (`ranking.ranker`) and training-input assembly
+    (`ranking.ranker_io`) so the two paths compute it identically (F-031).
 
     Returns ``None`` when no news rows fall in the window (caller propagates as
     NaN), and ``0`` when news rows exist but none are negative.

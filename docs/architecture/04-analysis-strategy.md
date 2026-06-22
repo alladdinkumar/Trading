@@ -13,7 +13,7 @@ flowchart LR
     OHLCV["parquet OHLCV"] --> TECH["features.technicals<br/>add_indicators()"]
     TECH --> RULES["strategy.rules (Layer A)<br/>10 pass/fail gates"]
     CTX["ScanContext<br/>(regime / ban / events)"] --> RULES
-    RULES -->|all_passed| RANK["strategy.ranker (Layer B)<br/>LightGBM score + top-K"]
+    RULES -->|all_passed| RANK["ranking.ranker (Layer B)<br/>LightGBM score + top-K"]
     RANK --> SEL["selected candidates"]
     SEL --> SIZE["strategy.sizing<br/>position_size()"]
     SIZE --> OPEN["paper-trade opened"]
@@ -184,8 +184,10 @@ logic-blocked. Supersedes the table-centric F-011.
 > three safety vetoes plus the macro-regime gate were dead despite the data being
 > available.
 
-### 3.5 Layer B — the LightGBM ranker (`ranker*.py`)
-Advisory re-ranker over Layer-A survivors. Four modules:
+### 3.5 Layer B — the LightGBM ranker (`ranking/ranker*.py`)
+Advisory re-ranker over Layer-A survivors. Lives in its own top-level
+`trading/ranking/` package (moved out of `strategy/` in F-008 so the L3 graph is
+a clean DAG `strategy < backtest < ranking`). Core modules:
 
 - **`ranker_features.py`** — 20 features (`FEATURE_NAMES`, the single source of
   column order): 5 setup (RSI, pullback%×2, ATR%, dist-from-52w-high), 5 trend
@@ -195,9 +197,9 @@ Advisory re-ranker over Layer-A survivors. Four modules:
   becomes NaN (LightGBM handles NaN natively).
 - **`ranker_labels.py`** — `label_candidate` replays **Phase 6 exits** forward
   from signal_date+1 (next-open fill + slippage + buy/sell charges) and labels
-  1 if net P&L > 0 else 0; `None` if < `max_days+1` forward bars. This is the
-  `strategy ⇄ backtest` entanglement from [01 §3.3](./01-architecture.md) — the
-  label *is* the backtest outcome.
+  1 if net P&L > 0 else 0; `None` if < `max_days+1` forward bars. This is why
+  `ranking` sits *above* `backtest` in the DAG ([01 §3.3](./01-architecture.md)) —
+  the label *is* the backtest outcome (`ranking → backtest`, one direction only).
 - **`ranker_train.py`** — `train_walkforward` over rolling windows; LightGBM
   hyperparams tuned for small data (`num_leaves=15`, `min_data_in_leaf=10`,
   `lr=0.05`, `n_estimators=200`, `is_unbalance=True`, `random_state=42`, early

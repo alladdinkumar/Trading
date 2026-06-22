@@ -8,12 +8,13 @@
 
 ## Executive summary
 
-The architecture review (docs 00–08) produced **43 active findings** (1 earlier
+The architecture review (docs 00–08) produced **44 active findings** (1 earlier
 finding superseded; F-035/F-036 spun off from F-026's self-healing follow-up;
 F-037–F-042 added 2026-06-20 from the self-learning / outcome-feedback review;
 F-043/F-044 added 2026-06-20 — residual model-quality caveats the F-037/F-041 fixes
-surfaced but did not resolve; F-043 since fixed). **33 are now fixed** (F-001, F-002, F-003, F-004, F-010, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043), leaving **10 open**. The system is **well-engineered at the
+surfaced but did not resolve; F-043 since fixed; F-045 added 2026-06-22 — the one
+residual layer back-edge the F-009 import-linter contract surfaced). **37 are now fixed** (F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043), leaving **7 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -42,9 +43,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 1 | F-005† |
-| Med | 4 | F-006, F-007, F-008, F-044 |
-| Low | 5 | F-009, F-017, F-027, F-028, F-030 |
-| ✅ Fixed | 33 | F-001, F-002, F-003, F-004, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043 |
+| Med | 2 | F-044, F-045 |
+| Low | 4 | F-017, F-027, F-028, F-030 |
+| ✅ Fixed | 37 | F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -52,9 +53,9 @@ future Phase 19 — out of scope for hardening the paper run.
 | Category | Count |
 |---|---:|
 | VULN (correctness/data-integrity) | 11 (all ✅: F-019, F-022, F-023, F-024, F-029, F-033, F-034, F-037, F-041, F-042, F-043) |
-| GAP (missing functionality/guardrail) | 12 (F-003 ✅, F-010 ✅, F-013 ✅, F-015 ✅, F-032 ✅; F-044 open) |
+| GAP (missing functionality/guardrail) | 12 (F-003 ✅, F-009 ✅, F-010 ✅, F-013 ✅, F-015 ✅, F-032 ✅; F-044 open) |
 | INACC (code ≠ spec/docstring) | 7 (F-001 ✅, F-020 ✅, F-021 ✅, F-031 ✅) |
-| DEBT (cleanup) | 8 (F-004 ✅) |
+| DEBT (cleanup) | 9 (F-004 ✅, F-006 ✅, F-007 ✅, F-008 ✅; F-045 open) |
 
 ## Remediation roadmap
 
@@ -105,11 +106,16 @@ reserved.
 ### Wave 4 — Structural & cleanup (low-risk, alongside)
 ~~F-001 (prune unused deps)~~ ✅ **Done 2026-06-20** (removed `vectorbt`/`anthropic`
 + breadcrumb note), ~~F-004 (canonical IST clock)~~ ✅ **Done 2026-06-20**
-(`trading/clock.py`: `IST`/`now_ist`/`today_ist`), F-006/F-007/F-008/F-009
-(layering: domain module, fetch/classify split, break cycle, import-linter),
-F-017 (macro column labels), ~~F-020 (regime name collision)~~ ✅ **Done
-2026-06-20** (renamed `passes_market_filter`), F-027 (heading constant + spanning
-test), F-028 (docstring), F-030 (guard visibility signals).
+(`trading/clock.py`: `IST`/`now_ist`/`today_ist`), ~~F-006/F-007/F-008/F-009
+(layering: domain module, fetch/classify split, break cycle, import-linter)~~ ✅
+**Done 2026-06-22** (`trading/domain.py`; `snapshot_and_classify`→`features.regime`;
+`ranker*`→new `trading/ranking/`; import-linter L0–L6 contract in the test gate) —
+**spun off [[F-045]]** (the one residual `strategy.daily_budget → paper.ledger`
+back-edge the contract surfaced; documented exemption, fix = relocate the pure
+cost model to a foundation module), F-017 (macro column labels), ~~F-020 (regime
+name collision)~~ ✅ **Done 2026-06-20** (renamed `passes_market_filter`), F-027
+(heading constant + spanning test), F-028 (docstring), F-030 (guard visibility
+signals).
 
 ### Separate track — needs a decision
 F-005: real-money execution path + kill-switch/risk-halt. Gated behind the Phase
@@ -169,10 +175,10 @@ User comment - Don't involve real money logic now , need proper evident profit b
 | ~~F-003~~ | GAP | Med | 0 | ~~Daily flow is ~13 manually-sequenced commands with no half-run/missed-step detection~~ | ✅ Fixed 2026-06-18 — `ops/run_status.py` + `trading status` infer per-step completion from on-disk artifacts (time-aware; exit 1 on a due-step miss) |
 | ~~F-004~~ | DEBT | Low | 0 | ~~Each job re-derives "today" in IST independently; no single canonical clock~~ | ✅ Fixed 2026-06-20 — new `trading/clock.py` (`IST`, `now_ist`, `today_ist`); the 4 modules that hand-rolled `timezone(+5:30)` + `_today_ist` now import it |
 | F-005 | GAP | High | 0 | No real-money execution path, kill-switch, or risk-halt design (gated to future Phase 19, tracked here so it isn't forgotten) | Needs decision |
-| F-006 | DEBT | Med | 1 | Domain DTOs live in `data/` so `store` depends "up" into the ingestion layer | Open |
-| F-007 | DEBT | Med | 1 | `data.macro.snapshot_and_classify` puts a decision concern (regime classify) in the data layer (upward back-edge into `features`) | Open |
-| F-008 | DEBT | Med | 1 | `strategy ⇄ backtest` package-level import cycle, broken only by lazy/TYPE_CHECKING imports | Open |
-| F-009 | GAP | Low | 1 | No automated dependency-layering enforcement (e.g. import-linter); layering is convention-only | Open |
+| ~~F-006~~ | DEBT | Med | 1 | ~~Domain DTOs live in `data/` so `store` depends "up" into the ingestion layer~~ | ✅ Fixed 2026-06-22 — new neutral `trading/domain.py` owns the cross-layer DTOs (`SectorRow`, `MacroSnapshot`, `NewsItem`) + constants (`NSE_SUFFIX`, `REQUIRED_COLUMNS`); `data` and `store` both import down from it, so `store` no longer imports `data` |
+| ~~F-007~~ | DEBT | Med | 1 | ~~`data.macro.snapshot_and_classify` puts a decision concern (regime classify) in the data layer (upward back-edge into `features`)~~ | ✅ Fixed 2026-06-22 — `snapshot_and_classify` moved to `features.regime`; `data.macro` is now fetch-only (its `features` back-edge is gone); the composed pipeline lives in the analysis layer |
+| ~~F-008~~ | DEBT | Med | 1 | ~~`strategy ⇄ backtest` package-level import cycle, broken only by lazy/TYPE_CHECKING imports~~ | ✅ Fixed 2026-06-22 — `ranker*` moved into a new top-level `trading/ranking/` package; the graph is now a clean DAG `strategy < backtest < ranking` (backtest never imports ranker*) |
+| ~~F-009~~ | GAP | Low | 1 | ~~No automated dependency-layering enforcement (e.g. import-linter); layering is convention-only~~ | ✅ Fixed 2026-06-22 — `import-linter` L0–L6 layers contract in `pyproject.toml`, enforced in the test gate (`tests/test_architecture.py`); KEPT with one documented exemption ([[F-045]]) |
 | F-010 | GAP | Med | 2 | 8 of 16 SQLite domain tables are defined but have zero writers (dormant schema reservations) | ✅ Fixed 2026-06-19 — `fno_ban_list` now written by `pre_open._step_fno_ban` (NSE `fo_secban.csv`) + read by `build_scan_context` (revives `passes_not_fno_banned`); other 7 tables formally reserved in migration + schema doc |
 | F-011 | VULN | High | 2 | Rule gates depend on empty tables — **superseded by F-019** (root cause is unpopulated `ScanContext`, not the tables) | Superseded |
 | F-012 | INACC | Med | 2 | Universe scope: paper-trading candidate set should be **Nifty 50 (50 stocks)** per user req; currently ~57 (Nifty 50 + holdings) under a `nifty200/` subdir | ✅ Fixed (2026-06-16) — candidate set pinned to Nifty 50; subdir rename deferred (cosmetic) |
@@ -207,6 +213,7 @@ User comment - Don't involve real money logic now , need proper evident profit b
 | ~~F-042~~ | VULN | Med | 18 | ~~Calibration `GROUP BY` a continuous REAL → singleton buckets → realized_hit_rate is 0%/100% noise~~ | ✅ Fixed 2026-06-20 — `gather_review_data` bands `predicted_return_pct` into 2% buckets |
 | ~~F-043~~ | VULN | Med | 16/18 | ~~The model F-037 made promotable has a **negative OOS Sharpe (−1.49)**; promotion only requires clearing a Sharpe *deadband* vs the incumbent, not a positive edge — so the live planner consumes ml_score from a model with no demonstrated out-of-sample skill~~ | ✅ Fixed 2026-06-20 — `SHARPE_PROMOTION_FLOOR=0.0` gates promotion on a positive OOS Sharpe (both paths) + `active ⟹ clears floor` invariant demotes sub-floor models; live −1.49 row flipped inactive → planner reverts to `p_win=prior`. Model *quality* (labels) still [[F-044]] |
 | F-044 | GAP | Med | 16 | Training labels remain **synthetic**: `ranker_labels.label_candidate` replays the exit engine on historical parquet bars; the learner still never trains on the realised `paper_trades`/`predictions` outcomes. F-041 closed the loop into the EV planner's `p_win` (calibration) but **not** into the model's own training signal | Open |
+| F-045 | DEBT | Med | 1 | `strategy.daily_budget` reaches **up** to `paper.ledger.buy_side_cost` (L3→L4) — the only residual layer back-edge after [[F-006]]/[[F-007]]/[[F-008]]. `buy_side_cost` is a thin wrapper over the pure `backtest.costs` model; the import-linter contract carries a documented exemption for it | Open |
 
 ---
 
@@ -309,33 +316,76 @@ decides scope and sequencing.
 
 ---
 
-### F-006 — Domain types in `data/` couple `store` to ingestion (`DEBT`, Med, Phase 1)
-`store/{ohlcv,macro_store,news_store,sector_store}.py` import their row types
-from `data/{yfinance,macro,news,sector}.py`. Persistence depends on the fetcher
-for "what the row is."
-- **Fix idea:** Introduce `trading/domain.py` (or `types/`) holding the frozen
-  DTOs; have both `data` and `store` import from there.
-- **Doc to revisit:** `01-architecture.md` §3.1 + layer table.
+### F-006 — Domain types in `data/` couple `store` to ingestion (`DEBT`, Med, Phase 1) — ✅ Fixed 2026-06-22
+**Resolution:** New neutral `trading/domain.py` (a foundation module that imports
+nothing from other `trading` packages, so it can never be in a cycle) is now the
+single home for the cross-layer DTOs `SectorRow`, `MacroSnapshot`, `NewsItem` and
+the canonical constants `NSE_SUFFIX` + `REQUIRED_COLUMNS`. `data/{sector,macro,news,yfinance}.py`
+and `store/{ohlcv,macro_store,news_store,sector_store}.py` (plus
+`features.sentiment`, `data.reconcile`, `ranking.ranker_features`, `llm.context`)
+all import these from `trading.domain`. Verified `store` no longer imports `data`
+at all (the back-edge is gone), enforced going forward by the F-009 contract.
 
-### F-007 — Regime classification lives in the data layer (`DEBT`, Med, Phase 1)
-`data.macro.snapshot_and_classify` lazily imports `features.regime` — the only
-upward (ingestion→analysis) edge.
-- **Fix idea:** Split into a pure `fetch` (in `data`) + `classify` (in
-  `features` or the `pre_open` job). Keep `data` fetch-only.
-- **Doc to revisit:** `01-architecture.md` §3.2; `03-data-layer.md` (Phase 3).
+*Was:* `store/{ohlcv,macro_store,news_store,sector_store}.py` imported their row
+types from `data/{yfinance,macro,news,sector}.py` — persistence depended on the
+fetcher for "what the row is."
 
-### F-008 — `strategy ⇄ backtest` cycle (`DEBT`, Med, Phase 1)
-Mutual package dependency: `backtest.engine` runs `strategy.*`; `strategy.ranker*`
-reuse `backtest.*` for labels/OOS scoring. Only lazy imports prevent an
-import-time cycle.
-- **Fix idea:** Extract the shared exit-replay/labeling logic into a small
-  neutral module both depend on; or formally accept the cycle and document the
-  import rules (never import across the seam at module top).
-- **Doc to revisit:** `01-architecture.md` §3.3; Phase 4/5 docs.
+### F-007 — Regime classification lives in the data layer (`DEBT`, Med, Phase 1) — ✅ Fixed 2026-06-22
+**Resolution:** `snapshot_and_classify` moved out of `data.macro` and into
+`features.regime` (the analysis layer). `data.macro` keeps only the pure fetchers
+(`fetch_all_yf_quotes`, `fetch_fii_dii`, `build_snapshot`) and no longer imports
+`features` in any form — the single ingestion→analysis back-edge is gone. The
+relocated orchestrator composes fetch + classify and imports `data.macro`
+function-locally (mirrors the §3.4 lazy-import startup-cost pattern; no cycle
+since `data.macro` only imports `domain` + `yfinance`). Callers `cli.py` and
+`jobs.pre_open` now import `snapshot_and_classify` from `features.regime`; their
+existing test mock seams (which patch the imported name in the consumer) keep
+working.
 
-### F-009 — No layering enforcement (`GAP`, Low, Phase 1)
-The downward-dependency rule is convention, unenforced.
-- **Fix idea:** Add `import-linter` contracts to CI mirroring the L0–L6 layers.
+*Was:* `data.macro.snapshot_and_classify` lazily imported `features.regime` — the
+only upward (ingestion→analysis) edge.
+
+### F-008 — `strategy ⇄ backtest` cycle (`DEBT`, Med, Phase 1) — ✅ Fixed 2026-06-22
+**Resolution:** The cycle was only ever the `ranker*` files (`strategy.rules`,
+`exits`, `sizing` never import `backtest`). Moved all five — `ranker.py`,
+`ranker_features.py`, `ranker_io.py`, `ranker_labels.py`, `ranker_train.py` — into
+a new top-level `trading/ranking/` package (via `git mv`, history preserved). The
+package graph is now a clean DAG: `strategy < backtest < ranking` — `backtest`
+imports only `strategy.{rules,exits,sizing}`; `ranking` imports both `backtest.*`
+and `strategy.*`; neither imports back up into `ranking`. Importers updated across
+`cli`, `jobs.{pre_open,weekly_train}`, `llm.context`, plus the ranker test suite;
+Ruff per-file-ignores re-pointed to the new paths.
+
+*Was:* mutual package dependency — `backtest.engine` runs `strategy.*` while
+`strategy.ranker*` reused `backtest.*` for labels/OOS scoring; only lazy imports
+prevented an import-time cycle.
+
+### F-009 — No layering enforcement (`GAP`, Low, Phase 1) — ✅ Fixed 2026-06-22
+**Resolution:** Added `import-linter` (dev dep) with a `layers` contract in
+`pyproject.toml` mirroring the L0–L6 model — ordering reflects the *actual* import
+DAG after F-006/7/8 (`data > store`, `ranking > backtest > strategy`, with
+`ops`/`config`/`domain`/`clock` as foundation leaves). The repo has no separate CI
+lint step, so the contract is wired into the **test gate**: `tests/test_architecture.py`
+runs `lint-imports` and fails on any back-edge. Contract status: **KEPT** with one
+documented exemption — `strategy.daily_budget → paper.ledger` — filed as the new
+open finding [[F-045]].
+
+*Was:* the downward-dependency rule was convention only, unenforced.
+
+### F-045 — `strategy.daily_budget` reaches up to `paper.ledger` for cost calc (`DEBT`, Med, Phase 1)
+Surfaced by the F-009 import-linter contract: `strategy/daily_budget.py` imports
+`paper.ledger.buy_side_cost` (L3→L4) to net realistic round-trip charges when
+pacing the day's entries. `buy_side_cost` is itself a thin wrapper over the pure,
+dependency-free `backtest.costs` model, so the cost logic lives *above* `strategy`
+no matter which of the two it imports — the real issue is that the cost model is
+housed in a layer that decision code below it needs.
+- **Fix idea:** Relocate the pure cost model (`CostConfig`, `buy_charges`,
+  `sell_charges`, and the `*_side_cost` helpers) into a neutral foundation module
+  (e.g. `trading/costs.py`, mirroring `trading/domain.py` from [[F-006]]); then
+  `strategy`, `backtest`, `ranking`, and `paper` all import it **down**, the
+  back-edge dissolves, and the import-linter exemption can be removed.
+- **Interim:** documented `ignore_imports` exemption in the `pyproject.toml`
+  contract so the gate stays green and the edge stays visible.
 
 ---
 
@@ -747,9 +797,9 @@ time.
 - Extracted the trailing-7d negative-news query into
   `store.news_store.negative_news_count_7d(conn, symbol, as_of)` (count of
   `news_items` with `sentiment < -0.20` in `[as_of-7d, as_of]`; `None` when no
-  news in window, `0` when news but none negative). Inference (`strategy.ranker`,
+  news in window, `0` when news but none negative). Inference (`ranking.ranker`,
   both call sites) now calls it instead of its own private copy.
-- `strategy.ranker_io.build_negative_news_lookup(conn, enriched)` precomputes the
+- `ranking.ranker_io.build_negative_news_lookup(conn, enriched)` precomputes the
   `(date_iso, symbol) → int` training lookup with that **same** function over each
   symbol's trading-date index (work bounded to the news-active span), exposed as
   `TrainingInputs.negative_news_lookup`.
@@ -1106,7 +1156,16 @@ track record is visible to the *planner* (via calibration) but invisible to the
 
 ---
 
-_Counts: 12 open · 1 superseded · 31 fixed. Updated 2026-06-20 (F-020 fixed —
+_Counts: 7 open · 1 superseded · 37 fixed. Updated 2026-06-22 (layering cluster
+F-006/F-007/F-008/F-009 fixed — neutral `trading/domain.py` for cross-layer DTOs
+so `store` no longer imports `data` [F-006]; `snapshot_and_classify` moved to
+`features.regime`, making `data.macro` fetch-only [F-007]; `ranker*` moved into a
+new `trading/ranking/` package for a clean `strategy < backtest < ranking` DAG
+[F-008]; an `import-linter` L0–L6 contract enforced in the test gate
+[F-009, `tests/test_architecture.py`]. The contract is KEPT with one documented
+exemption, spun off as new finding F-045 — the residual
+`strategy.daily_budget → paper.ledger` back-edge, fix = relocate the pure cost
+model to a foundation module). Updated 2026-06-20 (F-020 fixed —
 Layer-A rule `passes_regime` renamed `passes_market_filter` (rule name
 `market_filter`) to stop colliding with the `features.regime` voter; logic kept as
 a distinct extreme-stress veto, legacy `regime` alias preserves old signal

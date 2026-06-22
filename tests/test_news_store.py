@@ -7,7 +7,7 @@ from datetime import date
 
 import pytest
 
-from trading.data.news import NewsItem
+from trading.domain import NewsItem
 from trading.store.migrations import run_migrations
 from trading.store.news_store import (
     SentimentDailyRow,

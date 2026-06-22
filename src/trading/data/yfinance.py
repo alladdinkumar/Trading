@@ -13,8 +13,7 @@ from typing import Any
 import pandas as pd
 import yfinance as yf
 
-NSE_SUFFIX = ".NS"
-REQUIRED_COLUMNS = ("open", "high", "low", "close", "volume")
+from trading.domain import NSE_SUFFIX, REQUIRED_COLUMNS
 
 
 class OhlcvFetchError(Exception):

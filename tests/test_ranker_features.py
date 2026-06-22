@@ -4,14 +4,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from trading.data.macro import MacroSnapshot
+from trading.domain import MacroSnapshot
 from trading.features.technicals import add_indicators
-from trading.store.news_store import SentimentDailyRow
-from trading.strategy.ranker_features import (
+from trading.ranking.ranker_features import (
     FEATURE_NAMES,
     LiveContext,
     build_feature_row,
 )
+from trading.store.news_store import SentimentDailyRow
 
 
 def test_feature_names_is_a_tuple_of_20_unique_strings() -> None:

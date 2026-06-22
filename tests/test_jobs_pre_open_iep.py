@@ -11,7 +11,7 @@ import pytest
 
 from trading.config import get_paths
 from trading.data.kite import Quote
-from trading.data.macro import MacroSnapshot
+from trading.domain import MacroSnapshot
 from trading.features.regime import Regime
 from trading.jobs.pre_open_iep import (
     PreOpenIepAborted,
@@ -620,7 +620,7 @@ def _write_sector_map(paths, mapping: dict[str, str]) -> None:
 def test_pre_open_iep_autoloads_sector_map_and_momentum(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from trading.data.sector import SectorRow
+    from trading.domain import SectorRow
     from trading.store.sector_store import upsert_sector_daily
 
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
@@ -650,7 +650,7 @@ def test_pre_open_iep_autoloads_sector_map_and_momentum(
 def test_pre_open_iep_falls_back_to_d_minus_1_sector_data(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from trading.data.sector import SectorRow
+    from trading.domain import SectorRow
     from trading.store.sector_store import upsert_sector_daily
 
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
@@ -687,7 +687,7 @@ def test_pre_open_iep_explicit_empty_dicts_suppress_autoload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Passing sector_map={} should NOT trigger auto-load."""
-    from trading.data.sector import SectorRow
+    from trading.domain import SectorRow
     from trading.store.sector_store import upsert_sector_daily
 
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))

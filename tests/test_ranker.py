@@ -9,12 +9,12 @@ import numpy as np
 import pandas as pd
 
 from trading.config import Paths
+from trading.ranking.ranker import conviction_from_score, score_and_filter
+from trading.ranking.ranker_features import FEATURE_NAMES
 from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
 from trading.store.model_registry import RegistryRow, register, save_model
 from trading.store.ohlcv import write_ohlcv
-from trading.strategy.ranker import conviction_from_score, score_and_filter
-from trading.strategy.ranker_features import FEATURE_NAMES
 from trading.strategy.rules import Candidate, RuleResult
 
 
@@ -210,8 +210,8 @@ def test_k_larger_than_candidates_selects_all(tmp_path: Path) -> None:
 def test_ranker_signal_provider_truncates_to_top_k(tmp_path: Path) -> None:
     from trading.backtest.engine import Signal
     from trading.features.technicals import add_indicators
+    from trading.ranking.ranker import RankerSignalProvider
     from trading.store.model_registry import active as load_active
-    from trading.strategy.ranker import RankerSignalProvider
 
     paths = _paths(tmp_path)
     paths.data_dir.mkdir(parents=True, exist_ok=True)

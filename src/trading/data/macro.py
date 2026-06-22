@@ -13,12 +13,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import yfinance as yf
 
-if TYPE_CHECKING:
-    from trading.features.regime import RegimeResult
+from trading.domain import MacroSnapshot
 
 # ---------------------------------------------------------------------------
 # Tickers — yfinance symbols
@@ -42,24 +41,6 @@ YF_TICKERS: dict[str, str] = {
 # ---------------------------------------------------------------------------
 # Snapshot datatype — mirrors the macro_snapshot schema (spec §13)
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class MacroSnapshot:
-    """One row of `macro_snapshot`. All fields nullable per schema."""
-
-    date: str  # YYYY-MM-DD
-    sgx_nifty: float | None
-    dow_fut: float | None
-    nasdaq_fut: float | None
-    sp500: float | None
-    usdinr: float | None
-    crude: float | None
-    vix: float | None
-    us_10y: float | None
-    fii_flow_cr: float | None
-    dii_flow_cr: float | None
-    regime: str | None  # 'RISK_ON' | 'NEUTRAL' | 'RISK_OFF' | None
 
 
 @dataclass(frozen=True)
@@ -208,22 +189,3 @@ def build_snapshot(
         dii_flow_cr=dii_cr,
         regime=None,
     )
-
-
-def snapshot_and_classify(as_of: date) -> tuple[MacroSnapshot, "RegimeResult"]:
-    """End-to-end pipeline: fetch once, build snapshot, classify regime.
-
-    Returns the snapshot row with the regime bucket already filled in,
-    plus the full `RegimeResult` (per-axis votes + reasons) so callers can
-    surface the narrative into the daily briefing.
-    """
-    from trading.features.regime import classify_regime, regime_input_from_quotes
-
-    quotes = fetch_all_yf_quotes()
-    fii_cr, dii_cr = fetch_fii_dii()
-    snap = build_snapshot(as_of, quotes=quotes, fii_dii=(fii_cr, dii_cr))
-    regime_inp = regime_input_from_quotes(quotes, fii_cr)
-    result = classify_regime(regime_inp)
-    # Replace `regime` on the frozen dataclass via constructor:
-    classified = MacroSnapshot(**{**snap.__dict__, "regime": result.regime})
-    return classified, result

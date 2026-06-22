@@ -18,7 +18,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Literal
+
+from trading.domain import MacroSnapshot
 
 Regime = Literal["RISK_ON", "NEUTRAL", "RISK_OFF"]
 
@@ -199,3 +202,28 @@ def regime_input_from_quotes(
 def _attr(obj: object, name: str) -> float | None:
     val = getattr(obj, name, None) if obj is not None else None
     return float(val) if val is not None else None
+
+
+def snapshot_and_classify(as_of: date) -> tuple[MacroSnapshot, RegimeResult]:
+    """End-to-end macro pipeline: fetch once, build snapshot, classify regime.
+
+    Returns the snapshot row with the regime bucket already filled in, plus the
+    full `RegimeResult` (per-axis votes + reasons) so callers can surface the
+    narrative into the daily briefing.
+
+    This orchestration lives in `features` (the analysis layer), not in
+    `data.macro`: fetching is a data concern but classifying is a decision one,
+    so the data layer stays fetch-only and this is the single place the two are
+    composed (finding F-007). The `data.macro` import is function-local only to
+    avoid paying its yfinance import cost for unrelated regime callers.
+    """
+    from trading.data.macro import build_snapshot, fetch_all_yf_quotes, fetch_fii_dii
+
+    quotes = fetch_all_yf_quotes()
+    fii_cr, dii_cr = fetch_fii_dii()
+    snap = build_snapshot(as_of, quotes=quotes, fii_dii=(fii_cr, dii_cr))
+    regime_inp = regime_input_from_quotes(quotes, fii_cr)
+    result = classify_regime(regime_inp)
+    # Replace `regime` on the frozen dataclass via constructor:
+    classified = MacroSnapshot(**{**snap.__dict__, "regime": result.regime})
+    return classified, result

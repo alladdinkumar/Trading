@@ -12,9 +12,8 @@ import pandas as pd
 import pytest
 
 from trading.config import Settings, get_paths
-from trading.data.macro import MacroSnapshot
 from trading.data.news import RawHeadline
-from trading.data.sector import SectorRow
+from trading.domain import MacroSnapshot, SectorRow
 from trading.features.regime import RegimeResult
 from trading.jobs.pre_open import (
     PreOpenResult,
@@ -29,9 +28,9 @@ from trading.jobs.pre_open import (
     build_scan_context,
     run_pre_open,
 )
+from trading.ranking.ranker import ScoredCandidate
 from trading.store.migrations import run_migrations
 from trading.store.ohlcv import write_ohlcv
-from trading.strategy.ranker import ScoredCandidate
 from trading.strategy.rules import (
     Candidate,
     RuleResult,
@@ -782,8 +781,8 @@ def _register_passive_top1_model(paths) -> None:
     import lightgbm as lgb
     import numpy as np
 
+    from trading.ranking.ranker_features import FEATURE_NAMES
     from trading.store.model_registry import RegistryRow, register, save_model
-    from trading.strategy.ranker_features import FEATURE_NAMES
 
     rng = np.random.default_rng(0)
     X = rng.normal(loc=0, scale=1, size=(80, len(FEATURE_NAMES)))

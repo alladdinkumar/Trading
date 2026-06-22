@@ -758,7 +758,7 @@ def test_cli_notify_test_dispatches(monkeypatch):
 def test_trading_sector_happy_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`trading sector --date YYYY-MM-DD` writes rows + renders table."""
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
-    from trading.data.sector import SectorRow
+    from trading.domain import SectorRow
 
     fake_rows = [
         SectorRow(
@@ -806,7 +806,7 @@ def test_trading_sector_dry_run_does_not_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
-    from trading.data.sector import SectorRow
+    from trading.domain import SectorRow
 
     monkeypatch.setattr(
         "trading.cli.fetch_all_sectors",
@@ -944,7 +944,7 @@ def test_cli_prune_apply_deletes(tmp_path, monkeypatch) -> None:
 
 
 def _fake_snap(vix=19.40, usdinr=83.10):
-    from trading.data.macro import MacroSnapshot
+    from trading.domain import MacroSnapshot
 
     return MacroSnapshot(
         date="2026-06-19",

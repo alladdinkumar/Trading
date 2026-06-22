@@ -23,6 +23,7 @@ import feedparser
 
 from trading.config import Paths, get_paths, get_settings
 from trading.data.cache import get_cached_session
+from trading.domain import NewsItem
 
 # ---------------------------------------------------------------------------
 # Datatypes
@@ -38,25 +39,6 @@ class RawHeadline:
     headline: str
     url: str
     summary: str | None = None
-
-
-@dataclass(frozen=True)
-class NewsItem:
-    """One row of the `news_items` table.
-
-    `sentiment` / `category` / `is_critical` are filled by the scorer in a
-    later pass — we keep them as Optional fields so the news fetch and
-    scoring steps stay independently testable.
-    """
-
-    ts: str  # ISO 8601 with tz
-    symbol: str | None
-    source: str
-    headline: str
-    url: str | None
-    sentiment: float | None = None
-    category: str | None = None
-    is_critical: bool = False
 
 
 class NewsSource(Protocol):

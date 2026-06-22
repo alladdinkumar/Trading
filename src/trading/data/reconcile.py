@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from trading.data.macro import MacroSnapshot
+from trading.domain import MacroSnapshot
 from trading.data.macro_cross import MacroCrossSource
 from trading.store.reconciliation_store import ReconRow
 

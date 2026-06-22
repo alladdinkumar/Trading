@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from trading.features.technicals import add_indicators
-from trading.strategy.ranker_train import (
+from trading.ranking.ranker_train import (
     MIN_TRAIN_EXAMPLES,
     InsufficientDataError,
     train_walkforward,

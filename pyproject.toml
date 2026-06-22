@@ -65,6 +65,7 @@ dev = [
     "freezegun>=1.5",
     "pandas-stubs>=2.2",
     "types-requests>=2.31",
+    "import-linter>=2.0",
 ]
 
 [build-system]
@@ -111,8 +112,8 @@ ignore = [
 "src/trading/ui/Home.py" = ["N999"]
 # X / y are universal ML conventions for the feature matrix and label
 # vector; Phase 16 modules + their tests use them throughout.
-"src/trading/strategy/ranker_train.py" = ["N803", "N806"]
-"src/trading/strategy/ranker.py" = ["N806"]
+"src/trading/ranking/ranker_train.py" = ["N803", "N806"]
+"src/trading/ranking/ranker.py" = ["N806"]
 "src/trading/cli.py" = ["N806"]
 "tests/test_ranker*.py" = ["N806"]
 "tests/test_model_registry.py" = ["N806"]
@@ -148,4 +149,45 @@ markers = [
     "live: tests that hit live external APIs (Kite, news) — excluded from CI",
     "integration: end-to-end tests using cached fixtures",
     "slow: tests >5s — excluded from default run",
+]
+
+# ---------------------------------------------------------------------------
+# import-linter — automated dependency-layering enforcement (F-009)
+# ---------------------------------------------------------------------------
+# Mirrors the L0–L6 layer model in docs/architecture/01-architecture.md §1.
+# Higher layers may import lower; a lower layer importing a higher one fails.
+# Siblings joined by " | " are independent — they may NOT import each other.
+# Ordering reflects the *actual* import DAG after F-006/7/8:
+#   - data > store (data.ohlcv_refresh/reconcile persist via store; store is
+#     DTO-neutral via trading.domain, so it no longer imports data — F-006);
+#   - ranking > backtest > strategy (ranker* moved out of strategy — F-008);
+#   - ops + domain + clock + config are the foundation leaves.
+[tool.importlinter]
+root_package = "trading"
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture (L0–L6)"
+type = "layers"
+containers = ["trading"]
+layers = [
+    "cli | ui",
+    "jobs",
+    "llm",
+    "paper | portfolio",
+    "ranking",
+    "backtest",
+    "strategy",
+    "features",
+    "data",
+    "store",
+    "ops",
+    "config | domain | clock",
+]
+# One documented exemption (F-045): strategy.daily_budget reaches up to
+# paper.ledger.buy_side_cost — a thin wrapper over the pure backtest.costs
+# model — to apply realistic round-trip charges when pacing entries. The fix
+# is to relocate the pure cost model to a neutral foundation module (like
+# trading.domain in F-006); tracked as open finding F-045, not yet done.
+ignore_imports = [
+    "trading.strategy.daily_budget -> trading.paper.ledger",
 ]

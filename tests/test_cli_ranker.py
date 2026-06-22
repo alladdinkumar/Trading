@@ -10,8 +10,8 @@ from typer.testing import CliRunner
 
 from trading.cli import app
 from trading.config import Paths
+from trading.ranking.ranker_features import FEATURE_NAMES
 from trading.store.model_registry import RegistryRow, register, save_model
-from trading.strategy.ranker_features import FEATURE_NAMES
 
 
 @pytest.fixture()

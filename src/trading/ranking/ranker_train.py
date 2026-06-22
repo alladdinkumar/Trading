@@ -19,13 +19,13 @@ import pandas as pd
 
 from trading.backtest.metrics import sharpe
 from trading.backtest.walkforward import WalkForwardConfig, windows
-from trading.store.news_store import SentimentDailyRow
-from trading.strategy.ranker_features import (
+from trading.ranking.ranker_features import (
     FEATURE_NAMES,
     LiveContext,
     build_feature_row,
 )
-from trading.strategy.ranker_labels import label_candidate
+from trading.ranking.ranker_labels import label_candidate
+from trading.store.news_store import SentimentDailyRow
 from trading.strategy.rules import MIN_HISTORY_BARS, ScanContext, evaluate_symbol
 
 if TYPE_CHECKING:

@@ -9,7 +9,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from trading.data.news import NewsItem
+from trading.domain import NewsItem
 from trading.features.sentiment import (
     NEGATIVE_THRESHOLD,
     ScoreResult,

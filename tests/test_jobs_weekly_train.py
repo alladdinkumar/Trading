@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 from trading.config import get_paths
-from trading.data.news import NewsItem
+from trading.domain import NewsItem
 from trading.store.migrations import run_migrations
 
 AS_OF = date(2026, 6, 14)  # a Sunday
@@ -130,10 +130,10 @@ def test_step_retrain_feeds_negative_news_lookup(paths, monkeypatch) -> None:
     train_walkforward (not the old `{}`), so the feature is no longer NaN in
     training while populated at inference."""
     import trading.jobs.weekly_train as wt
+    from trading.ranking.ranker_train import InsufficientDataError
     from trading.store.db import get_conn
     from trading.store.news_store import insert_news_items
     from trading.store.ohlcv import write_ohlcv
-    from trading.strategy.ranker_train import InsufficientDataError
 
     write_ohlcv(_ohlcv_frame(300), "LONGSYM", paths)
 
@@ -402,8 +402,8 @@ def test_retrain_guard_skips_duplicate_window(paths, notify_calls, monkeypatch) 
 
 def test_insufficient_data_still_writes_review(paths, notify_calls, monkeypatch) -> None:
     from trading.jobs import weekly_train as wt
-    from trading.strategy.ranker_io import TrainingInputs
-    from trading.strategy.ranker_train import InsufficientDataError
+    from trading.ranking.ranker_io import TrainingInputs
+    from trading.ranking.ranker_train import InsufficientDataError
 
     monkeypatch.setattr(
         wt,
@@ -432,10 +432,10 @@ def test_retrain_success_registers_and_saves_model(paths, notify_calls, monkeypa
     import lightgbm as lgb
 
     from trading.jobs import weekly_train as wt
+    from trading.ranking.ranker_features import FEATURE_NAMES
+    from trading.ranking.ranker_io import TrainingInputs
+    from trading.ranking.ranker_train import TrainResult
     from trading.store.model_registry import all_rows
-    from trading.strategy.ranker_features import FEATURE_NAMES
-    from trading.strategy.ranker_io import TrainingInputs
-    from trading.strategy.ranker_train import TrainResult
 
     monkeypatch.setattr(
         wt,

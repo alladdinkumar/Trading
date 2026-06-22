@@ -29,6 +29,7 @@ from trading.backtest import (
     compute_metrics,
     run_backtest,
 )
+from trading.clock import today_ist
 from trading.config import get_paths, get_settings, update_env_var
 from trading.data.kite import (
     KiteAuthError,
@@ -49,7 +50,6 @@ from trading.data.kite_snapshot import (
 from trading.data.kite_snapshot import (
     read_holdings as _snapshot_read_holdings,
 )
-from trading.data.macro import MacroSnapshot, snapshot_and_classify
 from trading.data.macro_cross import read_macro_cross
 from trading.data.news import default_aliases, fetch_all_news
 from trading.data.ohlcv_refresh import refresh_ohlcv
@@ -57,6 +57,8 @@ from trading.data.reconcile import reconcile_macro
 from trading.data.sector import fetch_all_sectors
 from trading.data.universe import load_universe
 from trading.data.yfinance import OhlcvFetchError, fetch_ohlcv
+from trading.domain import MacroSnapshot
+from trading.features.regime import snapshot_and_classify
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
 from trading.jobs.mid_day import MidDayAborted, run_mid_day
@@ -73,7 +75,7 @@ from trading.llm.context import assemble_context as _assemble_context
 from trading.ops.notify import notify as _notify
 from trading.ops.retention import DEFAULT_NEWS_KEEP_DAYS, DEFAULT_RAW_KEEP_DAYS
 from trading.ops.run_status import StepStatus, compute_status, has_due_failure
-from trading.ops.runner import SCHEDULE, _today_ist, fire_reminder
+from trading.ops.runner import SCHEDULE, fire_reminder
 from trading.paper.funds import add_funds, list_funds, total_funds_added
 from trading.paper.ledger import log_signal_and_open_trade, open_trades
 from trading.paper.mtm import build_bars_from_history, mtm_open_trades
@@ -1763,7 +1765,7 @@ def status_cmd(
     step is missing (so cron/scripts can gate on it).
     """
     paths = get_paths()
-    as_of = date.fromisoformat(date_str) if date_str else _today_ist()
+    as_of = date.fromisoformat(date_str) if date_str else today_ist()
     with get_conn(paths.db_path) as conn:
         run_migrations(conn)
         statuses = compute_status(paths, as_of, conn=conn)
@@ -1847,16 +1849,16 @@ def train_ranker(
     """Train the Phase 16 LightGBM ranker over a walk-forward window."""
     from datetime import datetime
 
+    from trading.ranking.ranker_features import FEATURE_NAMES
+    from trading.ranking.ranker_io import load_training_inputs
+    from trading.ranking.ranker_train import (
+        InsufficientDataError,
+        train_walkforward,
+    )
     from trading.store.model_registry import (
         RegistryRow,
         register,
         save_model,
-    )
-    from trading.strategy.ranker_features import FEATURE_NAMES
-    from trading.strategy.ranker_io import load_training_inputs
-    from trading.strategy.ranker_train import (
-        InsufficientDataError,
-        train_walkforward,
     )
 
     paths = get_paths()
@@ -2024,7 +2026,7 @@ def daily_unattended_cmd(
     from trading.ops.logging_setup import configure_logging
 
     configure_logging("daily_unattended")
-    as_of = date.fromisoformat(date_str) if date_str else _today_ist()
+    as_of = date.fromisoformat(date_str) if date_str else today_ist()
     try:
         result = run_daily_unattended(as_of, force=force)
     except Exception:
@@ -2074,7 +2076,7 @@ def prune_cmd(
     from trading.ops.retention import run_retention
 
     paths = get_paths()
-    as_of = date.fromisoformat(date_str) if date_str else _today_ist()
+    as_of = date.fromisoformat(date_str) if date_str else today_ist()
     with get_conn(paths.db_path) as conn:
         run_migrations(conn)
         result = run_retention(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from trading.data.macro import MacroSnapshot
+from trading.domain import MacroSnapshot
 
 
 def upsert_macro_snapshot(conn: sqlite3.Connection, row: MacroSnapshot) -> None:

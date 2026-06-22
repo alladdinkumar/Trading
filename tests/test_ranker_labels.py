@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from trading.features.technicals import add_indicators
-from trading.strategy.ranker_labels import label_candidate
+from trading.ranking.ranker_labels import label_candidate
 
 
 def _trend_df(close_path: list[float], atr: float = 2.0) -> pd.DataFrame:

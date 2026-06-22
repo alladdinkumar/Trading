@@ -13,7 +13,7 @@ from pathlib import Path
 import pandas as pd
 
 from trading.config import Paths
-from trading.data.yfinance import NSE_SUFFIX, REQUIRED_COLUMNS
+from trading.domain import NSE_SUFFIX, REQUIRED_COLUMNS
 
 PARQUET_SUBDIR = "nifty200"
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import date
 
-from trading.data.sector import SectorRow
+from trading.domain import SectorRow
 
 
 def upsert_sector_daily(conn: sqlite3.Connection, rows: list[SectorRow]) -> int:

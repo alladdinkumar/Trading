@@ -28,6 +28,9 @@ from trading.clock import today_ist
 from trading.config import Paths, get_paths
 from trading.ops.notify import notify
 from trading.ops.retention import RetentionResult, run_retention
+from trading.ranking.ranker_features import FEATURE_NAMES
+from trading.ranking.ranker_io import load_training_inputs
+from trading.ranking.ranker_train import InsufficientDataError, train_walkforward
 from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
 from trading.store.model_registry import (
@@ -36,9 +39,6 @@ from trading.store.model_registry import (
     register,
     save_model,
 )
-from trading.strategy.ranker_features import FEATURE_NAMES
-from trading.strategy.ranker_io import load_training_inputs
-from trading.strategy.ranker_train import InsufficientDataError, train_walkforward
 
 TRAIN_WINDOW_YEARS = 3
 REVIEW_WINDOW_DAYS = 7

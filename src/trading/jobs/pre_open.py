@@ -22,12 +22,11 @@ from trading.data.kite_snapshot import (
     KiteSnapshotStaleError,
     read_holdings,
 )
-from trading.data.macro import snapshot_and_classify
 from trading.data.news import default_aliases, fetch_all_news
 from trading.data.ohlcv_refresh import cross_check_closes, refresh_ohlcv
 from trading.data.sector import fetch_all_sectors, load_sector_map
 from trading.data.universe import load_candidate_universe
-from trading.features.regime import Regime
+from trading.features.regime import Regime, snapshot_and_classify
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.llm.context import ContextInputs, assemble_context
 from trading.ops.logging_setup import configure_logging
@@ -39,6 +38,11 @@ from trading.portfolio.health import (
     score_holding,
 )
 from trading.portfolio.holding_context import build_holding_context
+from trading.ranking.ranker import (
+    ScoredCandidate,
+    conviction_from_score,
+    score_and_filter,
+)
 from trading.store.db import get_conn
 from trading.store.fno_ban_store import get_fno_ban_symbols, replace_fno_ban_list
 from trading.store.macro_store import get_macro_snapshot, upsert_macro_snapshot
@@ -59,11 +63,6 @@ from trading.store.sector_store import upsert_sector_daily
 from trading.strategy.calibration import build_score_calibration
 from trading.strategy.daily_budget import BudgetCandidate, plan_daily_entries
 from trading.strategy.exits import target_price
-from trading.strategy.ranker import (
-    ScoredCandidate,
-    conviction_from_score,
-    score_and_filter,
-)
 from trading.strategy.rules import Candidate, ScanContext, passing, scan
 
 RANKER_TOP_K = 5

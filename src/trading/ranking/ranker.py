@@ -17,6 +17,11 @@ import pandas as pd
 from loguru import logger
 
 from trading.features.technicals import add_indicators
+from trading.ranking.ranker_features import (
+    FEATURE_NAMES,
+    LiveContext,
+    build_feature_row,
+)
 from trading.store.macro_store import get_macro_snapshot
 from trading.store.model_registry import (
     ActiveModel,
@@ -26,11 +31,6 @@ from trading.store.model_registry import active as load_active
 from trading.store.news_store import get_sentiment_daily, negative_news_count_7d
 from trading.store.ohlcv import read_ohlcv
 from trading.store.repo import Conviction
-from trading.strategy.ranker_features import (
-    FEATURE_NAMES,
-    LiveContext,
-    build_feature_row,
-)
 from trading.strategy.rules import Candidate
 
 if TYPE_CHECKING:
