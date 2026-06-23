@@ -422,7 +422,7 @@ def test_pre_open_cli_writes_bundle_and_prints_next_step(tmp_path: Path, monkeyp
     monkeypatch.setattr(po, "_step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr(po, "_step_scan", lambda c, p, d, w: [])
     monkeypatch.setattr(po, "_step_portfolio", lambda p, s, w, *, as_of, **_: [])
-    monkeypatch.setattr(po, "_step_auto_open", lambda *a, **kw: 0)
+    monkeypatch.setattr(po, "_step_plan_and_record", lambda *a, **kw: 0)
     result = runner.invoke(
         app,
         ["pre-open", "--date", "2026-05-15", "--skip-news"],
@@ -442,7 +442,7 @@ def test_pre_open_cli_aborts_when_kite_snapshot_missing(tmp_path: Path, monkeypa
     monkeypatch.setattr(po, "_step_macro", lambda c, d, w: (False, "NEUTRAL"))
     monkeypatch.setattr(po, "_step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr(po, "_step_scan", lambda c, p, d, w: [])
-    monkeypatch.setattr(po, "_step_auto_open", lambda *a, **kw: 0)
+    monkeypatch.setattr(po, "_step_plan_and_record", lambda *a, **kw: 0)
     # NO seed_kite_snapshot — _step_portfolio will raise PreOpenAborted
     result = runner.invoke(
         app,
