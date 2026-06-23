@@ -62,6 +62,7 @@ from trading.features.regime import snapshot_and_classify
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.features.technicals import add_indicators
 from trading.jobs.mid_day import MidDayAborted, run_mid_day
+from trading.jobs.open_fills import OpenFillsAborted, run_open_fills
 from trading.jobs.post_close import PostCloseAborted, run_post_close
 from trading.jobs.pre_open import PreOpenAborted, build_scan_context, run_pre_open
 from trading.jobs.pre_open_iep import PreOpenIepAborted, run_pre_open_iep
@@ -1624,6 +1625,50 @@ def mid_day_cmd(
         for w in result.warnings:
             console.print(f"  - {w}")
     console.print(f"[green]wrote[/green] {result.update_path}")
+
+
+@app.command("open-fills")
+def open_fills_cmd(
+    date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD")],
+    apply: Annotated[
+        bool,
+        typer.Option(
+            "--apply",
+            help="Apply mode: read live quotes + open funded entries at LTP. "
+            "Without --apply runs prepare mode.",
+        ),
+    ] = False,
+) -> None:
+    """Post-open block — fill paper entries at the live LTP. Two-phase:
+    prepare → /kite-quotes-snapshot → apply."""
+    as_of = date.fromisoformat(date_str)
+    try:
+        result = run_open_fills(as_of, apply=apply)
+    except OpenFillsAborted as e:
+        console.print(f"[red]Open-fills aborted:[/red] {e}")
+        raise typer.Exit(code=2) from e
+
+    if result.symbols_path is not None:
+        console.print(f"[green]wrote[/green] {result.symbols_path}")
+        console.print(
+            "[bold]Now run /kite-quotes-snapshot skill in Claude Code, "
+            f"then `trading open-fills --date {date_str} --apply`[/bold]"
+        )
+        return
+
+    table = Table(title=f"open-fills {as_of.isoformat()}", show_header=True)
+    table.add_column("step")
+    table.add_column("count", justify="right")
+    table.add_row("quotes_captured_at", str(result.quotes_capture_ts))
+    table.add_row("trades_opened", str(result.trades_opened))
+    table.add_row("trades_skipped", str(result.trades_skipped))
+    console.print(table)
+    if result.warnings:
+        console.print("[yellow]Warnings:[/yellow]")
+        for w in result.warnings:
+            console.print(f"  - {w}")
+    if result.update_path:
+        console.print(f"[green]wrote[/green] {result.update_path}")
 
 
 @app.command("post-close")

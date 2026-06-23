@@ -9,7 +9,12 @@ from datetime import date
 import pytest
 
 from trading.paper.ledger import log_signal_and_open_trade
-from trading.paper.positions import compute_positions, compute_summary
+from trading.paper.positions import (
+    already_opened_today,
+    compute_positions,
+    compute_summary,
+    deployed_by_symbol,
+)
 from trading.store.migrations import run_migrations
 from trading.store.repo import Signal
 
@@ -110,3 +115,17 @@ def test_summary_empty_when_no_trades(conn: sqlite3.Connection) -> None:
     assert s.current_value == 0.0
     assert s.as_of_mark is None
     assert compute_positions(conn, as_of=date(2026, 6, 3)) == []
+
+
+def test_deployed_by_symbol_sums_open_cost_basis(conn: sqlite3.Connection) -> None:
+    _open(conn, "NESTLEIND", entry=100.0, qty=2, ts="2026-06-23T09:20:00")
+    _open(conn, "NESTLEIND", entry=110.0, qty=1, ts="2026-06-23T09:21:00")
+    _open(conn, "TATASTEEL", entry=200.0, qty=3, ts="2026-06-23T09:20:00")
+    assert deployed_by_symbol(conn) == {"NESTLEIND": 310.0, "TATASTEEL": 600.0}
+
+
+def test_already_opened_today_true_only_for_open_same_day(conn: sqlite3.Connection) -> None:
+    _open(conn, "TATASTEEL", entry=200.0, qty=1, ts="2026-06-23T09:20:00")
+    assert already_opened_today(conn, "TATASTEEL", date(2026, 6, 23)) is True
+    assert already_opened_today(conn, "TATASTEEL", date(2026, 6, 22)) is False
+    assert already_opened_today(conn, "POWERGRID", date(2026, 6, 23)) is False

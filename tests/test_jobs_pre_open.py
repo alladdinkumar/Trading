@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import replace
 from datetime import UTC, date
 from datetime import datetime as _dt
 from pathlib import Path
@@ -17,18 +18,20 @@ from trading.domain import MacroSnapshot, SectorRow
 from trading.features.regime import RegimeResult
 from trading.jobs.pre_open import (
     PreOpenResult,
-    _already_opened_today,
-    _step_auto_open,
     _step_macro,
     _step_news,
     _step_ohlcv,
+    _step_plan_and_record,
     _step_portfolio,
     _step_scan,
     _step_sector,
     build_scan_context,
     run_pre_open,
 )
+from trading.paper.pending import read_pending_entries
+from trading.paper.positions import already_opened_today
 from trading.ranking.ranker import ScoredCandidate
+from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
 from trading.store.ohlcv import write_ohlcv
 from trading.strategy.rules import (
@@ -92,8 +95,8 @@ def test_run_pre_open_returns_result_with_bundle_path(paths, monkeypatch) -> Non
         lambda paths, settings, warnings, *, as_of, **_: [],
     )
     monkeypatch.setattr(
-        "trading.jobs.pre_open._step_auto_open",
-        lambda conn, as_of, scored, regime, pool_capital, daily_cap, risk_pct, warnings: 0,
+        "trading.jobs.pre_open._step_plan_and_record",
+        lambda conn, as_of, scored, regime, warnings, paths: 0,
     )
 
     result = run_pre_open(
@@ -107,6 +110,7 @@ def test_run_pre_open_returns_result_with_bundle_path(paths, monkeypatch) -> Non
     assert result.bundle_path.is_file()
     assert result.candidates_passing == 0
     assert result.paper_trades_opened == 0
+    assert result.pending_entries == 0
 
 
 def test_step_macro_writes_snapshot_and_returns_regime(
@@ -525,104 +529,47 @@ def test_run_pre_open_unattended_writes_bundle_without_snapshot(paths, monkeypat
     assert any("snapshot" in w.lower() for w in result.warnings)
 
 
-def test_step_auto_open_creates_signal_and_paper_trade(
-    conn: sqlite3.Connection,
+def test_plan_and_record_writes_pending_for_selected(
+    conn: sqlite3.Connection, paths
 ) -> None:
+    """A selected candidate is recorded to _pending_entries.json and NO paper
+    trade or signal is opened at pre-open (the fill happens in open-fills)."""
     warnings: list[str] = []
-    cand = _candidate("RVNL", 10)
-    opened = _step_auto_open(
-        conn,
-        date(2026, 5, 15),
-        [_sc(cand)],
-        "NEUTRAL",
-        pool_capital=100_000.0,
-        daily_cap=100_000.0,
-        risk_pct=0.02,
-        warnings=warnings,
+    cand = _candidate("RVNL", 10)  # close=100, atr=2
+    count = _step_plan_and_record(
+        conn, date(2026, 5, 15), [_sc(cand, ml_score=0.55)], "NEUTRAL", warnings, paths
     )
-    assert opened == 1
-    sig_count = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
-    pt_count = conn.execute("SELECT COUNT(*) FROM paper_trades WHERE ts_exit IS NULL").fetchone()[0]
-    assert sig_count == 1
-    assert pt_count == 1
+    assert count == 1
 
-
-def test_step_auto_open_target_and_prediction_track_exit_engine(
-    conn: sqlite3.Connection,
-) -> None:
-    """F-029: signal.target = exit engine's min(+20%, 2.5R) and the logged
-    prediction derives from that target (not a constant +20%).
-
-    close=100, atr=2 → stop=97, R=3. 2.5R target = 107.5 < +20% (=120), so
-    target = 107.5 and predicted_return_pct = (107.5-100)/100 = 7.5%."""
-    warnings: list[str] = []
-    cand = _candidate("RVNL", 10)
-    _step_auto_open(
-        conn,
-        date(2026, 5, 15),
-        [_sc(cand)],
-        "NEUTRAL",
-        pool_capital=100_000.0,
-        daily_cap=100_000.0,
-        risk_pct=0.02,
-        warnings=warnings,
-    )
-    target = conn.execute("SELECT target FROM signals").fetchone()["target"]
-    predicted = conn.execute("SELECT predicted_return_pct FROM predictions").fetchone()[
-        "predicted_return_pct"
-    ]
-    assert target == pytest.approx(107.5)
-    assert predicted == pytest.approx(7.5)
-
-
-def test_step_auto_open_idempotent_on_rerun(
-    conn: sqlite3.Connection,
-) -> None:
-    warnings: list[str] = []
-    cand = _candidate("RVNL", 10)
-    _step_auto_open(
-        conn,
-        date(2026, 5, 15),
-        [_sc(cand)],
-        "NEUTRAL",
-        pool_capital=100_000.0,
-        daily_cap=100_000.0,
-        risk_pct=0.02,
-        warnings=warnings,
-    )
-    opened2 = _step_auto_open(
-        conn,
-        date(2026, 5, 15),
-        [_sc(cand)],
-        "NEUTRAL",
-        pool_capital=100_000.0,
-        daily_cap=100_000.0,
-        risk_pct=0.02,
-        warnings=warnings,
-    )
-    assert opened2 == 0
     pt_count = conn.execute("SELECT COUNT(*) FROM paper_trades").fetchone()[0]
-    assert pt_count == 1
+    sig_count = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
+    assert pt_count == 0  # nothing opened at pre-open
+    assert sig_count == 0  # selected candidates get no signal until open-fills
+
+    regime, entries = read_pending_entries(paths, date(2026, 5, 15))
+    assert regime == "NEUTRAL"
+    assert [e.symbol for e in entries] == ["RVNL"]
+    assert entries[0].atr_14 == pytest.approx(2.0)
+    assert entries[0].ml_score == pytest.approx(0.55)
+    assert entries[0].ref_close == pytest.approx(100.0)
 
 
-def test_step_auto_open_non_selected_logs_signal_only(
-    conn: sqlite3.Connection,
+def test_plan_and_record_non_selected_logs_signal_only(
+    conn: sqlite3.Connection, paths
 ) -> None:
-    """Visibility-only path: selected=False candidates write a signals row
-    (with ml_score) but do NOT open a paper-trade."""
+    """selected=False candidates write a visibility signal (with ml_score) but
+    are NOT recorded as pending and open no trade."""
     warnings: list[str] = []
     cand = _candidate("RVNL", 10)
-    opened = _step_auto_open(
+    count = _step_plan_and_record(
         conn,
         date(2026, 5, 15),
         [_sc(cand, ml_score=0.42, selected=False)],
         "NEUTRAL",
-        pool_capital=100_000.0,
-        daily_cap=100_000.0,
-        risk_pct=0.02,
-        warnings=warnings,
+        warnings,
+        paths,
     )
-    assert opened == 0
+    assert count == 0
     sig_count = conn.execute("SELECT COUNT(*) FROM signals").fetchone()[0]
     pt_count = conn.execute("SELECT COUNT(*) FROM paper_trades").fetchone()[0]
     score = conn.execute("SELECT ml_score FROM signals").fetchone()["ml_score"]
@@ -630,57 +577,71 @@ def test_step_auto_open_non_selected_logs_signal_only(
     assert pt_count == 0
     assert score == pytest.approx(0.42)
 
-
-def test_step_auto_open_respects_daily_cap_and_cash(
-    conn: sqlite3.Connection,
-) -> None:
-    """Two ₹100 candidates, daily_cap ₹150 → only ~1 share-worth opens;
-    total opened notional stays within the cap."""
-    warnings: list[str] = []
-    cands = [_sc(_candidate("RVNL", 10)), _sc(_candidate("NTPC", 10))]
-    opened = _step_auto_open(
-        conn,
-        date(2026, 5, 15),
-        cands,
-        "NEUTRAL",
-        pool_capital=100_000.0,
-        daily_cap=150.0,
-        risk_pct=0.02,
-        warnings=warnings,
-    )
-    assert opened == 1  # ₹150 cap / ₹100 entry = 1 share, one symbol
-    deployed = conn.execute(
-        "SELECT COALESCE(SUM(entry_price*qty),0) FROM paper_trades WHERE ts_exit IS NULL"
-    ).fetchone()[0]
-    assert deployed <= 150.0
+    _, entries = read_pending_entries(paths, date(2026, 5, 15))
+    assert entries == []
 
 
-def test_step_auto_open_no_cash_opens_nothing(
-    conn: sqlite3.Connection,
-) -> None:
-    """available_cash ≤ 0 (a pre-existing huge deployed position) → no new opens."""
-    # Seed an open trade that overdraws cash far below zero.
+def test_plan_and_record_skips_already_open(conn: sqlite3.Connection, paths) -> None:
+    """A symbol already holding an OPEN trade entered today is not re-recorded."""
     cur = conn.execute(
         "INSERT INTO signals (ts, symbol, side, entry, stop, target, horizon_days) "
-        "VALUES ('2026-05-01T08:30:00','TCS','LONG',100.0,95.0,120.0,25)"
+        "VALUES ('2026-05-15T08:30:00','RVNL','LONG',100.0,95.0,120.0,25)"
     )
     conn.execute(
         "INSERT INTO paper_trades (signal_id, ts_entry, entry_price, qty) VALUES (?,?,?,?)",
-        (cur.lastrowid, "2026-05-01T08:30:00", 100.0, 5000),  # ₹500k deployed
+        (cur.lastrowid, "2026-05-15T09:20:00", 100.0, 5),
     )
     conn.commit()
     warnings: list[str] = []
-    opened = _step_auto_open(
-        conn,
-        date(2026, 5, 15),
-        [_sc(_candidate("RVNL", 10))],
-        "NEUTRAL",
-        pool_capital=100_000.0,
-        daily_cap=7_000.0,
-        risk_pct=0.02,
-        warnings=warnings,
+    count = _step_plan_and_record(
+        conn, date(2026, 5, 15), [_sc(_candidate("RVNL", 10))], "NEUTRAL", warnings, paths
     )
+    assert count == 0
+    _, entries = read_pending_entries(paths, date(2026, 5, 15))
+    assert entries == []
+
+
+def test_plan_and_record_atr_wider_than_close_skipped(
+    conn: sqlite3.Connection, paths
+) -> None:
+    """A non-positive ATR (stop ≥ close) is warned and not recorded."""
+    warnings: list[str] = []
+    cand = replace(_candidate("RVNL", 10), atr_14=0.0)  # stop == close → skip
+    count = _step_plan_and_record(
+        conn, date(2026, 5, 15), [_sc(cand)], "NEUTRAL", warnings, paths
+    )
+    assert count == 0
+    assert any("RVNL" in w for w in warnings)
+    _, entries = read_pending_entries(paths, date(2026, 5, 15))
+    assert entries == []
+
+
+def test_run_pre_open_writes_pending_and_opens_nothing(paths, monkeypatch) -> None:
+    """End-to-end (upstream stubbed): a selected candidate is recorded to the
+    handoff file and run_pre_open reports paper_trades_opened == 0."""
+    monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (False, "NEUTRAL"))
+    monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
+    monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
+    monkeypatch.setattr("trading.jobs.pre_open._step_ohlcv", lambda p, d, w: 0)
+    monkeypatch.setattr("trading.jobs.pre_open._step_fno_ban", lambda c, d, w: None)
+    cand = _candidate("RVNL", 10)
+    monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda c, p, d, w: [cand])
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_rank", lambda c, p, d, passing, w: [_sc(cand, ml_score=0.6)]
+    )
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_portfolio",
+        lambda p, s, w, *, as_of, **_: [],
+    )
+
+    result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=True, require_snapshot=False)
+    assert result.paper_trades_opened == 0
+    assert result.pending_entries == 1
+    with get_conn(paths.db_path) as conn2:
+        opened = conn2.execute("SELECT COUNT(*) FROM paper_trades").fetchone()[0]
     assert opened == 0
+    _, entries = read_pending_entries(paths, date(2026, 5, 15))
+    assert [e.symbol for e in entries] == ["RVNL"]
 
 
 def test_already_opened_today_detects_open_trade(
@@ -697,8 +658,8 @@ def test_already_opened_today_detects_open_trade(
         (sig_id, "2026-05-15T08:30:00", 100.0, 10),
     )
     conn.commit()
-    assert _already_opened_today(conn, "RVNL", date(2026, 5, 15)) is True
-    assert _already_opened_today(conn, "NTPC", date(2026, 5, 15)) is False
+    assert already_opened_today(conn, "RVNL", date(2026, 5, 15)) is True
+    assert already_opened_today(conn, "NTPC", date(2026, 5, 15)) is False
 
 
 def _all_pass_frame() -> pd.DataFrame:
@@ -842,19 +803,27 @@ def test_pre_open_persists_ml_score_on_all_passing(paths, monkeypatch) -> None:
     result = run_pre_open(date(2026, 5, 15), paths=paths, skip_news=False)
     assert result.candidates_passing == 7
     assert result.candidates_selected == 5
-    # The ₹7k/day budget paces opens below the full selected set: each S* lists
-    # at ₹100, so ₹7k funds far fewer than 5 — at least one, at most all selected.
-    assert 1 <= result.paper_trades_opened <= result.candidates_selected
+    # Pre-open no longer opens trades; the 5 selected are recorded as pending
+    # entries (filled at the live LTP by open-fills), the 2 non-selected get
+    # visibility-only signals.
+    assert result.paper_trades_opened == 0
+    assert result.pending_entries == 5
 
     db = _sql.connect(paths.db_path)
     db.row_factory = _sql.Row
-    rows = db.execute(
+    sig_rows = db.execute(
         "SELECT symbol, ml_score FROM signals WHERE substr(ts, 1, 10) = ?",
         ("2026-05-15",),
     ).fetchall()
     db.close()
-    assert len(rows) == result.candidates_passing
-    assert all(r["ml_score"] is not None for r in rows)
+    # Only the non-selected (passing − selected) candidates are logged as signals.
+    assert len(sig_rows) == result.candidates_passing - result.candidates_selected
+    assert all(r["ml_score"] is not None for r in sig_rows)
+
+    # ml_score is carried on the selected candidates too — via the handoff file.
+    _, pending = read_pending_entries(paths, date(2026, 5, 15))
+    assert len(pending) == 5
+    assert all(e.ml_score is not None for e in pending)
 
 
 def test_pre_open_without_active_model_opens_all_passing(paths, monkeypatch) -> None:

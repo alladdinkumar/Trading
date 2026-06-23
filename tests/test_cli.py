@@ -422,7 +422,7 @@ def test_pre_open_cli_writes_bundle_and_prints_next_step(tmp_path: Path, monkeyp
     monkeypatch.setattr(po, "_step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr(po, "_step_scan", lambda c, p, d, w: [])
     monkeypatch.setattr(po, "_step_portfolio", lambda p, s, w, *, as_of, **_: [])
-    monkeypatch.setattr(po, "_step_auto_open", lambda *a, **kw: 0)
+    monkeypatch.setattr(po, "_step_plan_and_record", lambda *a, **kw: 0)
     result = runner.invoke(
         app,
         ["pre-open", "--date", "2026-05-15", "--skip-news"],
@@ -442,7 +442,7 @@ def test_pre_open_cli_aborts_when_kite_snapshot_missing(tmp_path: Path, monkeypa
     monkeypatch.setattr(po, "_step_macro", lambda c, d, w: (False, "NEUTRAL"))
     monkeypatch.setattr(po, "_step_news", lambda c, d, w: (0, 0))
     monkeypatch.setattr(po, "_step_scan", lambda c, p, d, w: [])
-    monkeypatch.setattr(po, "_step_auto_open", lambda *a, **kw: 0)
+    monkeypatch.setattr(po, "_step_plan_and_record", lambda *a, **kw: 0)
     # NO seed_kite_snapshot — _step_portfolio will raise PreOpenAborted
     result = runner.invoke(
         app,
@@ -582,6 +582,77 @@ def test_mid_day_cli_apply_happy_path(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0, result.stdout
     assert "evaluated" in result.stdout
     assert "mid_day_update.md" in result.stdout
+
+
+def test_open_fills_cli_prepare_writes_symbol_file(tmp_path: Path, monkeypatch) -> None:
+    from datetime import date as _d
+
+    from trading.config import get_paths
+    from trading.paper.pending import PendingEntry, write_pending_entries
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+    write_pending_entries(
+        get_paths(),
+        _d(2026, 6, 23),
+        regime="NEUTRAL",
+        entries=[PendingEntry(symbol="TATASTEEL", atr_14=4.0, ml_score=0.6, ref_close=198.97)],
+    )
+    result = runner.invoke(app, ["open-fills", "--date", "2026-06-23"])
+    assert result.exit_code == 0, result.stdout
+    out_path = tmp_path / "data" / "raw" / "2026-06-23" / "_quote_symbols.txt"
+    assert out_path.is_file()
+    assert "TATASTEEL" in out_path.read_text(encoding="utf-8")
+    assert "/kite-quotes-snapshot" in result.stdout
+
+
+def test_open_fills_cli_apply_aborts_when_quotes_missing(tmp_path: Path, monkeypatch) -> None:
+    from datetime import date as _d
+
+    from trading.config import get_paths
+    from trading.paper.pending import PendingEntry, write_pending_entries
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+    write_pending_entries(
+        get_paths(),
+        _d(2026, 6, 23),
+        regime="NEUTRAL",
+        entries=[PendingEntry(symbol="TATASTEEL", atr_14=4.0, ml_score=0.6, ref_close=198.97)],
+    )
+    result = runner.invoke(app, ["open-fills", "--date", "2026-06-23", "--apply"])
+    assert result.exit_code == 2, result.stdout
+    assert "/kite-quotes-snapshot" in result.stdout
+
+
+def test_open_fills_cli_apply_happy_path(tmp_path: Path, monkeypatch) -> None:
+    """Stub run_open_fills to verify exit-code + summary line without quotes."""
+    from datetime import date as _d
+    from datetime import datetime as _dt
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    _init_db(tmp_path)
+
+    fake_update = tmp_path / "data" / "research" / "2026-06-23" / "open_fills.md"
+    fake_update.parent.mkdir(parents=True, exist_ok=True)
+    fake_update.write_text("stub", encoding="utf-8")
+
+    from trading.jobs import open_fills as of_mod
+
+    fake_result = of_mod.OpenFillsResult(
+        as_of=_d(2026, 6, 23),
+        symbols_path=None,
+        update_path=fake_update,
+        quotes_capture_ts=_dt(2026, 6, 23, 9, 20),
+        trades_opened=1,
+        trades_skipped=0,
+        warnings=[],
+    )
+    monkeypatch.setattr("trading.cli.run_open_fills", lambda *a, **kw: fake_result)
+    result = runner.invoke(app, ["open-fills", "--date", "2026-06-23", "--apply"])
+    assert result.exit_code == 0, result.stdout
+    assert "trades_opened" in result.stdout
+    assert "open_fills.md" in result.stdout
 
 
 def test_post_close_cli_prepare_writes_symbol_file(tmp_path: Path, monkeypatch) -> None:

@@ -1,10 +1,12 @@
 """Phase 13 — pre_open MVP orchestrator.
 
-Runs each upstream phase in dependency order, auto-opens paper-trades
-for all-pass signals, writes the Phase 12 context bundle, halts. The
-per-step helpers stay private so the orchestrator's body reads as a
-narrative. Each `_step_*` either returns a typed result or appends to
-`warnings` on graceful-degradation paths.
+Runs each upstream phase in dependency order, records the day's
+funding-eligible candidates to `_pending_entries.json` (the open-fills
+block fills them at the live LTP after market open — 2026-06-23 design),
+writes the Phase 12 context bundle, halts. The per-step helpers stay
+private so the orchestrator's body reads as a narrative. Each `_step_*`
+either returns a typed result or appends to `warnings` on
+graceful-degradation paths.
 """
 
 from __future__ import annotations
@@ -24,14 +26,14 @@ from trading.data.kite_snapshot import (
 )
 from trading.data.news import default_aliases, fetch_all_news
 from trading.data.ohlcv_refresh import cross_check_closes, refresh_ohlcv
-from trading.data.sector import fetch_all_sectors, load_sector_map
+from trading.data.sector import fetch_all_sectors
 from trading.data.universe import load_candidate_universe
 from trading.features.regime import Regime, snapshot_and_classify
 from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.llm.context import ContextInputs, assemble_context
 from trading.ops.logging_setup import configure_logging
-from trading.paper.ledger import log_signal_and_open_trade
-from trading.paper.reconcile import compute_paper_cash
+from trading.paper.pending import PendingEntry, write_pending_entries
+from trading.paper.positions import already_opened_today
 from trading.portfolio.fundamentals import load_fundamentals_map
 from trading.portfolio.health import (
     HealthScore,
@@ -50,18 +52,13 @@ from trading.store.migrations import run_migrations
 from trading.store.news_store import (
     insert_news_items,
     list_critical_symbols,
-    negative_news_count_7d,
 )
 from trading.store.ohlcv import read_ohlcv
 from trading.store.repo import (
-    EntryAttribution,
     Signal,
     insert_signal,
-    matured_score_outcomes,
 )
 from trading.store.sector_store import upsert_sector_daily
-from trading.strategy.calibration import build_score_calibration
-from trading.strategy.daily_budget import BudgetCandidate, plan_daily_entries
 from trading.strategy.exits import target_price
 from trading.strategy.rules import Candidate, ScanContext, passing, scan
 
@@ -91,6 +88,7 @@ class PreOpenResult:
     candidates_passing: int
     candidates_selected: int
     paper_trades_opened: int
+    pending_entries: int
     holdings_scored: int
     ohlcv_bars_added: int = 0
     warnings: list[str] = field(default_factory=list)
@@ -111,12 +109,13 @@ def run_pre_open(
 
     Each step runs in dependency order. Failures in graceful-degradation
     steps (macro, news, portfolio) are collected as warnings; the bundle
-    is written either way. Auto-opened paper-trades use D-1 close as
-    entry price (the most recent bar in the parquet).
+    is written either way. Selected candidates are recorded to
+    `_pending_entries.json`; no paper trade opens here (the open-fills block
+    fills them at the live LTP after market open).
 
     `require_snapshot=False` (the unattended/gap-filler path, F-032) lets the
     broker-free spine run without a Kite snapshot: `_step_portfolio` degrades to
-    a warning instead of raising `PreOpenAborted`, so macro/scan/auto-open/bundle
+    a warning instead of raising `PreOpenAborted`, so macro/scan/record/bundle
     still complete on operator-absent days. The holdings-health section is then
     simply empty.
     """
@@ -146,15 +145,13 @@ def run_pre_open(
         holdings = _step_portfolio(p, s, warnings, as_of=as_of, require_snapshot=require_snapshot)
         _step_cross_check(p, as_of, warnings)
 
-        opened = _step_auto_open(
+        pending_count = _step_plan_and_record(
             conn,
             as_of,
             scored,
             regime,
-            pool_capital,
-            daily_deploy_cap,
-            risk_pct,
             warnings,
+            p,
         )
 
         bundle_path = _step_assemble(
@@ -176,7 +173,8 @@ def run_pre_open(
         candidates_total=len(candidates),
         candidates_passing=len(passing_candidates),
         candidates_selected=sum(1 for sc in scored if sc.selected),
-        paper_trades_opened=opened,
+        paper_trades_opened=0,
+        pending_entries=pending_count,
         holdings_scored=len(holdings),
         ohlcv_bars_added=ohlcv_bars_added,
         warnings=warnings,
@@ -393,144 +391,62 @@ def _step_portfolio(
     return results
 
 
-def _step_auto_open(
+def _step_plan_and_record(
     conn: sqlite3.Connection,
     as_of: date,
     scored: list[ScoredCandidate],
     regime: Regime,
-    pool_capital: float,
-    daily_cap: float,
-    risk_pct: float,
     warnings: list[str],
+    paths: Paths,
 ) -> int:
-    """Persist a signal for every scored candidate; open paper-trades for the
-    selected ones the daily-budget planner can fund.
-
-    Entry price = `cand.close` (D-1's close — the most recent bar in the parquet
-    at pre_open time, per spec §4.4 'limit order at close'). The planner caps
-    total new buys at `daily_cap` notional and at available cash, ranking by
-    expected value, so the book paces instead of deploying every top-K pick
-    against a fixed ₹1L (the over-deployment bug). Non-funded selected
-    candidates and non-selected ones are logged as visibility-only signals.
+    """Log visibility signals for non-selected candidates and record the
+    funding-eligible (selected) ones to `_pending_entries.json` for the
+    post-open `open-fills` block. Opens no paper trades — the live-LTP fill
+    happens after market open, not at D-1 close (2026-06-23 design). Returns
+    the number of pending entries written.
     """
-    available_cash = compute_paper_cash(conn, as_of=as_of)
-    deployed_by_symbol = _deployed_by_symbol(conn)
-
-    budget_cands: list[BudgetCandidate] = []
-    signal_by_symbol: dict[str, Signal] = {}
-    atr_by_symbol: dict[str, float] = {}
+    pending: list[PendingEntry] = []
     for sc in scored:
         cand = sc.candidate
         stop_price = cand.close - 1.5 * cand.atr_14
         if cand.close <= stop_price:
             warnings.append(f"{cand.symbol}: ATR={cand.atr_14:.2f} ≥ close — skip")
             continue
-        # Target = the exact price the exit engine aims for, min(+20%, 2.5R),
-        # so signal.target no longer disagrees with the exit logic (F-029).
-        signal_target = target_price(cand.close, stop_price)
-        signal = Signal(
-            id=None,
-            ts=f"{as_of.isoformat()}T08:30:00",
-            symbol=cand.symbol,
-            side="LONG",
-            entry=cand.close,
-            stop=stop_price,
-            target=signal_target,
-            horizon_days=25,
-            rules_passed_json=json.dumps([r.name for r in cand.rules if r.passed]),
-            ml_score=sc.ml_score,
-            conviction=conviction_from_score(sc.ml_score),
-            created_by="pre_open",
-        )
-        signal_by_symbol[cand.symbol] = signal
-        atr_by_symbol[cand.symbol] = cand.atr_14
         if not sc.selected:
             # Visibility-only: log the signal (with ml_score) but don't trade.
-            insert_signal(conn, signal)
+            insert_signal(
+                conn,
+                Signal(
+                    id=None,
+                    ts=f"{as_of.isoformat()}T08:30:00",
+                    symbol=cand.symbol,
+                    side="LONG",
+                    entry=cand.close,
+                    stop=stop_price,
+                    target=target_price(cand.close, stop_price),
+                    horizon_days=25,
+                    rules_passed_json=json.dumps(
+                        [r.name for r in cand.rules if r.passed]
+                    ),
+                    ml_score=sc.ml_score,
+                    conviction=conviction_from_score(sc.ml_score),
+                    created_by="pre_open",
+                ),
+            )
             continue
-        if _already_opened_today(conn, cand.symbol, as_of):
+        if already_opened_today(conn, cand.symbol, as_of):
             continue
-        budget_cands.append(
-            BudgetCandidate(
+        pending.append(
+            PendingEntry(
                 symbol=cand.symbol,
-                entry=cand.close,
-                stop=stop_price,
-                target=signal_target,
+                atr_14=cand.atr_14,
                 ml_score=sc.ml_score,
+                ref_close=cand.close,
             )
         )
 
-    # F-041: correct p_win with realised win-rate per ml_score band (self-healing).
-    p_win_calibration = build_score_calibration(matured_score_outcomes(conn))
-    plan = plan_daily_entries(
-        budget_cands,
-        available_cash=available_cash,
-        deployed_by_symbol=deployed_by_symbol,
-        regime=regime,
-        pool_capital=pool_capital,
-        daily_cap=daily_cap,
-        risk_pct=risk_pct,
-        p_win_calibration=p_win_calibration,
-    )
-
-    opened = 0
-    planned_symbols = {e.symbol for e in plan.entries}
-    sector_map = load_sector_map()
-    for entry in plan.entries:
-        signal = signal_by_symbol[entry.symbol]
-        log_signal_and_open_trade(
-            conn,
-            signal=signal,
-            entry_ts=signal.ts,
-            entry_price=entry.entry,
-            qty=entry.qty,
-            atr_at_entry=atr_by_symbol[entry.symbol],
-            # predicted_return_pct defaults to the signal's implied target %
-            # ((target - entry)/entry); signal.target is min(+20%, 2.5R) (F-029).
-            # F-040: snapshot entry conditions so a matured outcome can be
-            # attributed to *why* it opened (regime/sector/news cohorts).
-            attribution=EntryAttribution(
-                regime=regime,
-                sector=sector_map.get(entry.symbol),
-                neg_news_7d=negative_news_count_7d(conn, entry.symbol, as_of),
-            ),
-        )
-        opened += 1
-
-    # Visibility-only: any selected candidate the planner skipped logs a signal
-    # plus its skip reason so the brief shows why it didn't open.
-    for symbol, reason in plan.skipped:
-        if symbol in planned_symbols:
-            continue
-        skip_signal = signal_by_symbol.get(symbol)
-        if skip_signal is not None:
-            insert_signal(conn, skip_signal)
-        warnings.append(f"{symbol}: not opened — {reason}")
-
-    return opened
-
-
-def _deployed_by_symbol(conn: sqlite3.Connection) -> dict[str, float]:
-    """Cost-basis value of open paper positions, grouped by symbol."""
-    rows = conn.execute(
-        "SELECT s.symbol AS symbol, SUM(pt.entry_price * pt.qty) AS deployed "
-        "FROM paper_trades pt JOIN signals s ON s.id = pt.signal_id "
-        "WHERE pt.ts_exit IS NULL GROUP BY s.symbol"
-    ).fetchall()
-    return {r["symbol"]: float(r["deployed"]) for r in rows}
-
-
-def _already_opened_today(conn: sqlite3.Connection, symbol: str, as_of: date) -> bool:
-    """True if `symbol` has an OPEN paper-trade entered on `as_of`."""
-    row = conn.execute(
-        "SELECT 1 FROM paper_trades pt "
-        "JOIN signals s ON s.id = pt.signal_id "
-        "WHERE s.symbol = ? AND substr(pt.ts_entry, 1, 10) = ? "
-        "  AND pt.ts_exit IS NULL "
-        "LIMIT 1",
-        (symbol, as_of.isoformat()),
-    ).fetchone()
-    return row is not None
+    write_pending_entries(paths, as_of, regime=regime, entries=pending)
+    return len(pending)
 
 
 def _step_assemble(

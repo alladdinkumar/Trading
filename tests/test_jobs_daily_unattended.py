@@ -44,7 +44,8 @@ def _fake_pre_open(paths) -> PreOpenResult:
         candidates_total=3,
         candidates_passing=2,
         candidates_selected=1,
-        paper_trades_opened=1,
+        paper_trades_opened=0,
+        pending_entries=1,
         holdings_scored=0,
         warnings=["no Kite snapshot — holdings health skipped"],
     )
