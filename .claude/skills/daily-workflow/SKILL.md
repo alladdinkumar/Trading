@@ -23,11 +23,15 @@ On each invocation:
 1. **Resolve "now"** in IST (Asia/Kolkata — the machine clock is already IST).
 2. **Gate on trading day** (see below). If it's not a trading day, don't run
    any block — just re-arm for tomorrow morning and stop.
-3. **Pick the due block** — the block whose window is open now, or the most
+3. **Kite login pre-flight** (see "Kite login pre-flight" below). Before doing
+   any block work, probe auth and surface the login link if the session is
+   dead. Stop and wait for the user to log in rather than marching into a Kite
+   step that will fail mid-block.
+4. **Pick the due block** — the block whose window is open now, or the most
    recent block today whose window has passed but whose work isn't done yet.
-4. **Run that block** (steps below), skipping any step already done today
+5. **Run that block** (steps below), skipping any step already done today
    (idempotency). Pause if a Kite step hits a dead session.
-5. **Re-arm**: `ScheduleWakeup` for the next pending block's window so the
+6. **Re-arm**: `ScheduleWakeup` for the next pending block's window so the
    session fires itself on time. When the last block of the day is done, do
    **not** re-arm — the day is complete.
 
@@ -86,6 +90,22 @@ if one exists for `<date>`, skip the step.
 | 1/2 | `/kite-quotes-snapshot` | MCP skill | **Usually skipped.** Nothing writes `_quote_symbols.txt` for the IEP path, so the snapshot skill halts. Overnight quotes are *optional* — skip this step. |
 | 2/2 | `trading pre-open-iep --date <date>` | CLI | Runs without quotes: warns "Overnight quotes unavailable", no gap filter / rerank. This is expected, not an error. |
 
+### Open-fills block — window 09:15–09:25 · done-marker `data/research/<date>/open_fills.md`
+
+| Step | Command | Kind | Writes |
+|---|---|---|---|
+| 1/3 | `trading open-fills --date <date>` | CLI (prepare) | `data/raw/<date>/_quote_symbols.txt` (from `_pending_entries.json`) |
+| 2/3 | `/kite-quotes-snapshot` | MCP skill | `data/raw/<date>/quotes_HHMM.json` — **halt point** if Kite session dead |
+| 3/3 | `trading open-fills --date <date> --apply` | CLI | `data/research/<date>/open_fills.md`; opens funded entries at live LTP |
+
+This is where the day's paper entries actually open — pre-open only *records*
+the funding-eligible candidates to `_pending_entries.json`; the fill happens
+here at the live LTP (per the 2026-06-23 live-open-fills design), with qty, stop,
+and target recomputed from that fill. If pre-open recorded no pending entries,
+prepare is a no-op and nothing opens. Like mid-day, step 2 is a real **halt
+point**: if the Kite session is dead, present the login link and stop — don't
+open against a stale/empty quotes file.
+
 ### Mid-day block — window 12:25–12:35 · done-marker `data/research/<date>/mid_day_update.md`
 
 | Step | Command | Kind | Writes |
@@ -105,6 +125,28 @@ if one exists for `<date>`, skip the step.
 Monthly SIP (09:30) is **out of scope** — it's a once-a-month action, not part
 of the daily loop. If the user wants it, run `/kite-snapshot` then
 `trading sip --date <date>` separately.
+
+## Kite login pre-flight
+
+Every block except IEP needs a live Kite session (snapshot or quotes), and the
+session dies roughly once a day. So at the **start of each invocation** — right
+after the trading-day gate, before picking or running any block — confirm auth
+and surface the login link up front instead of discovering a dead session
+halfway through a block.
+
+1. Probe auth by calling `mcp__kite__get_profile`.
+2. **Authed** (profile returns) → say so briefly and continue to "Pick the due
+   block".
+3. **Not authed** (401 / "log in first" / session error) → call
+   `mcp__kite__login` and present the returned link to the user as clickable
+   markdown, prefaced by the ⚠️ AI-risk warning the login tool returns. Then
+   **stop** — do **not** run any block and do **not** re-arm a wake-up. The
+   user logs in via the link and re-invokes `/daily-workflow`; the pre-flight
+   passes on the next run and the block proceeds.
+
+This makes the very first thing the operator sees a login link when one is
+needed, rather than a half-run block. Once the pre-flight passes, individual
+Kite steps inside a block won't normally need to re-login that day.
 
 ## Driving the MCP (`/kite-*`) steps
 
@@ -149,10 +191,12 @@ After a block finishes (or when the current block isn't due yet), compute the
 next pending block's window-start in IST and call `ScheduleWakeup`:
 
 - `delaySeconds` = seconds from now until that window-start. The runtime clamps
-  to **[60, 3600]**, so gaps longer than an hour (e.g. IEP 09:00 → mid-day
+  to **[60, 3600]**, so gaps longer than an hour (e.g. open-fills 09:25 → mid-day
   12:25) can't be hit in one sleep. That's fine: sleep 3600 as an hourly
   heartbeat, wake, see no block is due yet, and re-arm again. Each wake is
-  cheap and keeps the loop alive.
+  cheap and keeps the loop alive. Block order through the day:
+  pre-open (08:30) → IEP (08:55) → open-fills (09:15) → mid-day (12:25) →
+  post-close (16:05).
 - `prompt` = the literal `/daily-workflow` input so the next firing re-enters
   this skill. (If the user launched you via `/loop` with no prompt, pass the
   sentinel `<<autonomous-loop-dynamic>>` instead.)
