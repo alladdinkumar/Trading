@@ -31,6 +31,7 @@ from trading.features.sentiment import aggregate_daily, score_news_items
 from trading.llm.context import ContextInputs, assemble_context
 from trading.ops.logging_setup import configure_logging
 from trading.paper.ledger import log_signal_and_open_trade
+from trading.paper.positions import already_opened_today, deployed_by_symbol
 from trading.paper.reconcile import compute_paper_cash
 from trading.portfolio.fundamentals import load_fundamentals_map
 from trading.portfolio.health import (
@@ -414,7 +415,7 @@ def _step_auto_open(
     candidates and non-selected ones are logged as visibility-only signals.
     """
     available_cash = compute_paper_cash(conn, as_of=as_of)
-    deployed_by_symbol = _deployed_by_symbol(conn)
+    deployed = deployed_by_symbol(conn)
 
     budget_cands: list[BudgetCandidate] = []
     signal_by_symbol: dict[str, Signal] = {}
@@ -448,7 +449,7 @@ def _step_auto_open(
             # Visibility-only: log the signal (with ml_score) but don't trade.
             insert_signal(conn, signal)
             continue
-        if _already_opened_today(conn, cand.symbol, as_of):
+        if already_opened_today(conn, cand.symbol, as_of):
             continue
         budget_cands.append(
             BudgetCandidate(
@@ -465,7 +466,7 @@ def _step_auto_open(
     plan = plan_daily_entries(
         budget_cands,
         available_cash=available_cash,
-        deployed_by_symbol=deployed_by_symbol,
+        deployed_by_symbol=deployed,
         regime=regime,
         pool_capital=pool_capital,
         daily_cap=daily_cap,
@@ -508,29 +509,6 @@ def _step_auto_open(
         warnings.append(f"{symbol}: not opened — {reason}")
 
     return opened
-
-
-def _deployed_by_symbol(conn: sqlite3.Connection) -> dict[str, float]:
-    """Cost-basis value of open paper positions, grouped by symbol."""
-    rows = conn.execute(
-        "SELECT s.symbol AS symbol, SUM(pt.entry_price * pt.qty) AS deployed "
-        "FROM paper_trades pt JOIN signals s ON s.id = pt.signal_id "
-        "WHERE pt.ts_exit IS NULL GROUP BY s.symbol"
-    ).fetchall()
-    return {r["symbol"]: float(r["deployed"]) for r in rows}
-
-
-def _already_opened_today(conn: sqlite3.Connection, symbol: str, as_of: date) -> bool:
-    """True if `symbol` has an OPEN paper-trade entered on `as_of`."""
-    row = conn.execute(
-        "SELECT 1 FROM paper_trades pt "
-        "JOIN signals s ON s.id = pt.signal_id "
-        "WHERE s.symbol = ? AND substr(pt.ts_entry, 1, 10) = ? "
-        "  AND pt.ts_exit IS NULL "
-        "LIMIT 1",
-        (symbol, as_of.isoformat()),
-    ).fetchone()
-    return row is not None
 
 
 def _step_assemble(

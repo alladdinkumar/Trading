@@ -70,6 +70,29 @@ def _marks(conn: sqlite3.Connection) -> tuple[dict[str, float], dict[str, float]
     return latest, prev, str(rows[0]["date"])
 
 
+def deployed_by_symbol(conn: sqlite3.Connection) -> dict[str, float]:
+    """Cost-basis value of open paper positions, grouped by symbol."""
+    rows = conn.execute(
+        "SELECT s.symbol AS symbol, SUM(pt.entry_price * pt.qty) AS deployed "
+        "FROM paper_trades pt JOIN signals s ON s.id = pt.signal_id "
+        "WHERE pt.ts_exit IS NULL GROUP BY s.symbol"
+    ).fetchall()
+    return {r["symbol"]: float(r["deployed"]) for r in rows}
+
+
+def already_opened_today(conn: sqlite3.Connection, symbol: str, as_of: date) -> bool:
+    """True if `symbol` has an OPEN paper-trade entered on `as_of`."""
+    row = conn.execute(
+        "SELECT 1 FROM paper_trades pt "
+        "JOIN signals s ON s.id = pt.signal_id "
+        "WHERE s.symbol = ? AND substr(pt.ts_entry, 1, 10) = ? "
+        "  AND pt.ts_exit IS NULL "
+        "LIMIT 1",
+        (symbol, as_of.isoformat()),
+    ).fetchone()
+    return row is not None
+
+
 def compute_positions(conn: sqlite3.Connection, *, as_of: date) -> list[Position]:
     """Per-symbol open holdings as of `as_of`, sorted by current value desc."""
     rows = conn.execute(

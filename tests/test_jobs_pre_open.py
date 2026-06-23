@@ -17,7 +17,6 @@ from trading.domain import MacroSnapshot, SectorRow
 from trading.features.regime import RegimeResult
 from trading.jobs.pre_open import (
     PreOpenResult,
-    _already_opened_today,
     _step_auto_open,
     _step_macro,
     _step_news,
@@ -28,6 +27,7 @@ from trading.jobs.pre_open import (
     build_scan_context,
     run_pre_open,
 )
+from trading.paper.positions import already_opened_today
 from trading.ranking.ranker import ScoredCandidate
 from trading.store.migrations import run_migrations
 from trading.store.ohlcv import write_ohlcv
@@ -697,8 +697,8 @@ def test_already_opened_today_detects_open_trade(
         (sig_id, "2026-05-15T08:30:00", 100.0, 10),
     )
     conn.commit()
-    assert _already_opened_today(conn, "RVNL", date(2026, 5, 15)) is True
-    assert _already_opened_today(conn, "NTPC", date(2026, 5, 15)) is False
+    assert already_opened_today(conn, "RVNL", date(2026, 5, 15)) is True
+    assert already_opened_today(conn, "NTPC", date(2026, 5, 15)) is False
 
 
 def _all_pass_frame() -> pd.DataFrame:
