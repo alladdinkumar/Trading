@@ -120,3 +120,25 @@ def test_eligible_set_ties_broken_deterministically_by_symbol() -> None:
 
 def test_eligible_set_empty_input_returns_empty() -> None:
     assert eligible_set({}, top_quantile=0.30) == set()
+
+
+def test_factors_are_point_in_time_unchanged_by_future_bars() -> None:
+    panel = _trending_panel()
+    as_of = panel["SYM0"].index[200]  # a date with future bars after it
+
+    before_mom = momentum_12_1(panel["SYM0"], as_of)
+    before_vol = realized_vol(panel["SYM0"], as_of, window=90)
+    before_scores = factor_score(panel, as_of, vol_window=90)
+
+    # Append wildly different future bars to every symbol.
+    future_idx = pd.bdate_range(panel["SYM0"].index[-1] + pd.Timedelta(days=1), periods=30)
+    mutated = {
+        s: pd.concat(
+            [df, pd.DataFrame({"close": [df["close"].iloc[-1] * 5] * 30}, index=future_idx)]
+        )
+        for s, df in panel.items()
+    }
+
+    assert momentum_12_1(mutated["SYM0"], as_of) == before_mom
+    assert realized_vol(mutated["SYM0"], as_of, window=90) == before_vol
+    assert factor_score(mutated, as_of, vol_window=90) == before_scores
