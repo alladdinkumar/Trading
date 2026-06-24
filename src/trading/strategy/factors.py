@@ -88,3 +88,21 @@ def factor_score(
     z_mom = _zscore(mom)
     z_vol = _zscore(vol)
     return {sym: (z_mom[sym] + (-z_vol[sym])) / 2.0 for sym in mom}
+
+
+def eligible_set(
+    scores: Mapping[str, float],
+    *,
+    top_quantile: float = 0.30,
+) -> set[str]:
+    """Top ``top_quantile`` of symbols by composite score.
+
+    Count = ``max(1, int(n * top_quantile))`` for non-empty input. Ties broken
+    deterministically: higher score first, then symbol ascending.
+    """
+    if not scores:
+        return set()
+    n = len(scores)
+    k = max(1, int(n * top_quantile))
+    ordered = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
+    return {sym for sym, _ in ordered[:k]}

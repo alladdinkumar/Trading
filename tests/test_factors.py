@@ -3,7 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from trading.strategy.factors import factor_score, momentum_12_1, realized_vol
+from trading.strategy.factors import (
+    eligible_set,
+    factor_score,
+    momentum_12_1,
+    realized_vol,
+)
 
 
 def _close_series(values: list[float]) -> pd.DataFrame:
@@ -99,3 +104,19 @@ def test_factor_score_empty_when_fewer_than_two_survive() -> None:
     one = {"ONLY": _trending_panel()["SYM0"]}
     as_of = one["ONLY"].index[-1]
     assert factor_score(one, as_of, vol_window=90) == {}
+
+
+def test_eligible_set_keeps_top_quantile_count() -> None:
+    scores = {f"S{i}": float(i) for i in range(10)}  # S9 highest
+    chosen = eligible_set(scores, top_quantile=0.30)  # 10 * 0.30 = 3
+    assert chosen == {"S9", "S8", "S7"}
+
+
+def test_eligible_set_ties_broken_deterministically_by_symbol() -> None:
+    scores = {"B": 1.0, "A": 1.0, "C": 0.0}  # A and B tie at the top
+    chosen = eligible_set(scores, top_quantile=0.34)  # 3 * 0.34 = 1 → keep 1
+    assert chosen == {"A"}  # tie resolved by symbol ascending
+
+
+def test_eligible_set_empty_input_returns_empty() -> None:
+    assert eligible_set({}, top_quantile=0.30) == set()
