@@ -7,6 +7,8 @@ supplies in-memory OHLCV frames and an ``as_of`` date. Every factor at date
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import numpy as np
 import pandas as pd
 
@@ -47,3 +49,42 @@ def realized_vol(df: pd.DataFrame, as_of: pd.Timestamp, *, window: int = 90) -> 
         return None
     log_ret = np.diff(np.log(until["close"].to_numpy()))
     return float(np.std(log_ret[-window:], ddof=1))
+
+
+def _zscore(values: dict[str, float]) -> dict[str, float]:
+    """Population z-score (ddof=0). Zero-stdev cross-section → all zeros."""
+    arr = np.array(list(values.values()), dtype=float)
+    mean = float(arr.mean())
+    std = float(arr.std(ddof=0))
+    if std < 1e-12:
+        return {k: 0.0 for k in values}
+    return {k: (v - mean) / std for k, v in values.items()}
+
+
+def factor_score(
+    panel: Mapping[str, pd.DataFrame],
+    as_of: pd.Timestamp,
+    *,
+    vol_window: int = 90,
+) -> dict[str, float]:
+    """Cross-sectional equal-weight composite of 12-1 momentum and low vol.
+
+    For each symbol compute both factors point-in-time; drop any symbol whose
+    either factor is ``None``. Z-score each factor across the survivors
+    (momentum: higher is better; volatility negated so lower is better).
+    Composite = mean(z_momentum, z_lowvol). Returns ``{}`` if < 2 survive.
+    """
+    mom: dict[str, float] = {}
+    vol: dict[str, float] = {}
+    for sym, df in panel.items():
+        m = momentum_12_1(df, as_of)
+        v = realized_vol(df, as_of, window=vol_window)
+        if m is None or v is None:
+            continue
+        mom[sym] = m
+        vol[sym] = v
+    if len(mom) < 2:
+        return {}
+    z_mom = _zscore(mom)
+    z_vol = _zscore(vol)
+    return {sym: (z_mom[sym] + (-z_vol[sym])) / 2.0 for sym in mom}

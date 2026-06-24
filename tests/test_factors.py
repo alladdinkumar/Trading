@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from trading.strategy.factors import momentum_12_1, realized_vol
+from trading.strategy.factors import factor_score, momentum_12_1, realized_vol
 
 
 def _close_series(values: list[float]) -> pd.DataFrame:
@@ -48,3 +48,54 @@ def test_realized_vol_matches_sample_stdev_of_log_returns() -> None:
 def test_realized_vol_none_when_insufficient_history() -> None:
     df = _close_series([100.0] * 90)  # need window+1=91 bars
     assert realized_vol(df, df.index[-1], window=90) is None
+
+
+def _trending_panel() -> dict[str, pd.DataFrame]:
+    """3 symbols, 300 bars, differing drift+noise so momentum/vol differ."""
+    idx = pd.bdate_range("2020-01-01", periods=300)
+    panel: dict[str, pd.DataFrame] = {}
+    for i, (drift, vol) in enumerate([(0.30, 0.005), (0.10, 0.02), (0.50, 0.05)]):
+        rng = np.random.default_rng(i)
+        steps = drift / 300 + rng.normal(0, vol, size=300)
+        closes = 100.0 * np.cumprod(1 + steps)
+        panel[f"SYM{i}"] = pd.DataFrame({"close": closes}, index=idx)
+    return panel
+
+
+def test_factor_score_is_zero_mean_unit_population_std_composite() -> None:
+    panel = _trending_panel()
+    as_of = panel["SYM0"].index[-1]
+    scores = factor_score(panel, as_of, vol_window=90)
+    assert set(scores) == {"SYM0", "SYM1", "SYM2"}
+    # Composite is the mean of two z-scores, each population-standardized.
+    vals = np.array(list(scores.values()))
+    assert abs(float(vals.mean())) < 1e-9
+
+
+def test_factor_score_drops_symbols_with_insufficient_history() -> None:
+    panel = _trending_panel()
+    short = pd.DataFrame(
+        {"close": [100.0] * 50},
+        index=pd.bdate_range("2020-01-01", periods=50),
+    )
+    panel["SHORT"] = short
+    as_of = panel["SYM0"].index[-1]
+    scores = factor_score(panel, as_of, vol_window=90)
+    assert "SHORT" not in scores
+
+
+def test_factor_score_rewards_low_vol_and_high_momentum() -> None:
+    panel = _trending_panel()
+    as_of = panel["SYM0"].index[-1]
+    scores = factor_score(panel, as_of, vol_window=90)
+    # SYM0 has the lowest vol; its low-vol z-score is the highest of the three.
+    vols = {s: realized_vol(df, as_of, window=90) for s, df in panel.items()}
+    lowest_vol = min(vols, key=lambda s: vols[s])  # type: ignore[arg-type]
+    # The lowest-vol symbol gets a positive low-vol contribution → above-mean.
+    assert scores[lowest_vol] > float(np.mean(list(scores.values())))
+
+
+def test_factor_score_empty_when_fewer_than_two_survive() -> None:
+    one = {"ONLY": _trending_panel()["SYM0"]}
+    as_of = one["ONLY"].index[-1]
+    assert factor_score(one, as_of, vol_window=90) == {}
