@@ -57,7 +57,7 @@ def _zscore(values: dict[str, float]) -> dict[str, float]:
     mean = float(arr.mean())
     std = float(arr.std(ddof=0))
     if std < 1e-12:
-        return {k: 0.0 for k in values}
+        return dict.fromkeys(values, 0.0)
     return {k: (v - mean) / std for k, v in values.items()}
 
 

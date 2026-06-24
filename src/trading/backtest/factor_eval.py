@@ -110,6 +110,29 @@ def per_trade_metrics(returns: Sequence[float]) -> TradeMetrics:
     )
 
 
+def information_coefficient(
+    panel: Mapping[str, pd.DataFrame],
+    *,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    vol_window: int = 90,
+    max_days: int = 25,
+    min_names: int = 5,
+) -> ICResult:
+    """Mean/stdev/t-stat of per-day Spearman IC of composite vs forward return."""
+    all_dates = sorted({d for df in panel.values() for d in df.index if start <= d <= end})
+    ics: list[float] = []
+    for sd in all_dates:
+        scores = factor_score(panel, sd, vol_window=vol_window)
+        if not scores:
+            continue
+        fwd = forward_returns(panel, sd, max_days=max_days)
+        ic = spearman_ic(scores, fwd, min_names=min_names)
+        if ic is not None:
+            ics.append(ic)
+    return aggregate_ic(ics)
+
+
 @dataclass(frozen=True)
 class GatedComparison:
     baseline: TradeMetrics

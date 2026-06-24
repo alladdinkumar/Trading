@@ -83,3 +83,30 @@ def test_per_trade_metrics_empty_is_zeroed() -> None:
     assert m.n == 0
     assert m.sharpe == 0.0
     assert m.profit_factor == 0.0
+
+
+def test_information_coefficient_runs_over_a_window() -> None:
+    from trading.backtest.factor_eval import information_coefficient
+    from trading.features.technicals import add_indicators
+
+    idx = pd.bdate_range("2020-01-01", periods=320)
+    panel = {}
+    for i in range(6):
+        rng = np.random.default_rng(i)
+        closes = 100.0 * np.cumprod(1 + rng.normal(0.0005 * i, 0.015, size=320))
+        raw = pd.DataFrame(
+            {
+                "open": closes,
+                "high": closes * 1.01,
+                "low": closes * 0.99,
+                "close": closes,
+                "volume": [1_000_000] * 320,
+            },
+            index=idx,
+        )
+        panel[f"SYM{i}"] = add_indicators(raw)
+    res = information_coefficient(
+        panel, start=idx[273], end=idx[280], vol_window=90, max_days=25, min_names=3
+    )
+    assert res.n_days >= 1
+    assert isinstance(res.mean_ic, float)

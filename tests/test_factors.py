@@ -33,7 +33,7 @@ def test_momentum_12_1_none_when_fewer_than_273_bars() -> None:
 
 def test_realized_vol_constant_growth_is_near_zero() -> None:
     # Constant 1%/bar growth → constant log return → ~0 stdev.
-    closes = [100.0 * (1.01 ** i) for i in range(120)]
+    closes = [100.0 * (1.01**i) for i in range(120)]
     df = _close_series(closes)
     vol = realized_vol(df, df.index[-1], window=90)
     assert vol is not None

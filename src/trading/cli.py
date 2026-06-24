@@ -29,6 +29,7 @@ from trading.backtest import (
     compute_metrics,
     run_backtest,
 )
+from trading.backtest.factor_eval import factor_gated_metrics, information_coefficient
 from trading.clock import today_ist
 from trading.config import get_paths, get_settings, update_env_var
 from trading.data.kite import (
@@ -534,6 +535,88 @@ def backtest_cmd(
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(_render_report(metrics, result, start_ts, end_ts), encoding="utf-8")
     console.print(f"\n[green]Report written to[/green] {report_path}")
+
+
+@app.command("factor-eval")
+def factor_eval_cmd(
+    start: Annotated[
+        str, typer.Option(help="Inclusive eval start date (YYYY-MM-DD).")
+    ] = "2023-01-01",
+    end: Annotated[
+        str | None, typer.Option(help="Inclusive end date (defaults to latest bar).")
+    ] = None,
+    top_quantile: Annotated[
+        float, typer.Option(help="Top fraction of the universe to deem eligible.")
+    ] = 0.30,
+    vol_window: Annotated[
+        int, typer.Option(help="Trailing window (bars) for realized volatility.")
+    ] = 90,
+) -> None:
+    """Offline read-only evaluation of the Path A cross-sectional factor tilt.
+
+    Reports Information Coefficient and a factor-gated vs rules-only per-trade
+    metric comparison. Writes nothing to the trade book.
+    """
+    paths = get_paths()
+    symbols = list_symbols(paths)
+    if not symbols:
+        console.print("[red]No parquet data on disk. Run `trading ingest-history` first.[/red]")
+        raise typer.Exit(code=1)
+
+    enriched: dict[str, pd.DataFrame] = {}
+    for sym in symbols:
+        try:
+            raw = read_ohlcv(sym, paths)
+        except FileNotFoundError:
+            continue
+        if len(raw) >= 200:
+            enriched[sym] = add_indicators(raw)
+    if not enriched:
+        console.print("[red]No symbol had >=200 bars after enrichment.[/red]")
+        raise typer.Exit(code=1)
+
+    start_ts = pd.Timestamp(start)
+    end_ts = pd.Timestamp(end) if end else max(df.index.max() for df in enriched.values())
+    console.print(
+        f"[bold]Factor-eval:[/bold] {start_ts.date()} to {end_ts.date()} "
+        f"on {len(enriched)} symbols (top {top_quantile:.0%}, vol window {vol_window})"
+    )
+
+    ic = information_coefficient(enriched, start=start_ts, end=end_ts, vol_window=vol_window)
+    cmp = factor_gated_metrics(
+        enriched, start=start_ts, end=end_ts, top_quantile=top_quantile, vol_window=vol_window
+    )
+
+    ic_table = Table(show_header=True, header_style="bold", title="Information Coefficient")
+    ic_table.add_column("Metric")
+    ic_table.add_column("Value", justify="right")
+    ic_table.add_row("Mean IC", f"{ic.mean_ic:.4f}")
+    ic_table.add_row("IC stdev", f"{ic.ic_std:.4f}")
+    ic_table.add_row("IC t-stat", f"{ic.ic_t_stat:.2f}")
+    ic_table.add_row("Positive-day rate", f"{ic.hit_rate_positive_days * 100:.1f}%")
+    ic_table.add_row("Days", str(ic.n_days))
+    console.print(ic_table)
+
+    cmp_table = Table(show_header=True, header_style="bold", title="Per-trade: gated vs rules-only")
+    cmp_table.add_column("Metric")
+    cmp_table.add_column("Rules-only", justify="right")
+    cmp_table.add_column("Factor-gated", justify="right")
+    for label, attr, fmt in [
+        ("Trades", "n", "{}"),
+        ("Sharpe (x12)", "sharpe", "{:.2f}"),
+        ("Profit factor", "profit_factor", "{:.2f}"),
+        ("Hit rate", "hit_rate", "{:.2%}"),
+        ("Payoff", "payoff", "{:.2f}"),
+    ]:
+        b = getattr(cmp.baseline, attr)
+        g = getattr(cmp.gated, attr)
+        cmp_table.add_row(label, fmt.format(b), fmt.format(g))
+    console.print(cmp_table)
+
+    console.print(
+        "\n[bold]Phase-2 gate:[/bold] wire the eligible set into pre_open only if "
+        "mean IC > 0 with t-stat ~>= 2 AND gated Sharpe/PF beat rules-only."
+    )
 
 
 def _default_report_name() -> str:
@@ -1541,9 +1624,7 @@ def pre_open_cmd(
     date_str: Annotated[str, typer.Option("--date", help="ISO date YYYY-MM-DD")],
     skip_news: Annotated[bool, typer.Option("--skip-news")] = False,
     capital: Annotated[float, typer.Option(help="Standing pool capital.")] = 100_000.0,
-    daily_cap: Annotated[
-        float, typer.Option(help="Max new buys per day (notional).")
-    ] = 7_000.0,
+    daily_cap: Annotated[float, typer.Option(help="Max new buys per day (notional).")] = 7_000.0,
     risk_pct: Annotated[float, typer.Option(help="Risk per trade.")] = 0.02,
 ) -> None:
     """Phase 13 MVP — orchestrate Phases 1-12 and write the analyst bundle."""
@@ -1815,8 +1896,12 @@ def status_cmd(
         run_migrations(conn)
         statuses = compute_status(paths, as_of, conn=conn)
 
-    glyph = {"done": "[green]✅[/green]", "missing": "[red]❌[/red]",
-             "pending": "[grey50]·[/grey50]", "n/a": "[grey50]-[/grey50]"}
+    glyph = {
+        "done": "[green]✅[/green]",
+        "missing": "[red]❌[/red]",
+        "pending": "[grey50]·[/grey50]",
+        "n/a": "[grey50]-[/grey50]",
+    }
     table = Table(title=f"daily status — {as_of.isoformat()}", show_header=True)
     table.add_column("")
     table.add_column("block")
@@ -2138,9 +2223,7 @@ def prune_cmd(
     table.add_column("target")
     table.add_column("keep days", justify="right")
     table.add_column("deleted", justify="right")
-    table.add_row(
-        "raw/<date>/ dirs", str(result.raw_keep_days), str(len(result.raw_dirs_deleted))
-    )
+    table.add_row("raw/<date>/ dirs", str(result.raw_keep_days), str(len(result.raw_dirs_deleted)))
     table.add_row("news_items rows", str(result.news_keep_days), str(result.news_rows_deleted))
     console.print(table)
     for name in result.raw_dirs_deleted:
