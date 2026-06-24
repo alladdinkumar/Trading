@@ -15,7 +15,10 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from trading.backtest.metrics import sharpe as _sharpe
 from trading.ranking.ranker_labels import realized_return
+from trading.strategy.factors import eligible_set, factor_score
+from trading.strategy.rules import MIN_HISTORY_BARS, ScanContext, evaluate_symbol
 
 
 def spearman_ic(
@@ -73,3 +76,76 @@ def forward_returns(
         if r is not None:
             out[sym] = r
     return out
+
+
+@dataclass(frozen=True)
+class TradeMetrics:
+    n: int
+    sharpe: float
+    profit_factor: float
+    hit_rate: float
+    payoff: float
+
+
+def per_trade_metrics(returns: Sequence[float]) -> TradeMetrics:
+    """Honest per-trade metrics over fractional realized returns."""
+    n = len(returns)
+    if n == 0:
+        return TradeMetrics(0, 0.0, 0.0, 0.0, 0.0)
+    arr = np.array(returns, dtype=float)
+    wins = arr[arr > 0]
+    losses = arr[arr < 0]
+    gross_profit = float(wins.sum())
+    gross_loss = float(-losses.sum())
+    pf = gross_profit / gross_loss if gross_loss > 0 else (math.inf if gross_profit > 0 else 0.0)
+    avg_win = float(wins.mean()) if len(wins) else 0.0
+    avg_loss = float(-losses.mean()) if len(losses) else 0.0
+    payoff = avg_win / avg_loss if avg_loss > 0 else (math.inf if avg_win > 0 else 0.0)
+    return TradeMetrics(
+        n=n,
+        sharpe=_sharpe(pd.Series(arr), periods_per_year=12),
+        profit_factor=pf,
+        hit_rate=float((arr > 0).mean()),
+        payoff=payoff,
+    )
+
+
+@dataclass(frozen=True)
+class GatedComparison:
+    baseline: TradeMetrics
+    gated: TradeMetrics
+
+
+def factor_gated_metrics(
+    panel: Mapping[str, pd.DataFrame],
+    *,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    top_quantile: float = 0.30,
+    vol_window: int = 90,
+    max_days: int = 25,
+) -> GatedComparison:
+    """Per-trade metrics for every rules-passing candidate (baseline) vs only
+    those also in that day's factor eligible set (gated), over [start, end]."""
+    baseline: list[float] = []
+    gated: list[float] = []
+    # Iterate the union of trading dates within the window.
+    all_dates = sorted({d for df in panel.values() for d in df.index if start <= d <= end})
+    for sd in all_dates:
+        scores = factor_score(panel, sd, vol_window=vol_window)
+        eligible = eligible_set(scores, top_quantile=top_quantile)
+        for sym, df in panel.items():
+            if sd not in df.index:
+                continue
+            sub = df.loc[:sd]
+            if len(sub) < MIN_HISTORY_BARS:
+                continue
+            if not evaluate_symbol(sym, sub, ScanContext(scan_date=sd.date())).all_passed:
+                continue
+            r = realized_return(df, sd, max_days=max_days)
+            if r is None:
+                continue
+            baseline.append(r)
+            if sym in eligible:
+                gated.append(r)
+    return GatedComparison(baseline=per_trade_metrics(baseline), gated=per_trade_metrics(gated))

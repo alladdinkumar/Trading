@@ -61,3 +61,25 @@ def test_forward_returns_matches_realized_return() -> None:
     as_of = df.index[250]
     fwd = forward_returns(panel, as_of, max_days=25)
     assert fwd["SYM"] == realized_return(df, as_of, max_days=25)
+
+
+def test_per_trade_metrics_on_known_returns() -> None:
+    from trading.backtest.factor_eval import per_trade_metrics
+    from trading.backtest.metrics import sharpe as _sharpe
+
+    rets = [0.06, -0.04, 0.05, -0.03, 0.07]
+    m = per_trade_metrics(rets)
+    assert m.n == 5
+    assert m.hit_rate == 3 / 5
+    assert m.profit_factor == (0.06 + 0.05 + 0.07) / (0.04 + 0.03)
+    assert m.payoff == ((0.06 + 0.05 + 0.07) / 3) / ((0.04 + 0.03) / 2)
+    assert m.sharpe == _sharpe(pd.Series(rets), periods_per_year=12)
+
+
+def test_per_trade_metrics_empty_is_zeroed() -> None:
+    from trading.backtest.factor_eval import per_trade_metrics
+
+    m = per_trade_metrics([])
+    assert m.n == 0
+    assert m.sharpe == 0.0
+    assert m.profit_factor == 0.0
