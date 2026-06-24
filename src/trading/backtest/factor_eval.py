@@ -15,8 +15,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from trading.backtest.forward_return import realized_return
 from trading.backtest.metrics import sharpe as _sharpe
-from trading.ranking.ranker_labels import realized_return
 from trading.strategy.factors import eligible_set, factor_score
 from trading.strategy.rules import MIN_HISTORY_BARS, ScanContext, evaluate_symbol
 
