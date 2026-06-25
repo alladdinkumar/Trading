@@ -8,13 +8,16 @@
 
 ## Executive summary
 
-The architecture review (docs 00–08) produced **44 active findings** (1 earlier
+The architecture review (docs 00–08) produced **46 active findings** (1 earlier
 finding superseded; F-035/F-036 spun off from F-026's self-healing follow-up;
 F-037–F-042 added 2026-06-20 from the self-learning / outcome-feedback review;
 F-043/F-044 added 2026-06-20 — residual model-quality caveats the F-037/F-041 fixes
 surfaced but did not resolve; F-043 since fixed; F-045 added 2026-06-22 — the one
-residual layer back-edge the F-009 import-linter contract surfaced). **37 are now fixed** (F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043), leaving **7 open**. The system is **well-engineered at the
+residual layer back-edge the F-009 import-linter contract surfaced; F-046 added &
+fixed 2026-06-25 — the spurious mean-of-fold-Sharpes promotion statistic the
+shadow-ranker work uncovered; F-047 added 2026-06-25 — the residual i.i.d.
+assumption in the F-046 t-stat gate, deferred). **38 are now fixed** (F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043, F-046), leaving **8 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -44,18 +47,18 @@ and *how its results are measured*. Both are fixable with localized changes.
 |---|---:|---|
 | **High** | 1 | F-005† |
 | Med | 2 | F-044, F-045 |
-| Low | 4 | F-017, F-027, F-028, F-030 |
-| ✅ Fixed | 37 | F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043 |
+| Low | 5 | F-017, F-027, F-028, F-030, F-047 |
+| ✅ Fixed | 38 | F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043, F-046 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
 
 | Category | Count |
 |---|---:|
-| VULN (correctness/data-integrity) | 11 (all ✅: F-019, F-022, F-023, F-024, F-029, F-033, F-034, F-037, F-041, F-042, F-043) |
+| VULN (correctness/data-integrity) | 12 (all ✅: F-019, F-022, F-023, F-024, F-029, F-033, F-034, F-037, F-041, F-042, F-043, F-046) |
 | GAP (missing functionality/guardrail) | 12 (F-003 ✅, F-009 ✅, F-010 ✅, F-013 ✅, F-015 ✅, F-032 ✅; F-044 open) |
 | INACC (code ≠ spec/docstring) | 7 (F-001 ✅, F-020 ✅, F-021 ✅, F-031 ✅) |
-| DEBT (cleanup) | 9 (F-004 ✅, F-006 ✅, F-007 ✅, F-008 ✅; F-045 open) |
+| DEBT (cleanup) | 10 (F-004 ✅, F-006 ✅, F-007 ✅, F-008 ✅; F-045, F-047 open) |
 
 ## Remediation roadmap
 
@@ -1153,10 +1156,65 @@ track record is visible to the *planner* (via calibration) but invisible to the
   (`actual_return_at_horizon`) back onto the training frame, and either blend it
   with or replace the replay label once the live book has enough closed trades to
   train on. Deeper than the calibration loop — needs its own spec.
+- **Update 2026-06-25 (partial — shadow-ranker honest gate):** the *realised
+  training join* stays **open** (live book has only 3 closed trades; a trainable
+  realised set is ~a year out — measured, not guessed). What landed instead: the
+  ranker is now an honest **silent** shadow learner. `train_walkforward` computes a
+  trade-weighted **pooled** OOS statistic; promotion is gated by `_is_usable`
+  (t-stat ≥ 2.0 over ≥ 50 pooled trades **and** a majority of folds positive),
+  with a 2-consecutive-week persistence check reading a new dated `ranker_eval_log`
+  verdict table. Replaces the bare positive-Sharpe floor; the model now goes
+  dormant *by honest measurement*. The magnitude-aware/abstention work (formerly
+  mis-cited as F-045 — the layering debt — now corrected to F-044) feeds this gate.
+  Spec: `docs/superpowers/specs/2026-06-25-shadow-ranker-honest-gate-design.md`;
+  the spurious-promotion-statistic risk it fixed is [[F-046]].
+
+### F-046 — Promotion gated on mean-of-fold Sharpes (`VULN`, Med, Phase 16) — ✅ Fixed 2026-06-25
+The [[F-043]] floor gated promotion on `oos_sharpe_mean`, the arithmetic mean of
+per-fold Sharpes. With the abstention + top-K cap, folds shrink to 1–15 trades, so
+a single lucky small fold inflates the mean above the floor and **spuriously
+promotes a no-edge model**. Verified on the real branch: a walk-forward over 62
+symbols / 2021–2026 reported `oos_sharpe_mean = +2.574` — clearing the 0.0 floor —
+yet the honest picture was a pooled hit-rate of 0.27 and a median fold Sharpe of
+−0.26, the headline number carried entirely by one +83.5-Sharpe / 3-trade fold.
+**Fixed** by a trade-weighted **pooled** statistic plus `_is_usable` (t-stat ≥ 2.0
+over ≥ `MIN_OOS_TRADES`=50 pooled trades + majority-fold breadth) and a
+2-consecutive-week persistence gate, replacing the bare floor. TDD across
+`test_ranker_train`, `test_model_registry`, `test_repo`/`test_migrations`,
+`test_jobs_weekly_train`; full suite green (1088).
+
+### F-047 — Usable-gate t-stat assumes i.i.d. trades; overlap overstates significance (`DEBT`, Low, Phase 16)
+The [[F-046]] gate clears a model when `t = (mean/std)·√N ≥ 2.0` over the pooled
+OOS trades. That formula assumes **independent** samples, but the pooled per-trade
+net returns are not i.i.d.: positions overlap (holds up to `max_days`=25 bars),
+multiple names share signal dates, and concurrent trades are cross-correlated.
+The **effective** sample size is therefore smaller than `N`, so the t-statistic
+**overstates** significance — the gate is somewhat more lenient than its nominal
+~97.5% one-sided confidence implies (López de Prado's overlapping-outcomes /
+backtest-overfitting bias).
+- **Why it's only Low / deferred:** the gate is a *conjunction* — t-stat **and**
+  majority-fold breadth **and** 2 consecutive weekly usable verdicts. Breadth forces
+  the edge across distinct regimes and persistence forces it to recur on fresh OOS
+  weeks; both attack exactly what overlap inflation cannot fake, so the practical
+  false-positive rate is far below the nominal t alone. The system also errs toward
+  *silence* (false-negatives), the safe direction for a paper run.
+- **Fix idea:** replace the parametric t-stat with a **block bootstrap** CI on the
+  pooled returns (blocks ≈ the holding horizon, to preserve overlap structure), or
+  deflate `N` by an estimated autocorrelation/concurrency factor (effective-N).
+  Can't be meaningfully calibrated until enough real, non-overlapping trades exist —
+  ties to the deferred realised-outcome join under [[F-044]]. Needs its own pass.
 
 ---
 
-_Counts: 7 open · 1 superseded · 37 fixed. Updated 2026-06-22 (layering cluster
+_Counts: 8 open · 1 superseded · 38 fixed. Updated 2026-06-25 (F-047 added — the
+F-046 usable-gate t-stat assumes i.i.d. trades; overlapping holds overstate
+significance, fix = block-bootstrap CI / effective-N, deferred until real trades
+accrue. F-046 added & fixed
+— the shadow-ranker honest OOS gate: a trade-weighted pooled statistic + `_is_usable`
+[t-stat ≥ 2.0 over ≥ 50 pooled trades + majority-fold breadth] + 2-consecutive-week
+persistence reading a new `ranker_eval_log` table replace the spurious
+mean-of-fold-Sharpes promotion floor; F-044 re-scoped — realised training join still
+open, magnitude/abstention comments re-cited F-045→F-044). Earlier updated 2026-06-22 (layering cluster
 F-006/F-007/F-008/F-009 fixed — neutral `trading/domain.py` for cross-layer DTOs
 so `store` no longer imports `data` [F-006]; `snapshot_and_classify` moved to
 `features.regime`, making `data.macro` fetch-only [F-007]; `ranker*` moved into a

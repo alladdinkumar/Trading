@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-CURRENT_VERSION = 6
+CURRENT_VERSION = 7
 
 
 SCHEMA_V1 = """
@@ -298,6 +298,25 @@ ALTER TABLE predictions ADD COLUMN neg_news_7d INTEGER;
 """
 
 
+# v7 (F-044/F-046): dated weekly "is the ranker usable yet?" verdict. One row per
+# Sunday eval. `usable` is the pooled-gate result; the 2-consecutive persistence
+# check (G3) reads this table. PK as_of makes the Sunday re-run idempotent.
+SCHEMA_V7 = """
+CREATE TABLE IF NOT EXISTS ranker_eval_log (
+  as_of         TEXT NOT NULL,
+  pooled_sharpe REAL,
+  pooled_hit    REAL,
+  n_oos         INTEGER NOT NULL,
+  n_folds_pos   INTEGER NOT NULL,
+  n_folds_total INTEGER NOT NULL,
+  usable        INTEGER NOT NULL,
+  note          TEXT,
+  created_at    TEXT NOT NULL,
+  PRIMARY KEY (as_of)
+);
+"""
+
+
 def _current_db_version(conn: sqlite3.Connection) -> int:
     """Return the highest applied version, or 0 if schema_version doesn't exist yet."""
     row = conn.execute(
@@ -352,5 +371,11 @@ def run_migrations(conn: sqlite3.Connection) -> int:
         conn.execute(
             "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
             (6, datetime.now(UTC).isoformat()),
+        )
+    if current < 7:
+        conn.executescript(SCHEMA_V7)
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (7, datetime.now(UTC).isoformat()),
         )
     return CURRENT_VERSION

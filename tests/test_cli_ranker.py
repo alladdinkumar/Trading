@@ -60,6 +60,9 @@ def test_ranker_status_lists_rows(isolated_paths: Paths) -> None:
             path=str(pkl.relative_to(isolated_paths.project_root)),
             active=True,
             notes="hello",
+            n_oos_trades=60,
+            n_folds_positive=3,
+            n_folds_total=4,
         ),
         promote=True,
     )

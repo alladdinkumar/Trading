@@ -471,3 +471,99 @@ def test_retrain_success_registers_and_saves_model(paths, notify_calls, monkeypa
     assert rows[0].notes == "weekly_train"
     text = result.review_path.read_text(encoding="utf-8")
     assert "Trained: yes — 42 examples" in text
+
+
+def test_first_usable_verdict_records_but_does_not_promote(paths, monkeypatch) -> None:
+    """G3 persistence: the first usable week records a verdict but must NOT
+    promote (needs 2 consecutive usable verdicts)."""
+    import lightgbm as lgb
+
+    from trading.jobs import weekly_train as wt
+    from trading.ranking.ranker_features import FEATURE_NAMES
+    from trading.ranking.ranker_io import TrainingInputs
+    from trading.ranking.ranker_train import TrainResult
+    from trading.store.db import get_conn
+    from trading.store.repo import latest_ranker_eval
+
+    monkeypatch.setattr(
+        wt, "load_training_inputs",
+        lambda p, c: TrainingInputs(
+            enriched={"RVNL": pd.DataFrame({"close": [1.0]})},
+            macro_history=pd.DataFrame(), sentiment_lookup={},
+            negative_news_lookup={},
+        ),
+    )
+    usable_stub = TrainResult(
+        folds=(), final_model=lgb.LGBMClassifier(),
+        final_train_start=pd.Timestamp("2023-06-14"),
+        final_train_end=pd.Timestamp("2026-06-14"),
+        n_final_examples=42,
+        oos_sharpe_mean=float("nan"), oos_hit_rate_mean=float("nan"),
+        feature_names=FEATURE_NAMES,
+        oos_sharpe_pooled=1.5, oos_hit_pooled=0.55,
+        n_oos_total=60, n_folds_positive=4, n_folds_total=6,
+    )
+    monkeypatch.setattr(wt, "train_walkforward", lambda **_kw: usable_stub)
+
+    paths.models_dir.mkdir(parents=True, exist_ok=True)
+    paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        out = wt._step_retrain(paths, conn, date(2026, 6, 21), skip_train=False)
+        assert out.usable is True
+        assert out.promoted is False          # first usable -> records, no promote
+        latest = latest_ranker_eval(conn)
+        assert latest is not None
+        assert latest.as_of == "2026-06-21"
+        assert latest.usable is True
+
+
+def test_two_consecutive_usable_verdicts_promote(paths, monkeypatch) -> None:
+    """The second consecutive usable week clears the persistence gate."""
+    import lightgbm as lgb
+
+    from trading.jobs import weekly_train as wt
+    from trading.ranking.ranker_features import FEATURE_NAMES
+    from trading.ranking.ranker_io import TrainingInputs
+    from trading.ranking.ranker_train import TrainResult
+    from trading.store.db import get_conn
+
+    monkeypatch.setattr(
+        wt, "load_training_inputs",
+        lambda p, c: TrainingInputs(
+            enriched={"RVNL": pd.DataFrame({"close": [1.0]})},
+            macro_history=pd.DataFrame(), sentiment_lookup={},
+            negative_news_lookup={},
+        ),
+    )
+
+    def _usable(end: pd.Timestamp) -> TrainResult:
+        m = lgb.LGBMClassifier()
+        import numpy as np
+        m.fit(np.array([[0.0], [1.0]]), np.array([0, 1]))
+        return TrainResult(
+            folds=(), final_model=m,
+            final_train_start=pd.Timestamp("2023-06-14"), final_train_end=end,
+            n_final_examples=42, oos_sharpe_mean=float("nan"),
+            oos_hit_rate_mean=float("nan"), feature_names=FEATURE_NAMES,
+            oos_sharpe_pooled=1.5, oos_hit_pooled=0.55,
+            n_oos_total=60, n_folds_positive=4, n_folds_total=6,
+        )
+
+    paths.models_dir.mkdir(parents=True, exist_ok=True)
+    paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        monkeypatch.setattr(
+            wt, "train_walkforward",
+            lambda **_kw: _usable(pd.Timestamp("2026-06-21")),
+        )
+        out1 = wt._step_retrain(paths, conn, date(2026, 6, 21), skip_train=False)
+        assert out1.promoted is False
+        monkeypatch.setattr(
+            wt, "train_walkforward",
+            lambda **_kw: _usable(pd.Timestamp("2026-06-28")),
+        )
+        out2 = wt._step_retrain(paths, conn, date(2026, 6, 28), skip_train=False)
+        assert out2.usable is True
+        assert out2.promoted is True          # 2 consecutive -> promote

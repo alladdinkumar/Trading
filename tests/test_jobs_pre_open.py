@@ -769,6 +769,9 @@ def _register_passive_top1_model(paths) -> None:
             path=str(pkl.relative_to(paths.project_root)),
             active=True,
             notes="test",
+            n_oos_trades=60,
+            n_folds_positive=3,
+            n_folds_total=4,
         ),
         promote=True,
     )

@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 from trading.features.technicals import add_indicators
-from trading.ranking.ranker_labels import label_candidate
+from trading.ranking.ranker_labels import label_candidate, realized_return
 
 
 def _trend_df(close_path: list[float], atr: float = 2.0) -> pd.DataFrame:
@@ -79,3 +79,32 @@ def test_label_time_exit_positive_returns_1() -> None:
     signal_date = df.index[49]
     label = label_candidate(df, signal_date)
     assert label == 1
+
+
+def test_realized_return_positive_and_agrees_with_label_on_winner() -> None:
+    """A winning path returns a positive fractional net return, and the binary
+    label is the sign of that return."""
+    warmup = [100.0] * 50
+    forward = [101, 103, 108, 115, 125, 130, 122, 121, 120, 119] + [120] * 20
+    df = _trend_df(warmup + forward)
+    signal_date = df.index[49]
+    r = realized_return(df, signal_date)
+    assert r is not None
+    assert r > 0
+    assert label_candidate(df, signal_date) == (1 if r > 0 else 0)
+
+
+def test_realized_return_negative_on_stopped_out_trade() -> None:
+    warmup = [100.0] * 50
+    forward = [100, 95, 90, 88, 85, 83, 82, 80, 80, 80] + [80] * 20
+    df = _trend_df(warmup + forward, atr=2.0)
+    signal_date = df.index[49]
+    r = realized_return(df, signal_date)
+    assert r is not None
+    assert r < 0
+
+
+def test_realized_return_none_when_window_too_short() -> None:
+    df = _trend_df([100.0] * 60)
+    signal_date = df.index[-1]
+    assert realized_return(df, signal_date) is None
