@@ -39,7 +39,8 @@
   ## Retrain outcome
   
   - Trained: yes — 42 examples, OOS Sharpe n/a
-  - Promoted: no (deadband held)
+  - Promoted: no (held — gate not cleared)
+  - Ranker: pooled OOS stat unavailable — staying silent.
   - Model: `models/ranker_2026-06-14.pkl`
   
   '''

@@ -35,9 +35,15 @@ from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
 from trading.store.model_registry import (
     RegistryRow,
+    _is_usable,
     has_row_for_train_end,
     register,
     save_model,
+)
+from trading.store.repo import (
+    RankerEval,
+    insert_ranker_eval,
+    latest_ranker_eval,
 )
 
 TRAIN_WINDOW_YEARS = 3
@@ -137,6 +143,10 @@ class RetrainOutcome:
     oos_sharpe: float | None
     promoted: bool
     model_path: str | None
+    # F-046 shadow-ranker verdict (None/False when no retrain ran).
+    pooled_sharpe: float | None = None
+    n_oos: int | None = None
+    usable: bool = False
 
 
 @dataclass(frozen=True)
@@ -392,9 +402,18 @@ def render_weekly_review(data: ReviewData, retrain: RetrainOutcome) -> str:
             if retrain.oos_sharpe is not None and not math.isnan(retrain.oos_sharpe)
             else "n/a"
         )
+        verdict = (
+            f"Ranker {'USABLE' if retrain.usable else 'NOT usable'}: pooled OOS "
+            f"Sharpe {retrain.pooled_sharpe:.2f} over N={retrain.n_oos} — "
+            f"{'promoting' if retrain.promoted else 'staying silent'}."
+            if retrain.pooled_sharpe is not None
+            and not math.isnan(retrain.pooled_sharpe)
+            else "Ranker: pooled OOS stat unavailable — staying silent."
+        )
         lines += [
             f"- Trained: yes — {retrain.examples} examples, OOS Sharpe {sharpe_txt}",
-            f"- Promoted: {'yes' if retrain.promoted else 'no (deadband held)'}",
+            f"- Promoted: {'yes' if retrain.promoted else 'no (held — gate not cleared)'}",
+            f"- {verdict}",
             f"- Model: `{retrain.model_path}`",
         ]
     else:
@@ -445,23 +464,70 @@ def _step_retrain(
         return RetrainOutcome(False, str(e), None, None, False, None)
 
     pkl_rel = f"models/ranker_{end_iso}.pkl"
-    save_model(paths.project_root / pkl_rel, result.final_model, FEATURE_NAMES)
+    save_model(
+        paths.project_root / pkl_rel,
+        result.final_model,
+        FEATURE_NAMES,
+        threshold=result.threshold,
+    )
+
+    usable = _is_usable(
+        result.oos_sharpe_pooled,
+        result.n_oos_total,
+        result.n_folds_positive,
+        result.n_folds_total,
+    )
+    # G3 persistence: read the PREVIOUS verdict before writing this week's, then
+    # promote only when this week AND last week are both usable (2 consecutive).
+    prev = latest_ranker_eval(conn)
+    streak_ok = usable and prev is not None and prev.usable
+    note = (
+        f"pooled Sharpe {result.oos_sharpe_pooled:.2f} over N={result.n_oos_total}, "
+        f"hit {result.oos_hit_pooled:.2f}, folds {result.n_folds_positive}/"
+        f"{result.n_folds_total} -> {'USABLE' if usable else 'not usable'}"
+    )
+    insert_ranker_eval(
+        conn,
+        RankerEval(
+            as_of=end_iso,
+            pooled_sharpe=result.oos_sharpe_pooled,
+            pooled_hit=result.oos_hit_pooled,
+            n_oos=result.n_oos_total,
+            n_folds_pos=result.n_folds_positive,
+            n_folds_total=result.n_folds_total,
+            usable=usable,
+            note=note,
+            created_at=datetime.now(UTC).isoformat(),
+        ),
+    )
+
     row = RegistryRow(
         version=end_iso,
         trained_at=datetime.now(UTC).isoformat(),
         train_start=str(result.final_train_start.date()),
         train_end=end_iso,
-        oos_sharpe=result.oos_sharpe_mean,
-        oos_hit_rate=result.oos_hit_rate_mean,
+        oos_sharpe=result.oos_sharpe_pooled,
+        oos_hit_rate=result.oos_hit_pooled,
         n_train_examples=result.n_final_examples,
         n_features=len(FEATURE_NAMES),
         path=pkl_rel,
         active=False,
         notes="weekly_train",
+        n_oos_trades=result.n_oos_total,
+        n_folds_positive=result.n_folds_positive,
+        n_folds_total=result.n_folds_total,
     )
-    promoted = register(paths, row=row, promote=True)
+    promoted = register(paths, row=row, promote=streak_ok)
     return RetrainOutcome(
-        True, None, result.n_final_examples, result.oos_sharpe_mean, promoted, pkl_rel
+        True,
+        None,
+        result.n_final_examples,
+        result.oos_sharpe_pooled,
+        promoted,
+        pkl_rel,
+        pooled_sharpe=result.oos_sharpe_pooled,
+        n_oos=result.n_oos_total,
+        usable=usable,
     )
 
 
@@ -484,6 +550,13 @@ def _slack_body(data: ReviewData, retrain: RetrainOutcome) -> str:
         lines.append(
             f"Retrain: {retrain.examples} examples, "
             f"{'PROMOTED' if retrain.promoted else 'not promoted'}"
+        )
+        lines.append(
+            f"Ranker {'usable' if retrain.usable else 'NOT usable'} "
+            f"(pooled Sharpe {retrain.pooled_sharpe:.2f}, N={retrain.n_oos})"
+            if retrain.pooled_sharpe is not None
+            and not math.isnan(retrain.pooled_sharpe)
+            else "Ranker: pooled stat unavailable — silent"
         )
     else:
         lines.append(f"Retrain: skipped — {retrain.skip_reason}")

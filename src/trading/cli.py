@@ -2041,27 +2041,31 @@ def train_ranker(
         )
     console.print(table)
     console.print(
-        f"OOS Sharpe mean: {result.oos_sharpe_mean:.3f} | "
-        f"OOS hit-rate mean: {result.oos_hit_rate_mean:.3f} | "
+        f"OOS Sharpe (pooled): {result.oos_sharpe_pooled:.3f} | "
+        f"hit (pooled): {result.oos_hit_pooled:.3f} | "
+        f"N={result.n_oos_total} folds {result.n_folds_positive}/{result.n_folds_total} | "
         f"final examples: {result.n_final_examples}"
     )
 
     version = end_ts.strftime("%Y-%m-%d")
     pkl_rel = f"models/ranker_{version}.pkl"
     pkl_path = paths.project_root / pkl_rel
-    save_model(pkl_path, result.final_model, FEATURE_NAMES)
+    save_model(pkl_path, result.final_model, FEATURE_NAMES, threshold=result.threshold)
     row = RegistryRow(
         version=version,
         trained_at=datetime.now(UTC).isoformat(),
         train_start=str(result.final_train_start.date()),
         train_end=str(result.final_train_end.date()),
-        oos_sharpe=result.oos_sharpe_mean,
-        oos_hit_rate=result.oos_hit_rate_mean,
+        oos_sharpe=result.oos_sharpe_pooled,
+        oos_hit_rate=result.oos_hit_pooled,
         n_train_examples=result.n_final_examples,
         n_features=len(FEATURE_NAMES),
         path=pkl_rel,
         active=False,
         notes="",
+        n_oos_trades=result.n_oos_total,
+        n_folds_positive=result.n_folds_positive,
+        n_folds_total=result.n_folds_total,
     )
     became_active = register(paths, row=row, promote=promote)
     console.print(f"saved {pkl_rel} (active={became_active})")
@@ -2073,8 +2077,10 @@ def train_ranker(
             f"# Ranker training run {version}\n\n"
             f"- Train period: {result.final_train_start.date()} → {result.final_train_end.date()}\n"
             f"- Final examples: {result.n_final_examples}\n"
-            f"- OOS Sharpe mean: {result.oos_sharpe_mean:.3f}\n"
-            f"- OOS hit-rate mean: {result.oos_hit_rate_mean:.3f}\n"
+            f"- OOS Sharpe (pooled): {result.oos_sharpe_pooled:.3f} "
+            f"over N={result.n_oos_total} ({result.n_folds_positive}/"
+            f"{result.n_folds_total} folds positive)\n"
+            f"- OOS hit-rate (pooled): {result.oos_hit_pooled:.3f}\n"
             f"- Active: {became_active}\n\n"
             f"## Per-fold metrics\n\n"
             + "\n".join(
