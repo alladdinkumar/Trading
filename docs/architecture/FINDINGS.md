@@ -8,15 +8,16 @@
 
 ## Executive summary
 
-The architecture review (docs 00–08) produced **45 active findings** (1 earlier
+The architecture review (docs 00–08) produced **46 active findings** (1 earlier
 finding superseded; F-035/F-036 spun off from F-026's self-healing follow-up;
 F-037–F-042 added 2026-06-20 from the self-learning / outcome-feedback review;
 F-043/F-044 added 2026-06-20 — residual model-quality caveats the F-037/F-041 fixes
 surfaced but did not resolve; F-043 since fixed; F-045 added 2026-06-22 — the one
 residual layer back-edge the F-009 import-linter contract surfaced; F-046 added &
 fixed 2026-06-25 — the spurious mean-of-fold-Sharpes promotion statistic the
-shadow-ranker work uncovered). **38 are now fixed** (F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043, F-046), leaving **7 open**. The system is **well-engineered at the
+shadow-ranker work uncovered; F-047 added 2026-06-25 — the residual i.i.d.
+assumption in the F-046 t-stat gate, deferred). **38 are now fixed** (F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043, F-046), leaving **8 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -46,7 +47,7 @@ and *how its results are measured*. Both are fixable with localized changes.
 |---|---:|---|
 | **High** | 1 | F-005† |
 | Med | 2 | F-044, F-045 |
-| Low | 4 | F-017, F-027, F-028, F-030 |
+| Low | 5 | F-017, F-027, F-028, F-030, F-047 |
 | ✅ Fixed | 38 | F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043, F-046 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
@@ -57,7 +58,7 @@ future Phase 19 — out of scope for hardening the paper run.
 | VULN (correctness/data-integrity) | 12 (all ✅: F-019, F-022, F-023, F-024, F-029, F-033, F-034, F-037, F-041, F-042, F-043, F-046) |
 | GAP (missing functionality/guardrail) | 12 (F-003 ✅, F-009 ✅, F-010 ✅, F-013 ✅, F-015 ✅, F-032 ✅; F-044 open) |
 | INACC (code ≠ spec/docstring) | 7 (F-001 ✅, F-020 ✅, F-021 ✅, F-031 ✅) |
-| DEBT (cleanup) | 9 (F-004 ✅, F-006 ✅, F-007 ✅, F-008 ✅; F-045 open) |
+| DEBT (cleanup) | 10 (F-004 ✅, F-006 ✅, F-007 ✅, F-008 ✅; F-045, F-047 open) |
 
 ## Remediation roadmap
 
@@ -1182,9 +1183,33 @@ over ≥ `MIN_OOS_TRADES`=50 pooled trades + majority-fold breadth) and a
 `test_ranker_train`, `test_model_registry`, `test_repo`/`test_migrations`,
 `test_jobs_weekly_train`; full suite green (1088).
 
+### F-047 — Usable-gate t-stat assumes i.i.d. trades; overlap overstates significance (`DEBT`, Low, Phase 16)
+The [[F-046]] gate clears a model when `t = (mean/std)·√N ≥ 2.0` over the pooled
+OOS trades. That formula assumes **independent** samples, but the pooled per-trade
+net returns are not i.i.d.: positions overlap (holds up to `max_days`=25 bars),
+multiple names share signal dates, and concurrent trades are cross-correlated.
+The **effective** sample size is therefore smaller than `N`, so the t-statistic
+**overstates** significance — the gate is somewhat more lenient than its nominal
+~97.5% one-sided confidence implies (López de Prado's overlapping-outcomes /
+backtest-overfitting bias).
+- **Why it's only Low / deferred:** the gate is a *conjunction* — t-stat **and**
+  majority-fold breadth **and** 2 consecutive weekly usable verdicts. Breadth forces
+  the edge across distinct regimes and persistence forces it to recur on fresh OOS
+  weeks; both attack exactly what overlap inflation cannot fake, so the practical
+  false-positive rate is far below the nominal t alone. The system also errs toward
+  *silence* (false-negatives), the safe direction for a paper run.
+- **Fix idea:** replace the parametric t-stat with a **block bootstrap** CI on the
+  pooled returns (blocks ≈ the holding horizon, to preserve overlap structure), or
+  deflate `N` by an estimated autocorrelation/concurrency factor (effective-N).
+  Can't be meaningfully calibrated until enough real, non-overlapping trades exist —
+  ties to the deferred realised-outcome join under [[F-044]]. Needs its own pass.
+
 ---
 
-_Counts: 7 open · 1 superseded · 38 fixed. Updated 2026-06-25 (F-046 added & fixed
+_Counts: 8 open · 1 superseded · 38 fixed. Updated 2026-06-25 (F-047 added — the
+F-046 usable-gate t-stat assumes i.i.d. trades; overlapping holds overstate
+significance, fix = block-bootstrap CI / effective-N, deferred until real trades
+accrue. F-046 added & fixed
 — the shadow-ranker honest OOS gate: a trade-weighted pooled statistic + `_is_usable`
 [t-stat ≥ 2.0 over ≥ 50 pooled trades + majority-fold breadth] + 2-consecutive-week
 persistence reading a new `ranker_eval_log` table replace the spurious
