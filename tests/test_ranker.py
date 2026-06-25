@@ -105,10 +105,10 @@ def _toy_model() -> lgb.LGBMClassifier:
     return m
 
 
-def _register_active_model(paths: Paths) -> None:
+def _register_active_model(paths: Paths, *, threshold: float | None = None) -> None:
     paths.models_dir.mkdir(parents=True, exist_ok=True)
     pkl = paths.models_dir / "ranker_2024-12-31.pkl"
-    save_model(pkl, _toy_model(), FEATURE_NAMES)
+    save_model(pkl, _toy_model(), FEATURE_NAMES, threshold=threshold)
     register(
         paths,
         row=RegistryRow(
@@ -123,6 +123,9 @@ def _register_active_model(paths: Paths) -> None:
             path=str(pkl.relative_to(paths.project_root)),
             active=True,
             notes="test",
+            n_oos_trades=60,
+            n_folds_positive=3,
+            n_folds_total=4,
         ),
         promote=True,
     )
@@ -151,6 +154,28 @@ def test_active_model_scores_and_filters_to_top_k(tmp_path: Path) -> None:
     assert scores_selected == scores_all[:3]
 
 
+def test_threshold_lets_model_abstain(tmp_path: Path) -> None:
+    """Tier 2b: with a calibrated threshold, candidates the model scores below it
+    are not selected (the model abstains) even if they'd be in the top-K — but
+    ml_score is still recorded for every candidate."""
+    paths = _paths(tmp_path)
+    paths.data_dir.mkdir(parents=True, exist_ok=True)
+    paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    syms = [f"SYM{i}" for i in range(8)]
+    _seed_universe(paths, syms)
+    # Threshold above any possible probability ⇒ the model declines everything.
+    _register_active_model(paths, threshold=1.01)
+
+    with get_conn(paths.db_path) as conn:
+        run_migrations(conn)
+        cands = [_candidate(s, date(2024, 12, 31)) for s in syms]
+        out = score_and_filter(cands, paths, conn, date(2024, 12, 31), k=3)
+
+    assert len(out) == 8
+    assert all(sc.ml_score is not None for sc in out)
+    assert sum(1 for sc in out if sc.selected) == 0
+
+
 def test_missing_pkl_falls_back_to_cold_start(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     paths.data_dir.mkdir(parents=True, exist_ok=True)
@@ -172,6 +197,9 @@ def test_missing_pkl_falls_back_to_cold_start(tmp_path: Path) -> None:
             path="models/missing.pkl",
             active=True,
             notes="dangling",
+            n_oos_trades=60,
+            n_folds_positive=3,
+            n_folds_total=4,
         ),
         promote=True,
     )
