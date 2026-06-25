@@ -172,6 +172,12 @@ def score_and_filter(
     proba = am.model.predict_proba(X.values)[:, 1]
     ranked_idx = sorted(range(len(proba)), key=lambda i: -proba[i])
     selected = set(ranked_idx[:k])
+    # Meta-labeling act/pass gate (F-044): if the model carries a calibrated
+    # threshold, drop top-K picks it scores below it — the model abstains rather
+    # than being forced to trade every rules-passing candidate. ml_score is still
+    # recorded for all. No threshold (older model) → top-K-only, as before.
+    if am.threshold is not None:
+        selected = {i for i in selected if proba[i] >= am.threshold}
     return [
         ScoredCandidate(
             candidate=cand_index[i],

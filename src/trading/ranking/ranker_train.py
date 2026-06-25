@@ -38,7 +38,7 @@ MIN_TRAIN_EXAMPLES = 30
 # Layer-A base rate of every rules-passing candidate (F-044).
 OOS_TOP_K = 5
 # Minimum trades a probability threshold must admit before it's a trustworthy
-# calibration point — fewer than this and the Sharpe is noise (F-045).
+# calibration point — fewer than this and the Sharpe is noise (F-044).
 MIN_THRESHOLD_TRADES = 20
 
 
@@ -47,7 +47,7 @@ class _FoldXY(NamedTuple):
 
     `w` is the per-sample weight (∝ |return|) so the classifier optimises
     expectancy rather than hit rate; `rets` is the signed realised return used
-    to calibrate the act/pass threshold (F-045)."""
+    to calibrate the act/pass threshold (F-044)."""
 
     X: pd.DataFrame
     y: np.ndarray[Any, Any]
@@ -99,7 +99,7 @@ class TrainResult:
     oos_sharpe_mean: float
     oos_hit_rate_mean: float
     feature_names: tuple[str, ...]
-    # Calibrated act/pass probability threshold for the final model (F-045).
+    # Calibrated act/pass probability threshold for the final model (F-044).
     # None when no threshold admitted enough trades — production falls back to
     # top-K-only selection.
     threshold: float | None = None
@@ -124,7 +124,7 @@ def _build_xy_for_window(
     """Walk each (symbol, date) in [train_start, train_end), evaluate Layer A,
     and build (X, y, w, rets) for every all-pass candidate with a resolvable
     forward window. `w` (∝ |return|) weights training toward economically large
-    outcomes; `rets` is the signed realised return (F-045)."""
+    outcomes; `rets` is the signed realised return (F-044)."""
     feat_rows: list[dict[str, float]] = []
     rets: list[float] = []
     for sym, df in enriched.items():
@@ -197,7 +197,7 @@ def calibrate_threshold(
     This is the meta-labeling gate: it lets the model *decline* low-conviction
     setups (trade nothing on a weak day) instead of being forced to trade every
     rules-passing candidate. Returns None when no threshold admits enough trades —
-    the caller then falls back to top-K-only selection (F-045).
+    the caller then falls back to top-K-only selection (F-044).
     """
     p = np.asarray(proba, dtype=float)
     r = np.asarray(rets, dtype=float)
@@ -237,7 +237,7 @@ def _evaluate_fold_oos(
     (mirroring `score_and_filter`). The Sharpe + hit rate are computed over the
     **realised net returns** of the selected trades (Phase 6 exit replay) — a
     magnitude-aware metric, not `sharpe(label*2-1)` which is a pure transform of
-    hit rate and blind to the strategy's payoff asymmetry (F-045). This is the
+    hit rate and blind to the strategy's payoff asymmetry (F-044). This is the
     basis F-043 gates promotion on. Returns (n_trades, sharpe, hit_rate).
     """
     feat_rows: list[dict[str, float]] = []

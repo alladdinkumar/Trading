@@ -80,7 +80,7 @@ class ActiveModel:
     row: RegistryRow
     model: lgb.LGBMClassifier
     feature_names: tuple[str, ...]
-    # Calibrated act/pass probability threshold (F-045). None for models saved
+    # Calibrated act/pass probability threshold (F-044). None for models saved
     # before thresholds existed → inference falls back to top-K-only selection.
     threshold: float | None = None
 

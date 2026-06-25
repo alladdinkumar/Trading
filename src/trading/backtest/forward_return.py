@@ -40,7 +40,7 @@ def realized_return(
     Stop is `signal_date close − atr_stop_multiple × atr_14`; target / trail
     / time-exit are delegated to `strategy.exits.evaluate_exit` unchanged.
     Magnitude (not just sign) is what lets the ranker train on and be judged by
-    expectancy rather than hit rate (F-045).
+    expectancy rather than hit rate (F-044).
     """
     if signal_date not in enriched_df.index:
         return None
