@@ -58,6 +58,38 @@ def _sample_signal(symbol: str = "RVNL", ts: str = "2026-05-11T09:10:00") -> Sig
     )
 
 
+def test_ranker_eval_log_insert_and_latest(conn: sqlite3.Connection) -> None:
+    from trading.store.repo import (
+        RankerEval,
+        insert_ranker_eval,
+        latest_ranker_eval,
+    )
+
+    assert latest_ranker_eval(conn) is None
+    insert_ranker_eval(conn, RankerEval(
+        as_of="2026-06-21", pooled_sharpe=-0.3, pooled_hit=0.27,
+        n_oos=38, n_folds_pos=2, n_folds_total=7, usable=False,
+        note="not usable", created_at="2026-06-21T00:00:00Z",
+    ))
+    insert_ranker_eval(conn, RankerEval(
+        as_of="2026-06-28", pooled_sharpe=1.2, pooled_hit=0.55,
+        n_oos=60, n_folds_pos=4, n_folds_total=6, usable=True,
+        note="usable", created_at="2026-06-28T00:00:00Z",
+    ))
+    latest = latest_ranker_eval(conn)
+    assert latest is not None
+    assert latest.as_of == "2026-06-28"
+    assert latest.usable is True
+    # PK as_of makes a same-week re-run idempotent (INSERT OR REPLACE).
+    insert_ranker_eval(conn, RankerEval(
+        as_of="2026-06-28", pooled_sharpe=1.3, pooled_hit=0.56,
+        n_oos=61, n_folds_pos=4, n_folds_total=6, usable=True,
+        note="rerun", created_at="2026-06-28T01:00:00Z",
+    ))
+    rows = conn.execute("SELECT COUNT(*) AS c FROM ranker_eval_log").fetchone()
+    assert rows["c"] == 2
+
+
 def test_insert_and_get_signal(conn: sqlite3.Connection) -> None:
     sig = _sample_signal()
     sig_id = insert_signal(conn, sig)

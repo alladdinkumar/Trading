@@ -358,3 +358,67 @@ def matured_score_outcomes(conn: sqlite3.Connection) -> list[tuple[float, bool]]
         "AND actual_return_at_horizon IS NOT NULL"
     ).fetchall()
     return [(float(r["ml_score"]), float(r["actual_return_at_horizon"]) > 0) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Ranker eval log (F-044/F-046)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RankerEval:
+    """A dated weekly verdict on whether the shadow ranker is usable yet."""
+
+    as_of: str
+    pooled_sharpe: float | None
+    pooled_hit: float | None
+    n_oos: int
+    n_folds_pos: int
+    n_folds_total: int
+    usable: bool
+    note: str | None
+    created_at: str
+
+
+def insert_ranker_eval(conn: sqlite3.Connection, ev: RankerEval) -> None:
+    """Upsert this week's verdict (PK as_of → Sunday re-run is idempotent)."""
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO ranker_eval_log (
+          as_of, pooled_sharpe, pooled_hit, n_oos, n_folds_pos,
+          n_folds_total, usable, note, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            ev.as_of,
+            ev.pooled_sharpe,
+            ev.pooled_hit,
+            ev.n_oos,
+            ev.n_folds_pos,
+            ev.n_folds_total,
+            1 if ev.usable else 0,
+            ev.note,
+            ev.created_at,
+        ),
+    )
+
+
+def latest_ranker_eval(conn: sqlite3.Connection) -> RankerEval | None:
+    """The most recent weekly verdict, or None if the log is empty. Feeds the
+    G3 persistence gate (promote only after 2 consecutive usable verdicts)."""
+    row = conn.execute(
+        "SELECT * FROM ranker_eval_log ORDER BY as_of DESC LIMIT 1"
+    ).fetchone()
+    if row is None:
+        return None
+    return RankerEval(
+        as_of=row["as_of"],
+        pooled_sharpe=row["pooled_sharpe"],
+        pooled_hit=row["pooled_hit"],
+        n_oos=int(row["n_oos"]),
+        n_folds_pos=int(row["n_folds_pos"]),
+        n_folds_total=int(row["n_folds_total"]),
+        usable=bool(row["usable"]),
+        note=row["note"],
+        created_at=row["created_at"],
+    )

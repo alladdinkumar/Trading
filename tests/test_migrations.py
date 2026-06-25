@@ -35,6 +35,7 @@ EXPECTED_TABLES = {
     "event_calendar",
     "macro_reconciliation",
     "cash_ledger",
+    "ranker_eval_log",
 }
 
 
