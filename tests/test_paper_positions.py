@@ -14,6 +14,7 @@ from trading.paper.positions import (
     compute_positions,
     compute_summary,
     deployed_by_symbol,
+    open_lots_by_symbol,
 )
 from trading.store.migrations import run_migrations
 from trading.store.repo import Signal
@@ -122,6 +123,14 @@ def test_deployed_by_symbol_sums_open_cost_basis(conn: sqlite3.Connection) -> No
     _open(conn, "NESTLEIND", entry=110.0, qty=1, ts="2026-06-23T09:21:00")
     _open(conn, "TATASTEEL", entry=200.0, qty=3, ts="2026-06-23T09:20:00")
     assert deployed_by_symbol(conn) == {"NESTLEIND": 310.0, "TATASTEEL": 600.0}
+
+
+def test_open_lots_by_symbol_counts_open_entries(conn: sqlite3.Connection) -> None:
+    # Two open POWERGRID lots across two days + one TATASTEEL → counts, not notional.
+    _open(conn, "POWERGRID", entry=285.0, qty=10, ts="2026-06-16T09:20:00")
+    _open(conn, "POWERGRID", entry=288.0, qty=10, ts="2026-06-19T09:20:00")
+    _open(conn, "TATASTEEL", entry=200.0, qty=3, ts="2026-06-23T09:20:00")
+    assert open_lots_by_symbol(conn) == {"POWERGRID": 2, "TATASTEEL": 1}
 
 
 def test_already_opened_today_true_only_for_open_same_day(conn: sqlite3.Connection) -> None:

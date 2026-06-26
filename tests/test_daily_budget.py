@@ -11,10 +11,81 @@ from trading.strategy.daily_budget import (
 )
 
 
-def _cand(symbol: str, *, entry: float, target: float, ml: float | None, stop_frac: float = 0.97):
+def _cand(
+    symbol: str,
+    *,
+    entry: float,
+    target: float,
+    ml: float | None,
+    stop_frac: float = 0.97,
+    sector: str | None = None,
+):
     return BudgetCandidate(
-        symbol=symbol, entry=entry, stop=entry * stop_frac, target=target, ml_score=ml
+        symbol=symbol,
+        entry=entry,
+        stop=entry * stop_frac,
+        target=target,
+        ml_score=ml,
+        sector=sector,
     )
+
+
+def test_skips_symbol_already_open_at_lot_cap() -> None:
+    # F-048: a name already holding the max open lots (default 1) is not re-entered.
+    a = _cand("AAA", entry=100.0, target=130.0, ml=0.9)
+    plan = plan_daily_entries(
+        [a],
+        available_cash=1_000_000.0,
+        deployed_by_symbol={},
+        regime="RISK_ON",
+        open_lots_by_symbol={"AAA": 1},
+    )
+    assert plan.entries == []
+    assert any(sym == "AAA" and "lot" in reason.lower() for sym, reason in plan.skipped)
+
+
+def test_skips_sector_at_lot_cap() -> None:
+    # F-048: a sector already at the cap (default 2) blocks a further name in it.
+    a = _cand("AAA", entry=100.0, target=130.0, ml=0.9, sector="Power")
+    plan = plan_daily_entries(
+        [a],
+        available_cash=1_000_000.0,
+        deployed_by_symbol={},
+        regime="RISK_ON",
+        open_lots_by_sector={"Power": 2},
+    )
+    assert plan.entries == []
+    assert any(sym == "AAA" and "sector" in reason.lower() for sym, reason in plan.skipped)
+
+
+def test_sector_cap_counts_within_run() -> None:
+    # F-048: one Power lot already open + cap 2 ⇒ only one new Power name fits;
+    # the higher-EV one fills, the next is skipped on the sector cap.
+    a = _cand("AAA", entry=100.0, target=130.0, ml=0.9, sector="Power")
+    b = _cand("BBB", entry=100.0, target=130.0, ml=0.8, sector="Power")
+    plan = plan_daily_entries(
+        [a, b],
+        available_cash=1_000_000.0,
+        deployed_by_symbol={},
+        regime="RISK_ON",
+        daily_cap=1_000_000.0,  # headroom so the sector cap, not the budget, binds
+        open_lots_by_sector={"Power": 1},
+    )
+    assert [e.symbol for e in plan.entries] == ["AAA"]
+    assert any(sym == "BBB" and "sector" in reason.lower() for sym, reason in plan.skipped)
+
+
+def test_none_sector_exempt_from_sector_cap() -> None:
+    # Regression guard: sector-less candidates are never gated by the sector cap.
+    cands = [_cand(f"S{i}", entry=100.0, target=130.0, ml=0.7) for i in range(3)]
+    plan = plan_daily_entries(
+        cands,
+        available_cash=1_000_000.0,
+        deployed_by_symbol={},
+        regime="RISK_ON",
+        open_lots_by_sector={None: 5},
+    )
+    assert not any("sector" in reason.lower() for _, reason in plan.skipped)
 
 
 def test_calibration_corrects_optimistic_p_win() -> None:
@@ -75,13 +146,22 @@ def test_cash_gate_binds_when_cash_below_cap() -> None:
 
 
 def test_per_stock_cap_honored_via_deployed() -> None:
-    # 25% of 100k = 25k already deployed in AAA → stock cap leaves 0 room.
+    # 50% of 100k = 50k already deployed in AAA → stock cap leaves 0 room.
+    a = _cand("AAA", entry=100.0, target=130.0, ml=0.9)
+    plan = plan_daily_entries(
+        [a], available_cash=1_000_000.0, deployed_by_symbol={"AAA": 50_000.0}, regime="RISK_ON"
+    )
+    assert plan.entries == []
+    assert any(sym == "AAA" for sym, _ in plan.skipped)
+
+
+def test_per_stock_cap_allows_topup_below_50pct() -> None:
+    # 25k deployed is under the 50% (₹50k) cap, so a top-up still sizes.
     a = _cand("AAA", entry=100.0, target=130.0, ml=0.9)
     plan = plan_daily_entries(
         [a], available_cash=1_000_000.0, deployed_by_symbol={"AAA": 25_000.0}, regime="RISK_ON"
     )
-    assert plan.entries == []
-    assert any(sym == "AAA" for sym, _ in plan.skipped)
+    assert plan.entries and plan.entries[0].symbol == "AAA"
 
 
 def test_expensive_top_ev_clipped_cheaper_later_fills() -> None:

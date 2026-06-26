@@ -109,6 +109,37 @@ def test_apply_skips_when_planner_funds_zero(paths) -> None:
 
 
 @freeze_time("2026-06-23 09:21:00")
+def test_apply_skips_reentry_into_already_open_name(paths) -> None:
+    """F-048: an open lot from a *prior* day (so `already_opened_today` is False)
+    still blocks a fresh fill — the planner's per-symbol lot cap refuses lot #2."""
+    from trading.paper.ledger import log_signal_and_open_trade
+    from trading.store.repo import Signal
+
+    with get_conn(paths.db_path) as conn:
+        sig = Signal(
+            id=None, ts="2026-06-19T09:20:00", symbol="TATASTEEL", side="LONG",
+            entry=199.0, stop=192.0, target=210.0, horizon_days=25, created_by="test",
+        )
+        log_signal_and_open_trade(
+            conn, signal=sig, entry_ts="2026-06-19T09:20:00",
+            entry_price=199.0, qty=10, atr_at_entry=4.0,
+        )
+        conn.commit()
+
+    write_pending_entries(
+        paths,
+        AS_OF,
+        regime="NEUTRAL",
+        entries=[PendingEntry(symbol="TATASTEEL", atr_14=4.0, ml_score=0.6, ref_close=198.97)],
+    )
+    _write_quotes(paths, "0920", {"TATASTEEL": 205.0})
+
+    result = run_open_fills(AS_OF, paths=paths, apply=True)
+    assert result.trades_opened == 0
+    assert any("TATASTEEL" in w and "lot" in w.lower() for w in result.warnings)
+
+
+@freeze_time("2026-06-23 09:21:00")
 def test_apply_missing_quotes_aborts(paths) -> None:
     write_pending_entries(
         paths,

@@ -80,6 +80,21 @@ def deployed_by_symbol(conn: sqlite3.Connection) -> dict[str, float]:
     return {r["symbol"]: float(r["deployed"]) for r in rows}
 
 
+def open_lots_by_symbol(conn: sqlite3.Connection) -> dict[str, int]:
+    """Count of open paper lots (not notional) grouped by symbol.
+
+    Feeds the F-048 per-symbol/per-sector concentration caps in the daily planner:
+    `deployed_by_symbol` answers *how much* is in a name, this answers *how many
+    lots*, which is what the lot caps gate on.
+    """
+    rows = conn.execute(
+        "SELECT s.symbol AS symbol, COUNT(*) AS lots "
+        "FROM paper_trades pt JOIN signals s ON s.id = pt.signal_id "
+        "WHERE pt.ts_exit IS NULL GROUP BY s.symbol"
+    ).fetchall()
+    return {r["symbol"]: int(r["lots"]) for r in rows}
+
+
 def already_opened_today(conn: sqlite3.Connection, symbol: str, as_of: date) -> bool:
     """True if `symbol` has an OPEN paper-trade entered on `as_of`."""
     row = conn.execute(

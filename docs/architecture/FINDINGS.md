@@ -16,8 +16,10 @@ surfaced but did not resolve; F-043 since fixed; F-045 added 2026-06-22 — the 
 residual layer back-edge the F-009 import-linter contract surfaced; F-046 added &
 fixed 2026-06-25 — the spurious mean-of-fold-Sharpes promotion statistic the
 shadow-ranker work uncovered; F-047 added 2026-06-25 — the residual i.i.d.
-assumption in the F-046 t-stat gate, deferred). **38 are now fixed** (F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043, F-046), leaving **8 open**. The system is **well-engineered at the
+assumption in the F-046 t-stat gate, deferred; F-048 added 2026-06-25 — the daily
+planner's correlated-cluster concentration, selection half open / concentration half
+fixed). **38 are now fixed** (F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015,
+F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043, F-046), leaving **9 open**. The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -46,7 +48,7 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 1 | F-005† |
-| Med | 2 | F-044, F-045 |
+| Med | 3 | F-044, F-045, F-048 |
 | Low | 5 | F-017, F-027, F-028, F-030, F-047 |
 | ✅ Fixed | 38 | F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043, F-046 |
 
@@ -1204,9 +1206,42 @@ backtest-overfitting bias).
   Can't be meaningfully calibrated until enough real, non-overlapping trades exist —
   ties to the deferred realised-outcome join under [[F-044]]. Needs its own pass.
 
+### F-048 — Daily planner concentrates into correlated high-ATR names: no sector cap, unbounded re-entry, flat-prior EV ranks by volatility (`RISK`, Med, paper-run)
+The EV planner (`strategy.daily_budget.plan_daily_entries`) paced 16 paper entries
+into a book that ended **8/10 power-PSU** (4× POWERGRID, 3× NTPC, COALINDIA) with
+**no per-sector cap and no bound on day-over-day re-entry** into a name already
+held. The only concentration control was a 50%-of-pool *notional* per-stock cap,
+which never binds at the ₹7k daily-deploy pace. Two compounding causes:
+
+- **Selection (still open).** Every live `signals.ml_score` is NULL and the shadow
+  ranker is unpromoted (`ranker_eval_log` empty), so `calibrated_p_win` returns the
+  flat 0.5 prior for *every* candidate. EV then collapses to `0.5 × implied_return`,
+  and `implied_return = 2.5 × (entry − stop) = 3.75 × ATR%` — so the planner ranks
+  **purely by volatility**, funding the widest-ATR PSU names first and starving the
+  genuine winner (DRREDDY: lowest implied-return, ranked last, yet the only name to
+  hit target — twice). Ties to [[F-044]] (synthetic training labels) and the
+  ranker-promotion gate [[F-046]]/[[F-047]]; cannot close until real outcome labels
+  promote a model that actually discriminates.
+- **Concentration (fixed here).** With selection biased toward one correlated
+  cluster, the missing sector cap let the cluster stack, and a tight
+  `entry − 1.5×ATR` stop (~3.3–4% ≈ one ATR-day of range) meant a single sector
+  down-day stopped the cluster out together (COALINDIA on 2026-06-25; the rest left
+  "LAGGING" just above their stops). Realised over 6 closed trades: 2 wins / 4
+  losses, **+₹121 net** — flat only because R/R is 2.5:1.
+
+**Fix (concentration half):** `plan_daily_entries` now enforces a per-symbol
+open-lot cap (default 1 — no day-over-day pyramiding) and a per-sector open-lot cap
+(default 2), counting both already-open lots and within-run picks; `open_fills`
+supplies the open-lot maps and tags each candidate's sector. The selection half
+stays open pending real-outcome ranker promotion.
+
 ---
 
-_Counts: 8 open · 1 superseded · 38 fixed. Updated 2026-06-25 (F-047 added — the
+_Counts: 9 open · 1 superseded · 38 fixed. Updated 2026-06-25 (F-048 added — the
+daily planner concentrated into a correlated power-PSU cluster because EV ranks on
+volatility under a flat p_win prior [open, ties F-044] and nothing capped per-sector
+or day-over-day re-entry [concentration half fixed: per-symbol + per-sector open-lot
+caps in `daily_budget`]). Earlier 2026-06-25 (F-047 added — the
 F-046 usable-gate t-stat assumes i.i.d. trades; overlapping holds overstate
 significance, fix = block-bootstrap CI / effective-N, deferred until real trades
 accrue. F-046 added & fixed

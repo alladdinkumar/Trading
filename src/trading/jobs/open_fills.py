@@ -32,7 +32,11 @@ from trading.paper.pending import (
     PendingEntry,
     read_pending_entries,
 )
-from trading.paper.positions import already_opened_today, deployed_by_symbol
+from trading.paper.positions import (
+    already_opened_today,
+    deployed_by_symbol,
+    open_lots_by_symbol,
+)
 from trading.paper.reconcile import compute_paper_cash
 from trading.ranking.ranker import conviction_from_score
 from trading.store.db import get_conn
@@ -130,9 +134,19 @@ def run_open_fills(
                     stop=stop,
                     target=target_price(ltp, stop),
                     ml_score=pend.ml_score,
+                    sector=sector_map.get(pend.symbol),
                 )
             )
             meta[pend.symbol] = pend
+
+        # F-048: feed open-lot counts so the planner caps day-over-day re-entry into
+        # a held name and per-sector concentration (the correlated-cluster drawdown).
+        lots_by_symbol = open_lots_by_symbol(conn)
+        lots_by_sector: dict[str, int] = {}
+        for sym, lots in lots_by_symbol.items():
+            sec = sector_map.get(sym)
+            if sec is not None:
+                lots_by_sector[sec] = lots_by_sector.get(sec, 0) + lots
 
         p_win_cal = build_score_calibration(matured_score_outcomes(conn))
         plan = plan_daily_entries(
@@ -141,6 +155,8 @@ def run_open_fills(
             deployed_by_symbol=deployed_by_symbol(conn),
             regime=cast(Regime, regime),
             p_win_calibration=p_win_cal,
+            open_lots_by_symbol=lots_by_symbol,
+            open_lots_by_sector=lots_by_sector,
         )
 
         planned = {pe.symbol for pe in plan.entries}
@@ -207,9 +223,7 @@ def run_open_fills(
     update_dir = p.research_dir / as_of.isoformat()
     update_dir.mkdir(parents=True, exist_ok=True)
     update_path = update_dir / "open_fills.md"
-    update_path.write_text(
-        _render_open_fills(capture_ts, opened_rows, warnings), encoding="utf-8"
-    )
+    update_path.write_text(_render_open_fills(capture_ts, opened_rows, warnings), encoding="utf-8")
 
     return OpenFillsResult(
         as_of=as_of,
@@ -228,8 +242,7 @@ def _render_open_fills(
     warnings: list[str],
 ) -> str:
     lines = [
-        "## Open-fills — filled at live LTP, captured "
-        f"{capture_ts.isoformat(timespec='seconds')}",
+        f"## Open-fills — filled at live LTP, captured {capture_ts.isoformat(timespec='seconds')}",
         "",
         "| symbol | LTP | qty | prev close | drift |",
         "|---|---|---|---|---|",
