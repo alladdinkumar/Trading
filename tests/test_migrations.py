@@ -154,7 +154,12 @@ def test_v3_collapses_preexisting_duplicate_news_rows(tmp_path: Path) -> None:
             "INSERT INTO schema_version (version, applied_at) VALUES (?, 'x')",
             [(1,), (2,)],
         )
-        dup = ("2026-05-13T10:00:00+00:00", "nse_events", "RVNL: Board Meeting", "https://nse?s=RVNL")
+        dup = (
+            "2026-05-13T10:00:00+00:00",
+            "nse_events",
+            "RVNL: Board Meeting",
+            "https://nse?s=RVNL",
+        )
         conn.executemany(
             "INSERT INTO news_items (ts, source, headline, url) VALUES (?, ?, ?, ?)",
             [dup, dup, dup],
@@ -204,6 +209,60 @@ def test_cash_ledger_migration_is_idempotent(tmp_path: Path) -> None:
         run_migrations(conn)
         # Re-running must be a no-op (no duplicate-table error).
         assert run_migrations(conn) == CURRENT_VERSION
+
+
+def _seed_visibility_signal(
+    conn: sqlite3.Connection, symbol: str, ts: str, created_by: str
+) -> None:
+    conn.execute(
+        "INSERT INTO signals (ts, symbol, side, entry, stop, target, horizon_days, created_by) "
+        "VALUES (?, ?, 'LONG', 100, 95, 120, 25, ?)",
+        (ts, symbol, created_by),
+    )
+
+
+def test_visibility_signal_unique_index_rejects_duplicate(tmp_path: Path) -> None:
+    """F-030: the v8 partial unique index blocks a second pre_open visibility row
+    for the same (symbol, ts); the store uses INSERT OR IGNORE to lean on it."""
+    with get_conn(tmp_path / "vs.db") as conn:
+        run_migrations(conn)
+        _seed_visibility_signal(conn, "RVNL", "2026-05-15T08:30:00", "pre_open")
+        with pytest.raises(sqlite3.IntegrityError):
+            _seed_visibility_signal(conn, "RVNL", "2026-05-15T08:30:00", "pre_open")
+
+
+def test_visibility_index_scoped_to_pre_open_only(tmp_path: Path) -> None:
+    """F-030: the index is partial (created_by='pre_open'), so selected/open_fills
+    rows with the same symbol+ts are NOT rejected."""
+    with get_conn(tmp_path / "vs2.db") as conn:
+        run_migrations(conn)
+        # Two non-pre_open rows with identical symbol+ts are fine.
+        _seed_visibility_signal(conn, "RVNL", "2026-05-15T09:20:00", "open_fills")
+        _seed_visibility_signal(conn, "RVNL", "2026-05-15T09:20:00", "open_fills")
+        n = conn.execute(
+            "SELECT COUNT(*) AS c FROM signals WHERE created_by='open_fills'"
+        ).fetchone()["c"]
+    assert n == 2
+
+
+def test_v8_collapses_preexisting_duplicate_visibility_rows(tmp_path: Path) -> None:
+    """Upgrading a pre-v8 DB that already holds duplicate pre_open visibility rows
+    collapses them to one before installing the unique index (F-030)."""
+    db = tmp_path / "vdup.db"
+    with get_conn(db) as conn:
+        run_migrations(conn)  # at CURRENT_VERSION
+        # Drop the v8 index and roll the version marker back to 7 to simulate a
+        # pre-v8 DB that accumulated duplicates from earlier pre_open re-runs.
+        conn.execute("DROP INDEX idx_signals_visibility_dedup")
+        conn.execute("DELETE FROM schema_version WHERE version = 8")
+        dup_args = ("RVNL", "2026-05-15T08:30:00", "pre_open")
+        for _ in range(3):
+            _seed_visibility_signal(conn, *dup_args)
+        run_migrations(conn)  # re-applies v8 → dedup + unique index
+        count = conn.execute(
+            "SELECT COUNT(*) AS c FROM signals WHERE created_by='pre_open'"
+        ).fetchone()["c"]
+    assert count == 1
 
 
 def test_pk_composite_sentiment_daily(tmp_path: Path) -> None:

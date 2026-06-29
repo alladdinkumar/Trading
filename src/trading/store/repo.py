@@ -171,10 +171,19 @@ def _row_to_prediction(row: sqlite3.Row) -> Prediction:
 # ---------------------------------------------------------------------------
 
 
-def insert_signal(conn: sqlite3.Connection, sig: Signal) -> int:
+def insert_signal(conn: sqlite3.Connection, sig: Signal, *, or_ignore: bool = False) -> int:
+    """Insert a signal row, returning its new id.
+
+    `or_ignore=True` switches to `INSERT OR IGNORE`, leaning on the v8 partial
+    unique index `idx_signals_visibility_dedup` (`symbol, ts` where
+    `created_by='pre_open'`) so a same-day pre_open re-run is a no-op rather than
+    a duplicate visibility row (F-030). On a suppressed insert the returned id is
+    0 (no row written); callers using OR IGNORE for visibility signals discard it.
+    """
+    verb = "INSERT OR IGNORE INTO" if or_ignore else "INSERT INTO"
     cur = conn.execute(
-        """
-        INSERT INTO signals (
+        f"""
+        {verb} signals (
           ts, symbol, side, entry, stop, target, horizon_days,
           rules_passed_json, ml_score, conviction, rationale, created_by
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -195,8 +204,9 @@ def insert_signal(conn: sqlite3.Connection, sig: Signal) -> int:
         ),
     )
     rowid = cur.lastrowid
-    assert rowid is not None
-    return rowid
+    if not or_ignore:
+        assert rowid is not None
+    return rowid if rowid is not None else 0
 
 
 def get_signal(conn: sqlite3.Connection, signal_id: int) -> Signal | None:
@@ -406,9 +416,7 @@ def insert_ranker_eval(conn: sqlite3.Connection, ev: RankerEval) -> None:
 def latest_ranker_eval(conn: sqlite3.Connection) -> RankerEval | None:
     """The most recent weekly verdict, or None if the log is empty. Feeds the
     G3 persistence gate (promote only after 2 consecutive usable verdicts)."""
-    row = conn.execute(
-        "SELECT * FROM ranker_eval_log ORDER BY as_of DESC LIMIT 1"
-    ).fetchone()
+    row = conn.execute("SELECT * FROM ranker_eval_log ORDER BY as_of DESC LIMIT 1").fetchone()
     if row is None:
         return None
     return RankerEval(

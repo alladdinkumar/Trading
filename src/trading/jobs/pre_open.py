@@ -414,6 +414,8 @@ def _step_plan_and_record(
             continue
         if not sc.selected:
             # Visibility-only: log the signal (with ml_score) but don't trade.
+            # `or_ignore` leans on the v8 partial unique index so a same-day
+            # pre_open re-run doesn't duplicate this row (F-030).
             insert_signal(
                 conn,
                 Signal(
@@ -425,13 +427,12 @@ def _step_plan_and_record(
                     stop=stop_price,
                     target=target_price(cand.close, stop_price),
                     horizon_days=25,
-                    rules_passed_json=json.dumps(
-                        [r.name for r in cand.rules if r.passed]
-                    ),
+                    rules_passed_json=json.dumps([r.name for r in cand.rules if r.passed]),
                     ml_score=sc.ml_score,
                     conviction=conviction_from_score(sc.ml_score),
                     created_by="pre_open",
                 ),
+                or_ignore=True,
             )
             continue
         if already_opened_today(conn, cand.symbol, as_of):

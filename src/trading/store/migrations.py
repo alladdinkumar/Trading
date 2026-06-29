@@ -10,7 +10,7 @@ from __future__ import annotations
 import sqlite3
 from datetime import UTC, datetime
 
-CURRENT_VERSION = 7
+CURRENT_VERSION = 8
 
 
 SCHEMA_V1 = """
@@ -317,6 +317,29 @@ CREATE TABLE IF NOT EXISTS ranker_eval_log (
 """
 
 
+# v8 (F-030): make the pre_open visibility-only signal insert idempotent. Those
+# rows have a fixed daily identity — symbol + `ts` (`{date}T08:30:00`) +
+# `created_by='pre_open'` — and never open a paper trade, so a partial UNIQUE
+# index scoped to `created_by='pre_open'` dedups re-runs without touching the
+# selected/auto-opened rows (live `ts`, other `created_by`) that legitimately
+# need one signal per fill. The pre-index DELETE collapses any duplicates an
+# earlier re-run already wrote; it is FK-safe because visibility rows have no
+# `paper_trades` referencing them. The store uses INSERT OR IGNORE to lean on it
+# (mirrors F-016's `idx_news_dedup`).
+SCHEMA_V8 = """
+DELETE FROM signals
+WHERE created_by = 'pre_open'
+  AND id NOT IN (
+    SELECT MIN(id) FROM signals
+    WHERE created_by = 'pre_open'
+    GROUP BY symbol, ts
+  );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_signals_visibility_dedup
+  ON signals(symbol, ts)
+  WHERE created_by = 'pre_open';
+"""
+
+
 def _current_db_version(conn: sqlite3.Connection) -> int:
     """Return the highest applied version, or 0 if schema_version doesn't exist yet."""
     row = conn.execute(
@@ -377,5 +400,11 @@ def run_migrations(conn: sqlite3.Connection) -> int:
         conn.execute(
             "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
             (7, datetime.now(UTC).isoformat()),
+        )
+    if current < 8:
+        conn.executescript(SCHEMA_V8)
+        conn.execute(
+            "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+            (8, datetime.now(UTC).isoformat()),
         )
     return CURRENT_VERSION

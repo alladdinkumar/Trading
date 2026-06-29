@@ -529,9 +529,7 @@ def test_run_pre_open_unattended_writes_bundle_without_snapshot(paths, monkeypat
     assert any("snapshot" in w.lower() for w in result.warnings)
 
 
-def test_plan_and_record_writes_pending_for_selected(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_plan_and_record_writes_pending_for_selected(conn: sqlite3.Connection, paths) -> None:
     """A selected candidate is recorded to _pending_entries.json and NO paper
     trade or signal is opened at pre-open (the fill happens in open-fills)."""
     warnings: list[str] = []
@@ -554,9 +552,7 @@ def test_plan_and_record_writes_pending_for_selected(
     assert entries[0].ref_close == pytest.approx(100.0)
 
 
-def test_plan_and_record_non_selected_logs_signal_only(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_plan_and_record_non_selected_logs_signal_only(conn: sqlite3.Connection, paths) -> None:
     """selected=False candidates write a visibility signal (with ml_score) but
     are NOT recorded as pending and open no trade."""
     warnings: list[str] = []
@@ -581,6 +577,29 @@ def test_plan_and_record_non_selected_logs_signal_only(
     assert entries == []
 
 
+def test_plan_and_record_visibility_signal_idempotent_on_rerun(
+    conn: sqlite3.Connection, paths
+) -> None:
+    """F-030: re-running pre_open the same day must not duplicate the
+    visibility-only (non-selected) signal row for a symbol+date."""
+    cand = _candidate("RVNL", 10)
+    for _ in range(2):
+        count = _step_plan_and_record(
+            conn,
+            date(2026, 5, 15),
+            [_sc(cand, ml_score=0.42, selected=False)],
+            "NEUTRAL",
+            [],
+            paths,
+        )
+        assert count == 0  # never pending — visibility only
+
+    sig_count = conn.execute(
+        "SELECT COUNT(*) FROM signals WHERE symbol='RVNL' AND created_by='pre_open'"
+    ).fetchone()[0]
+    assert sig_count == 1  # second run was a no-op, not a duplicate
+
+
 def test_plan_and_record_skips_already_open(conn: sqlite3.Connection, paths) -> None:
     """A symbol already holding an OPEN trade entered today is not re-recorded."""
     cur = conn.execute(
@@ -601,15 +620,11 @@ def test_plan_and_record_skips_already_open(conn: sqlite3.Connection, paths) -> 
     assert entries == []
 
 
-def test_plan_and_record_atr_wider_than_close_skipped(
-    conn: sqlite3.Connection, paths
-) -> None:
+def test_plan_and_record_atr_wider_than_close_skipped(conn: sqlite3.Connection, paths) -> None:
     """A non-positive ATR (stop ≥ close) is warned and not recorded."""
     warnings: list[str] = []
     cand = replace(_candidate("RVNL", 10), atr_14=0.0)  # stop == close → skip
-    count = _step_plan_and_record(
-        conn, date(2026, 5, 15), [_sc(cand)], "NEUTRAL", warnings, paths
-    )
+    count = _step_plan_and_record(conn, date(2026, 5, 15), [_sc(cand)], "NEUTRAL", warnings, paths)
     assert count == 0
     assert any("RVNL" in w for w in warnings)
     _, entries = read_pending_entries(paths, date(2026, 5, 15))
