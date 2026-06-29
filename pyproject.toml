@@ -181,13 +181,5 @@ layers = [
     "data",
     "store",
     "ops",
-    "config | domain | clock",
-]
-# One documented exemption (F-045): strategy.daily_budget reaches up to
-# paper.ledger.buy_side_cost — a thin wrapper over the pure backtest.costs
-# model — to apply realistic round-trip charges when pacing entries. The fix
-# is to relocate the pure cost model to a neutral foundation module (like
-# trading.domain in F-006); tracked as open finding F-045, not yet done.
-ignore_imports = [
-    "trading.strategy.daily_budget -> trading.paper.ledger",
+    "config | costs | domain | clock",
 ]

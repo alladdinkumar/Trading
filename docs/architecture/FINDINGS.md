@@ -218,7 +218,7 @@ User comment - Don't involve real money logic now , need proper evident profit b
 | ~~F-042~~ | VULN | Med | 18 | ~~Calibration `GROUP BY` a continuous REAL → singleton buckets → realized_hit_rate is 0%/100% noise~~ | ✅ Fixed 2026-06-20 — `gather_review_data` bands `predicted_return_pct` into 2% buckets |
 | ~~F-043~~ | VULN | Med | 16/18 | ~~The model F-037 made promotable has a **negative OOS Sharpe (−1.49)**; promotion only requires clearing a Sharpe *deadband* vs the incumbent, not a positive edge — so the live planner consumes ml_score from a model with no demonstrated out-of-sample skill~~ | ✅ Fixed 2026-06-20 — `SHARPE_PROMOTION_FLOOR=0.0` gates promotion on a positive OOS Sharpe (both paths) + `active ⟹ clears floor` invariant demotes sub-floor models; live −1.49 row flipped inactive → planner reverts to `p_win=prior`. Model *quality* (labels) still [[F-044]] |
 | F-044 | GAP | Med | 16 | Training labels remain **synthetic**: `ranker_labels.label_candidate` replays the exit engine on historical parquet bars; the learner still never trains on the realised `paper_trades`/`predictions` outcomes. F-041 closed the loop into the EV planner's `p_win` (calibration) but **not** into the model's own training signal | Open |
-| F-045 | DEBT | Med | 1 | `strategy.daily_budget` reaches **up** to `paper.ledger.buy_side_cost` (L3→L4) — the only residual layer back-edge after [[F-006]]/[[F-007]]/[[F-008]]. `buy_side_cost` is a thin wrapper over the pure `backtest.costs` model; the import-linter contract carries a documented exemption for it | Open |
+| ~~F-045~~ | DEBT | Med | 1 | ~~`strategy.daily_budget` reaches **up** to `paper.ledger.buy_side_cost` (L3→L4) — the only residual layer back-edge after [[F-006]]/[[F-007]]/[[F-008]]~~ | ✅ Fixed 2026-06-29 — pure cost model moved to neutral `trading/costs.py` foundation module; all callers import down; import-linter exemption removed (contract kept, 0 broken) |
 
 ---
 
@@ -377,8 +377,20 @@ open finding [[F-045]].
 
 *Was:* the downward-dependency rule was convention only, unenforced.
 
-### F-045 — `strategy.daily_budget` reaches up to `paper.ledger` for cost calc (`DEBT`, Med, Phase 1)
-Surfaced by the F-009 import-linter contract: `strategy/daily_budget.py` imports
+### F-045 — `strategy.daily_budget` reaches up to `paper.ledger` for cost calc (`DEBT`, Med, Phase 1) — ✅ Fixed 2026-06-29
+**Resolution:** The pure cost model now lives in a new dependency-free foundation
+module `src/trading/costs.py` (mirroring the `trading/domain.py` precedent from
+[[F-006]]): `CostConfig`, `CostBreakdown`, `Side`, `buy_charges`, `sell_charges`,
+`apply_slippage`, `round_trip_cost_pct`, and the `buy_side_cost`/`sell_side_cost`
+helpers (moved out of `paper/ledger.py`). `backtest/costs.py` is now a thin
+backward-compat re-export shim; `paper.ledger`/`paper.reconcile`/`strategy.daily_budget`
+import the helpers **down** from `trading.costs`. The `[tool.importlinter]` `costs`
+leaf was added to the foundation layer and the `ignore_imports` exemption removed —
+`lint-imports` reports the L0–L6 contract **kept, 0 broken**. New
+`tests/test_costs_foundation.py` locks the import direction. Full suite green
+(1097 passed, 1 skipped); ruff + mypy clean.
+
+*Was:* surfaced by the F-009 import-linter contract: `strategy/daily_budget.py` imports
 `paper.ledger.buy_side_cost` (L3→L4) to net realistic round-trip charges when
 pacing the day's entries. `buy_side_cost` is itself a thin wrapper over the pure,
 dependency-free `backtest.costs` model, so the cost logic lives *above* `strategy`

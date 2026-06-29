@@ -19,7 +19,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from trading.backtest.costs import CostConfig, buy_charges, sell_charges
+from trading.costs import buy_side_cost, sell_side_cost
 from trading.store.repo import (
     EntryAttribution,
     ExitReason,
@@ -33,24 +33,6 @@ from trading.store.repo import (
     insert_signal,
     list_open_paper_trades,
 )
-
-
-def buy_side_cost(value: float, cfg: CostConfig | None = None) -> float:
-    """Total buy-side cost on a ₹`value` fill: explicit Zerodha charges + slippage.
-
-    Reuses the backtest cost model so paper trading carries the same friction as
-    the backtest that justifies the strategy — otherwise paper P&L and the equity
-    curve read systematically rosier than the backtest (F-025). Slippage is the
-    backtest's per-side price shift expressed as a cash drag (`value × slippage`).
-    """
-    c = cfg or CostConfig()
-    return buy_charges(value, c).total + value * c.slippage_pct
-
-
-def sell_side_cost(value: float, cfg: CostConfig | None = None) -> float:
-    """Total sell-side cost on a ₹`value` fill: explicit charges + slippage (F-025)."""
-    c = cfg or CostConfig()
-    return sell_charges(value, c).total + value * c.slippage_pct
 
 
 @dataclass(frozen=True)
@@ -107,11 +89,7 @@ def log_signal_and_open_trade(
         else ((signal.target - signal.entry) / signal.entry * 100.0)
     )
     attr = attribution or EntryAttribution()
-    atr_pct = (
-        atr_at_entry / entry_price
-        if atr_at_entry is not None and entry_price > 0
-        else None
-    )
+    atr_pct = atr_at_entry / entry_price if atr_at_entry is not None and entry_price > 0 else None
     prediction_id = insert_prediction(
         conn,
         Prediction(
@@ -175,9 +153,7 @@ def close_with_exit(
     if trade is None:
         raise LookupError(f"paper_trade id={trade_id} not found")
     if trade.ts_exit is not None:
-        raise ValueError(
-            f"paper_trade id={trade_id} already closed at {trade.ts_exit}"
-        )
+        raise ValueError(f"paper_trade id={trade_id} already closed at {trade.ts_exit}")
 
     pnl_abs, pnl_pct = compute_trade_pnl(
         entry_price=trade.entry_price, exit_price=exit_price, qty=trade.qty

@@ -16,7 +16,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from trading.paper.ledger import buy_side_cost
+from trading.costs import buy_side_cost
 from trading.strategy.calibration import ScoreCalibration, calibrated_p_win
 from trading.strategy.sizing import Regime, SizingInput, position_size
 

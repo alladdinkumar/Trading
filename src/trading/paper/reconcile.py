@@ -20,8 +20,9 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+from trading.costs import buy_side_cost, sell_side_cost
 from trading.paper.funds import total_funds_added
-from trading.paper.ledger import buy_side_cost, open_trades, sell_side_cost
+from trading.paper.ledger import open_trades
 from trading.strategy.exits import Bar
 
 # Starting paper capital. The *live* cash balance is not this constant — it is
