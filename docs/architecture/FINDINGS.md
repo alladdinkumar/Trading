@@ -191,7 +191,7 @@ User comment - Don't involve real money logic now , need proper evident profit b
 | F-014 | GAP | High | 3 | Only 12 symbols have parquet OHLCV on disk → live candidate universe is 12, not the configured ~57 nor the required Nifty 50 | ✅ Fixed (2026-06-16) — all 50 Nifty + 8 holdings ingested; `candidates_total` 12→50 |
 | ~~F-015~~ | GAP | Med | 3 | ~~News symbol-attribution alias map covers only 12 symbols → sparse `sentiment_daily`, near-empty per-symbol sentiment/critical inputs~~ | ✅ Fixed 2026-06-17 — `data/static/aliases.csv` covers all 58 ingest symbols; attribution + rollup watch-list both read it |
 | ~~F-016~~ | DEBT | Med | 3 | ~~News dedup is URL-only and single-run; daily event/headline re-fetch creates duplicate `news_items` rows (no DB-level uniqueness)~~ | ✅ Fixed 2026-06-17 — v3 `idx_news_dedup` UNIQUE + `INSERT OR IGNORE`; NSE events get per-event URLs so distinct events stop colliding |
-| F-017 | INACC | Low | 3 | `macro_snapshot.dow_fut`/`nasdaq_fut` store spot index closes not futures; `sgx_nifty` always NULL | Open |
+| ~~F-017~~ | INACC | Low | 3 | ~~`macro_snapshot.dow_fut`/`nasdaq_fut` store spot index closes not futures; `sgx_nifty` always NULL~~ | ✅ Fixed 2026-06-29 — documented inline (dataclass + migration + fetcher + schema doc); rename declined (live schema, names not read by regime voter or brief — purely cosmetic) |
 | F-018 | GAP | High | 3 | No automated daily OHLCV refresh and no read-time freshness guard; scan can silently run on stale parquet. Quote staleness also assumes host clock == IST | ✅ Fixed (2026-06-16) — refresh step + scan staleness guard + Kite close cross-check; IST-clock centralisation ([[F-004]]) ✅ done 2026-06-20 |
 | F-019 | VULN | High | 4 | 4 of 10 Layer-A rules (regime, fno_banned, t2t, critical_event) are unconditional passes — `pre_open`/`scan` build `ScanContext` with all defaults; risk vetoes + regime gate are dead despite the data being available | ✅ Fixed (2026-06-16) — `build_scan_context` wires regime/VIX + critical-news gates; `fno_banned`/`t2t` still await NSE feeds ([[F-010]]) |
 | ~~F-020~~ | INACC | Med | 4 | ~~Two different "regime" concepts share the name: `features.regime` 4-axis voter (feeds sizing) vs Layer-A `passes_regime` rule (VIX<25/dd gate)~~ | ✅ Fixed 2026-06-20 — Layer-A rule renamed `passes_regime`→`passes_market_filter` (rule name `market_filter`); voter keeps `regime`; logic unchanged (kept as a distinct extreme-stress veto, not merged into RISK_OFF); legacy `regime` alias keeps old signals rendering |
@@ -543,10 +543,17 @@ distinct events (Board Meeting vs. Dividend) collapsed to a single row.
   pre-existing dups) + 2 news tests (`event_url` uniqueness, orchestrator keeps
   distinct NSE events). Full suite green, ruff + mypy clean.
 
-### F-017 — Macro column labels misleading (`INACC`, Low, Phase 3)
-`dow_fut`/`nasdaq_fut` hold spot index closes (`^DJI`/`^IXIC`); `sgx_nifty`
-always NULL. Logic unaffected (regime uses values by key), naming misleads.
-- **Fix idea:** Rename columns to `dow`/`nasdaq` (schema v3) or document inline.
+### F-017 — Macro column labels misleading (`INACC`, Low, Phase 3) — ✅ Fixed 2026-06-29
+**Resolution (document inline — rename declined):** `dow_fut`/`nasdaq_fut` hold
+spot index closes (`^DJI`/`^IXIC`) and `sgx_nifty` is never written (always NULL).
+The misnomer is purely cosmetic — the regime voter reads the **quote dict** keys
+`dow`/`nasdaq`/`sp500` (not these field names), and `_render_macro` never renders
+them — so a v9 rename migration over live macro history wasn't worth the blast
+radius (~5 source + ~8 test files) for a Low-severity naming nit. Instead the truth
+is now stated at every site: `MacroSnapshot` dataclass docstring + per-field
+comments, the `macro_snapshot` column definitions in `migrations.py`,
+`build_snapshot` in `data/macro.py`, and `02-data-schema.md`. `sgx_nifty` annotated
+RESERVED/unpopulated. No behavior change; full suite green.
 
 ### F-018 — No OHLCV freshness / refresh (`GAP`, High, Phase 3) — ✅ Fixed 2026-06-16
 **Resolution (implements the approved Phase 12.7 spec):**

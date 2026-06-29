@@ -44,12 +44,21 @@ class SectorRow:
 
 @dataclass(frozen=True)
 class MacroSnapshot:
-    """One row of `macro_snapshot`. All fields nullable per schema."""
+    """One row of `macro_snapshot`. All fields nullable per schema.
+
+    Naming caveat (F-017): despite the `_fut` suffix, `dow_fut` and
+    `nasdaq_fut` hold the SPOT index closes (`^DJI` / `^IXIC`), not index
+    futures — see the fetcher in `data/macro.py` (`YF_TICKERS`). They are
+    used as overnight global-direction proxies; the regime voter reads the
+    underlying quote dict, not these fields, so the misnomer is cosmetic.
+    `sgx_nifty` is reserved/unpopulated (always None): there is no reliable
+    free yfinance GIFT/SGX-Nifty ticker since the 2023 SGX->IFSC move.
+    """
 
     date: str  # YYYY-MM-DD
-    sgx_nifty: float | None
-    dow_fut: float | None
-    nasdaq_fut: float | None
+    sgx_nifty: float | None  # reserved — never populated (no free feed); always None
+    dow_fut: float | None  # SPOT ^DJI close (NOT a future) — see class docstring
+    nasdaq_fut: float | None  # SPOT ^IXIC close (NOT a future) — see class docstring
     sp500: float | None
     usdinr: float | None
     crude: float | None

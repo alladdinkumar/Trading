@@ -109,11 +109,15 @@ CREATE TABLE IF NOT EXISTS sector_daily (
   PRIMARY KEY (date, sector)
 );
 
+-- NOTE (F-017): `dow_fut`/`nasdaq_fut` are misnamed — they store SPOT index
+-- closes (^DJI/^IXIC), NOT index futures (see data/macro.py YF_TICKERS).
+-- Names are kept for schema/data stability; the values are overnight global
+-- direction proxies. `sgx_nifty` is reserved and always NULL (no free feed).
 CREATE TABLE IF NOT EXISTS macro_snapshot (
   date         TEXT PRIMARY KEY,
-  sgx_nifty    REAL,
-  dow_fut      REAL,
-  nasdaq_fut   REAL,
+  sgx_nifty    REAL,  -- reserved, always NULL (no reliable GIFT/SGX-Nifty feed)
+  dow_fut      REAL,  -- SPOT ^DJI close, not a future
+  nasdaq_fut   REAL,  -- SPOT ^IXIC close, not a future
   sp500        REAL,
   usdinr       REAL,
   crude        REAL,

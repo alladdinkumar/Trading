@@ -185,6 +185,12 @@ gate dead. `t2t_symbols` has no table and still awaits an NSE T2T feed. → **F-
   `dii_flow_cr`) but the regime voter uses a subset (VIX, global futures mean,
   FII flow, USDINR). Some columns may be persisted `NULL`. Confirmed against the
   fetcher in [03-data-layer](./03-data-layer.md).
+  - **Naming caveat (F-017):** `dow_fut`/`nasdaq_fut` are misnomers — they store
+    SPOT index closes (`^DJI`/`^IXIC`), **not** index futures. The names are kept
+    for schema/data stability; the values serve as overnight global-direction
+    proxies and the regime voter reads the underlying quote dict, not these
+    columns, so the misnomer is cosmetic. `sgx_nifty` is reserved and always
+    `NULL` (no reliable free GIFT/SGX-Nifty ticker since the 2023 SGX->IFSC move).
 - **`signals.rules_passed_json`** stores the Layer-A pass/fail map as JSON text —
   denormalised on purpose so a signal is self-describing without a join.
 - **CHECK constraints** encode the enums (sides, exit reasons, regimes, impact

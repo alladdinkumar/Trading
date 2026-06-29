@@ -32,7 +32,7 @@ YF_TICKERS: dict[str, str] = {
     "nasdaq": "^IXIC",
     "dow": "^DJI",
     "usdinr": "INR=X",
-    "crude": "BZ=F",   # Brent
+    "crude": "BZ=F",  # Brent
     "vix": "^INDIAVIX",
     "us_10y": "^TNX",
 }
@@ -130,9 +130,7 @@ def fetch_fii_dii() -> tuple[float | None, float | None]:
     # The endpoint's column names have shifted historically; check both
     # the modern (`category`, `netValue`) and legacy (`type`, `netVal`) forms.
     cat_col = next((c for c in ("category", "Category", "type") if c in df.columns), None)
-    val_col = next(
-        (c for c in ("netValue", "netVal", "net", "Net Value") if c in df.columns), None
-    )
+    val_col = next((c for c in ("netValue", "netVal", "net", "Net Value") if c in df.columns), None)
     if cat_col is None or val_col is None:
         return None, None
 
@@ -144,8 +142,8 @@ def fetch_fii_dii() -> tuple[float | None, float | None]:
 def _sum_for(df: Any, cat_col: str, val_col: str, needles: tuple[str, ...]) -> float | None:
     """Sum `val_col` over rows whose `cat_col` contains any of `needles`."""
     try:
-        mask = df[cat_col].astype(str).str.upper().str.contains(
-            "|".join(n.upper() for n in needles)
+        mask = (
+            df[cat_col].astype(str).str.upper().str.contains("|".join(n.upper() for n in needles))
         )
         if not mask.any():
             return None
@@ -178,6 +176,9 @@ def build_snapshot(
     return MacroSnapshot(
         date=as_of.isoformat(),
         sgx_nifty=None,  # see module docstring — no reliable yf ticker
+        # F-017: `dow_fut`/`nasdaq_fut` are misnomers — these are SPOT index
+        # closes (^DJI/^IXIC, see YF_TICKERS), not futures. Field names kept
+        # for schema stability; values are overnight global-direction proxies.
         dow_fut=q["dow"].close,
         nasdaq_fut=q["nasdaq"].close,
         sp500=q["sp500"].close,
