@@ -9,6 +9,7 @@ and passing them in. Pure renderer: no scanner / portfolio invocation here.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -24,6 +25,22 @@ from trading.store.sector_store import get_sector_daily
 from trading.strategy.rules import Candidate
 
 Mode = Literal["pre_open", "mid_day", "post_close"]
+
+# --- Candidate heading: single source of truth (F-027) -----------------------
+# The "### SYM — passes N/M rules" line has THREE coupled call sites:
+#   1. `_render_candidates` here (WRITES it),
+#   2. `trading.jobs.pre_open_iep` (REWRITES / reorders around it),
+#   3. `trading.llm.briefing` (PARSES symbols back out).
+# Before F-027 each duplicated the literal/regex, so a format drift in one
+# silently broke the others. They now all consume the constants below.
+# The symbol class allows hyphen/ampersand so BAJAJ-AUTO / M&M parse (F-033).
+CANDIDATE_HEADING_FMT = "### {symbol} — passes {n_passed}/{n_total} rules"
+CANDIDATE_HEADING_RE = re.compile(r"^### ([A-Z0-9_&-]+) — passes \d+/\d+ rules", re.MULTILINE)
+
+
+def render_candidate_heading(symbol: str, n_passed: int, n_total: int) -> str:
+    """Render the canonical candidate heading line (F-027 single source)."""
+    return CANDIDATE_HEADING_FMT.format(symbol=symbol, n_passed=n_passed, n_total=n_total)
 
 
 @dataclass(frozen=True)
@@ -192,7 +209,7 @@ def _render_candidates(
         n_passed = sum(1 for r in c.rules if r.passed)
         n_total = len(c.rules)
         blocks.append("")
-        blocks.append(f"### {c.symbol} — passes {n_passed}/{n_total} rules")
+        blocks.append(render_candidate_heading(c.symbol, n_passed, n_total))
         blocks.append(
             f"- close {c.close:.2f} (bar {c.bar_date.isoformat()}), "
             f"RSI {c.rsi_14:.1f}, ATR(14) {c.atr_14:.2f}"

@@ -7,7 +7,6 @@ Modifies _context.md in-place.
 
 from __future__ import annotations
 
-import re
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -22,6 +21,7 @@ from trading.data.quotes_snapshot import (
 )
 from trading.data.sector import load_sector_map
 from trading.features.regime import Regime
+from trading.llm.context import CANDIDATE_HEADING_RE
 from trading.ops.logging_setup import configure_logging
 from trading.store.db import get_conn
 from trading.store.macro_store import get_macro_snapshot
@@ -429,9 +429,8 @@ def _parse_candidates_from_context(context_md: str) -> list[str]:
     Looks for lines matching: '### SYMBOL — passes X/Y rules'
     Returns list of symbols in order of appearance.
     """
-    pattern = r"^### ([A-Z0-9_&-]+) — passes \d+/\d+ rules"
-    matches = re.findall(pattern, context_md, re.MULTILINE)
-    return matches
+    # F-027: shared heading regex lives in trading.llm.context (single source).
+    return CANDIDATE_HEADING_RE.findall(context_md)
 
 
 def _update_context_markdown(
@@ -476,7 +475,7 @@ def _update_context_markdown(
         if line.startswith("###"):
             if current_symbol and current_block:
                 candidate_blocks[current_symbol] = current_block
-            match = re.match(r"^### ([A-Z0-9_&-]+) —", line)
+            match = CANDIDATE_HEADING_RE.match(line)
             if match:
                 current_symbol = match.group(1)
                 current_block = [line]

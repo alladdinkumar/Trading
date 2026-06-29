@@ -13,7 +13,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from trading.llm.context import Mode
+from trading.llm.context import CANDIDATE_HEADING_RE, Mode
 
 
 class MissingNarrativeError(RuntimeError):
@@ -53,11 +53,9 @@ def optional_parts(mode: Mode) -> list[str]:
     return ["sector_commentary.md"]
 
 
-_CANDIDATE_HEADING = re.compile(r"^### ([A-Z0-9_&-]+) — passes \d+/\d+ rules", re.MULTILINE)
-
-
 def _parse_candidate_symbols(context_md: str) -> list[str]:
-    return _CANDIDATE_HEADING.findall(context_md)
+    # F-027: shared heading regex lives in trading.llm.context (single source).
+    return CANDIDATE_HEADING_RE.findall(context_md)
 
 
 def _infer_mode(context_md: str) -> Mode:
