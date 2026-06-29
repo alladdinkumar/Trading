@@ -18,8 +18,8 @@ fixed 2026-06-25 — the spurious mean-of-fold-Sharpes promotion statistic the
 shadow-ranker work uncovered; F-047 added 2026-06-25 — the residual i.i.d.
 assumption in the F-046 t-stat gate, deferred; F-048 added 2026-06-25 — the daily
 planner's correlated-cluster concentration, selection half open / concentration half
-fixed). **38 are now fixed** (F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015,
-F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043, F-046), leaving **9 open**. The system is **well-engineered at the
+fixed; F-017/F-027/F-028/F-030/F-045 fixed 2026-06-29). **43 are now fixed** (F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015,
+F-016, F-017, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-027, F-028, F-029, F-030, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043, F-045, F-046), leaving **4 open** (F-005 suspended, F-044, F-047, F-048-selection). The system is **well-engineered at the
 seams** — graceful degradation, idempotency, pure-function cores, clean
 job/CLI/UI layers — but two themes undermine its current goal of proving itself
 in a live paper-trade run:
@@ -48,9 +48,9 @@ and *how its results are measured*. Both are fixable with localized changes.
 | Severity | Count | IDs |
 |---|---:|---|
 | **High** | 1 | F-005† |
-| Med | 3 | F-044, F-045, F-048 |
-| Low | 5 | F-017, F-027, F-028, F-030, F-047 |
-| ✅ Fixed | 38 | F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015, F-016, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-029, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043, F-046 |
+| Med | 2 | F-044, F-048 |
+| Low | 1 | F-047 |
+| ✅ Fixed | 43 | F-001, F-002, F-003, F-004, F-006, F-007, F-008, F-009, F-010, F-012, F-013, F-014, F-015, F-016, F-017, F-018, F-019, F-020, F-021, F-022, F-023, F-024, F-025, F-026, F-027, F-028, F-029, F-030, F-031, F-032, F-033, F-034, F-035, F-036, F-037, F-038, F-039, F-040, F-041, F-042, F-043, F-045, F-046 |
 
 † F-005 (real-money execution / kill-switch) is `Needs decision`, gated to a
 future Phase 19 — out of scope for hardening the paper run.
@@ -59,8 +59,8 @@ future Phase 19 — out of scope for hardening the paper run.
 |---|---:|
 | VULN (correctness/data-integrity) | 12 (all ✅: F-019, F-022, F-023, F-024, F-029, F-033, F-034, F-037, F-041, F-042, F-043, F-046) |
 | GAP (missing functionality/guardrail) | 12 (F-003 ✅, F-009 ✅, F-010 ✅, F-013 ✅, F-015 ✅, F-032 ✅; F-044 open) |
-| INACC (code ≠ spec/docstring) | 7 (F-001 ✅, F-020 ✅, F-021 ✅, F-031 ✅) |
-| DEBT (cleanup) | 10 (F-004 ✅, F-006 ✅, F-007 ✅, F-008 ✅; F-045, F-047 open) |
+| INACC (code ≠ spec/docstring) | 7 (F-001 ✅, F-017 ✅, F-020 ✅, F-021 ✅, F-028 ✅, F-031 ✅) |
+| DEBT (cleanup) | 10 (F-004 ✅, F-006 ✅, F-007 ✅, F-008 ✅, F-027 ✅, F-030 ✅, F-045 ✅; F-047 open) |
 
 ## Remediation roadmap
 
@@ -1256,7 +1256,12 @@ stays open pending real-outcome ranker promotion.
 
 ---
 
-_Counts: 9 open · 1 superseded · 38 fixed. Updated 2026-06-25 (F-048 added — the
+_Counts: 4 open · 1 superseded · 43 fixed. Updated 2026-06-29 (cleanup pass —
+F-045 pure cost model relocated to a `trading/costs.py` foundation [import-linter
+exemption removed]; F-030 visibility-signal dedup via migration v8 partial unique
+index; F-027 single-source candidate-heading format + spanning test; F-028
+`assemble_context` docstring; F-017 misleading macro column labels documented inline,
+rename declined). Earlier 2026-06-25 (F-048 added — the
 daily planner concentrated into a correlated power-PSU cluster because EV ranks on
 volatility under a flat p_win prior [open, ties F-044] and nothing capped per-sector
 or day-over-day re-entry [concentration half fixed: per-symbol + per-sector open-lot
