@@ -65,9 +65,11 @@ def assemble_context(
 ) -> Path:
     """Render `_context.md` for `as_of` and return the written path.
 
-    Sections rendered (in order): header, macro, candidates, holdings health,
-    open paper-trades, (post_close only) matured predictions. Empty sections
-    render as `_(no data)_` so the skill can flag the gap explicitly.
+    Sections rendered (in order): header, macro, sector momentum, candidates,
+    (Layer-B ranker only when `inputs.scored_candidates` is non-empty),
+    holdings health, open paper-trades, (post_close only) matured predictions.
+    Empty sections render as `_(no data)_` so the skill can flag the gap
+    explicitly.
     """
     date_dir = paths.research_dir / as_of.isoformat()
     date_dir.mkdir(parents=True, exist_ok=True)
