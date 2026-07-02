@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -7,6 +9,7 @@ import pytest
 from trading.backtest.forward_return import LABEL_HORIZON_DAYS
 from trading.features.technicals import add_indicators
 from trading.ranking.ranker_train import (
+    _EMBARGO_HOLIDAY_PAD_DAYS,
     MIN_TRAIN_EXAMPLES,
     InsufficientDataError,
     _build_xy_for_window,
@@ -16,6 +19,31 @@ from trading.ranking.ranker_train import (
     calibrate_threshold,
     train_walkforward,
 )
+
+# Frozen NSE calendar for these tests: 2024 has the two Diwali-season holidays
+# (the F-055 review example); every other year deliberately has NO coverage so
+# the missing-coverage pad path is exercised. Patched at the same seam
+# `tests/test_ops_calendar.py` uses.
+_NSE_TEST_HOLIDAYS: dict[int, frozenset[date]] = {
+    2024: frozenset({date(2024, 10, 31), date(2024, 11, 1)}),
+}
+
+
+@pytest.fixture(autouse=True)
+def _frozen_nse_calendar(monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+    """Hermetic calendar: `_embargo_boundary` consults `nse_holidays`, which
+    would otherwise attempt a live nsepython fetch per year. Freeze it so the
+    embargo tests are deterministic and offline."""
+    import trading.ops.calendar as cal
+
+    cal.nse_holidays.cache_clear()
+    monkeypatch.setattr(
+        cal,
+        "_fetch_holidays_from_nsepython",
+        lambda year: _NSE_TEST_HOLIDAYS.get(year, frozenset()),
+    )
+    yield
+    cal.nse_holidays.cache_clear()
 
 
 def _separable_ohlcv(seed: int, n: int = 1300) -> pd.DataFrame:
@@ -285,6 +313,61 @@ def test_build_xy_embargoes_training_signals_near_train_end() -> None:
         enriched, _empty_macro_history(), {}, {}, train_start, train_end
     )
     assert len(fx.X) == embargoed_count
+
+
+def test_embargo_boundary_is_nse_holiday_aware() -> None:
+    """F-055 review fix: NSE holidays inside the label horizon make weekday-only
+    counting place the boundary CLOSER to train_end (a backward offset skips
+    fewer real trading days), shrinking the effective embargo to
+    25 − holiday_count. A signal exactly 25 real trading days before train_end
+    — whose 25-bar label window reaches train_end itself — must be excluded,
+    even though weekday-only math would admit it."""
+    train_end = pd.Timestamp("2024-11-15")  # Friday, a trading day
+    holidays = [pd.Timestamp("2024-10-31"), pd.Timestamp("2024-11-01")]  # Diwali
+    idx = pd.bdate_range("2024-01-01", "2024-11-15")
+    idx = idx[~idx.isin(holidays)]  # NSE-style trading calendar skips holidays
+
+    pos = idx.get_loc(train_end)
+    sd_25_real = idx[pos - 25]  # exactly 25 real trading days before train_end
+
+    # Precondition: weekday-only math WOULD admit this signal (the regression).
+    weekday_boundary = pd.Timestamp(np.busday_offset("2024-11-15", -25))
+    assert sd_25_real < weekday_boundary, "fixture: weekday-only math must admit this signal"
+
+    mask = _train_signal_mask(idx, idx[0], train_end)
+    assert not mask[pos - 25], (
+        "signal 25 real trading days before train_end has its 25th label bar on "
+        "train_end (= test_start) — must be excluded"
+    )
+    # One real trading day further back the full label window fits before
+    # train_end — must still be included (boundary is tight, not just wide).
+    assert mask[pos - 26]
+
+
+def test_embargo_pads_when_calendar_coverage_missing() -> None:
+    """F-055 review fix: NSE always has holidays, so an empty `nse_holidays(year)`
+    means NO coverage, not no holidays. The boundary must widen by the safety
+    pad instead of silently trusting weekday-only counting."""
+    train_end = pd.Timestamp("2023-06-05")  # Monday; 2023 has no test coverage
+    expected = pd.Timestamp(
+        np.busday_offset("2023-06-05", -(LABEL_HORIZON_DAYS + _EMBARGO_HOLIDAY_PAD_DAYS))
+    )
+    assert _embargo_boundary(train_end) == expected
+
+
+def test_embargo_rolls_nonbusiness_train_end_backward() -> None:
+    """F-055 review fix (minor): a weekend/holiday train_end must roll to the
+    PRECEDING trading day before counting back — rolling forward would count
+    from a day inside the test fold and narrow the embargo."""
+    saturday = pd.Timestamp("2024-06-01")
+    monday = pd.Timestamp("2024-06-03")
+    # Rolling Saturday backward bases the count at Friday 2024-05-31, one
+    # trading day earlier than Monday's base — so the boundary is strictly
+    # earlier (wider embargo), never equal (which roll="forward" would give).
+    assert _embargo_boundary(saturday) < _embargo_boundary(monday)
+    assert _embargo_boundary(saturday) == pd.Timestamp(
+        np.busday_offset("2024-05-31", -LABEL_HORIZON_DAYS)
+    )
 
 
 def test_calibrate_threshold_excludes_losers() -> None:

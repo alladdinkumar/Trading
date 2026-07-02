@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 import lightgbm as lgb
@@ -20,6 +21,7 @@ import pandas as pd
 from trading.backtest.forward_return import LABEL_HORIZON_DAYS
 from trading.backtest.metrics import sharpe
 from trading.backtest.walkforward import WalkForwardConfig, windows
+from trading.ops.calendar import nse_holidays
 from trading.ranking.ranker_features import (
     FEATURE_NAMES,
     LiveContext,
@@ -114,24 +116,57 @@ class TrainResult:
     n_folds_total: int = 0
 
 
+# NSE lists ~15-16 trading holidays a year, so `nse_holidays(year)` returning
+# an EMPTY set means "no calendar coverage", not "no holidays" (live nsepython
+# publishes only the current year; the bundled fallback ships
+# data/static/nse_holidays_<year>.json for select years). Without coverage,
+# weekday-only counting would land the embargo boundary up to holiday_count
+# trading days too CLOSE to train_end (a backward offset over a window with
+# holidays skips fewer real trading days), so we widen by this pad instead.
+# 5 covers the densest observed holiday cluster inside the ~6-calendar-week
+# lookback window (the Mar–May and Oct–Nov festival stretches have 3-4).
+_EMBARGO_HOLIDAY_PAD_DAYS = 5
+# Calendar-day reach of the embargo lookback from train_end, used only to
+# decide which years' holiday calendars matter: 25 trading days + pad
+# ≈ 30 busdays ≈ 42 calendar days plus holidays — 90 is a comfortable bound.
+_EMBARGO_LOOKBACK_CAL_DAYS = 90
+
+
 def _embargo_boundary(train_end: pd.Timestamp) -> pd.Timestamp:
     """The latest signal_date a training example may have — `LABEL_HORIZON_DAYS`
-    trading days before `train_end`.
+    NSE trading days before `train_end`.
 
     A training label is the realised outcome of a trade held up to
     `LABEL_HORIZON_DAYS` forward bars; `windows()` sets `test_start ==
     train_end` with zero gap, so any training signal dated within that horizon
     of `train_end` has its label resolved on bars inside the fold's own OOS
-    test window (F-055). Uses `numpy.busday_offset` (Mon–Fri trading-day
-    arithmetic, consistent with the rest of the codebase's trading-day math,
-    e.g. `trading.paper.journal`) rather than the exact bars of any one
-    symbol's index, since the boundary must be a single date shared across the
-    whole (multi-symbol) training set. `roll="forward"` rolls `train_end`
-    itself onto a business day first when it isn't one, which only widens
-    (never narrows) the embargo.
+    test window (F-055). Uses `numpy.busday_offset` fed with the NSE holiday
+    calendar (`trading.ops.calendar.nse_holidays`) — weekday-only counting
+    would place the boundary holiday_count trading days too close to
+    `train_end`, leaving near-boundary labels reaching into the test fold.
+    A single shared date (not any one symbol's exact bars) because the
+    training set spans many symbols. Two safety choices, both in the widening
+    direction:
+
+    - `roll="backward"`: a non-trading `train_end` is treated as the
+      *preceding* trading day before counting back — rolling forward would
+      count from a day inside the test fold and narrow the gap.
+    - Missing calendar coverage (an empty holiday set for a year the lookback
+      touches — impossible for a real NSE year) widens the offset by
+      `_EMBARGO_HOLIDAY_PAD_DAYS` rather than trusting weekday-only math.
     """
+    end = train_end.date()
+    years = {end.year, (end - timedelta(days=_EMBARGO_LOOKBACK_CAL_DAYS)).year}
+    holiday_sets = [nse_holidays(y) for y in sorted(years)]
+    holidays = np.array(
+        sorted(d.isoformat() for hs in holiday_sets for d in hs), dtype="datetime64[D]"
+    )
+    pad = 0 if all(holiday_sets) else _EMBARGO_HOLIDAY_PAD_DAYS
     boundary = np.busday_offset(
-        train_end.date().isoformat(), -LABEL_HORIZON_DAYS, roll="forward"
+        end.isoformat(),
+        -(LABEL_HORIZON_DAYS + pad),
+        roll="backward",
+        holidays=holidays,
     )
     return pd.Timestamp(boundary)
 
