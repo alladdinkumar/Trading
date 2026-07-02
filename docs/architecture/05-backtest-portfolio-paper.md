@@ -151,6 +151,14 @@ flowchart LR
 `close_with_exit` raises if the trade is missing or already closed (guards
 double-close). SQL stays in `store.repo`; this module is the workflow layer.
 
+Since the 2026-06-23 plan/fill split its production caller is the **open_fills
+job** (live-LTP fills of `_pending_entries.json`, `created_by="open_fills"` —
+see [07 §4a](./07-jobs-workflows.md)); `trading paper-open` is the manual path.
+The package has since grown sibling modules: `pending.py` (the
+plan→fill handoff file), `positions.py` (open-lot/deployed aggregations feeding
+the budget caps), `funds.py` (operator deposits/top-ups in the cash ledger), and
+`journal.py` (closed-trade journal for the UI).
+
 ### 4.2 Mark-to-market (`mtm.py`)
 `mtm_open_trades(conn, bars, as_of)` reconstructs each open trade's `TradeState`,
 runs `evaluate_exit` against the supplied bar, and either closes or ratchets.

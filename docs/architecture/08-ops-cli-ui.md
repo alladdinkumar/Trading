@@ -107,13 +107,15 @@ flowchart LR
 | `trading_daily_unattended.xml` (Mon–Fri 10:00) | runs `trading daily-unattended` — broker-free spine, skips days already covered | **unattended** |
 
 > **Live-run continuity (F-032 — partly closed):** the interactive pipeline is
-> still human-run, but the **macro/scan/auto-open/track-record spine no longer
-> depends on the operator** — `daily_unattended` runs it broker-free
-> (`require_snapshot=False`) on any trading day the operator hasn't already
-> covered (detected via the `trading status` artifact probe), so the bundle,
-> signals, and paper-trades are produced even on missed days (F-032 ✅).
-> **Still gapped:** MTM / exit-management of open trades needs live Kite quotes
-> and stays interactive — a missed *afternoon* is not back-filled. Half-run
+> still human-run, but the **macro/scan/plan/track-record spine no longer
+> depends on the operator** — `daily_unattended` runs `run_pre_open`
+> broker-free (`require_snapshot=False`) on any trading day the operator hasn't
+> already covered (detected via the `trading status` artifact probe), so the
+> bundle, signals, and `_pending_entries.json` are produced even on missed days
+> (F-032 ✅). **Still gapped:** since the 2026-06-23 plan/fill split, *fills*
+> need the interactive open-fills block (live quotes) — on a missed morning the
+> pending entries simply expire unfilled, and MTM / exit-management of open
+> trades likewise stays interactive: a missed *afternoon* is not back-filled. Half-run
 > detection exists (`trading status`, F-003 ✅), and `days_held` is
 > calendar-derived so a missed day doesn't corrupt the exit-timing count
 > (F-024 ✅).
@@ -126,15 +128,16 @@ A `typer` app; the project's single entry point (`trading …`). It's intentiona
 - **Heavy/optional imports are function-local** (ranker, weekly_train, monthly_sip
   pull in `lightgbm`/`torch`) so `trading --help` and unrelated commands stay fast
   — the deliberate startup-cost pattern from [01 §3.4](./01-architecture.md).
-- **Abort contract:** `PreOpenAborted` / `MidDayAborted` / `PostCloseAborted` /
-  `MonthlySipAborted` are caught and turned into **exit code 2** with the
-  remediation message ("run /kite-snapshot first").
+- **Abort contract:** `PreOpenAborted` / `OpenFillsAborted` / `MidDayAborted` /
+  `PostCloseAborted` / `MonthlySipAborted` are caught and turned into **exit
+  code 2** with the remediation message ("run /kite-snapshot first").
 
 Command groups (full list in [00-overview §5](./00-overview.md)): daily jobs,
 periodic (weekly-train/sip/daily-unattended), brief (assemble-context/compile),
-data ingest (ingest-history/ingest-news/macro snapshot·refresh·verify/sector), analysis (scan/backtest),
-portfolio & paper, ranker (train-ranker/ranker-status), broker fallback
-(kite-emergency-*), ops (remind/notify-test/status/prune).
+data ingest (ingest-history/refresh-ohlcv/ingest-news/macro snapshot·refresh·verify/sector),
+analysis (scan/backtest/factor-eval), portfolio & paper (incl. `funds`),
+ranker (train-ranker/ranker-status), broker fallback (kite-emergency-*),
+ops (remind/notify-test/status/prune).
 
 ## 4. `ui/` — the Streamlit dashboard
 
@@ -145,7 +148,7 @@ Read-only visualisation; never writes. Four-module split:
 | `ui/data.py` | cached readers — every dashboard read goes through here |
 | `ui/charts.py` | pure Plotly figure builders (empty-state aware) |
 | `ui/components.py` | Streamlit widgets (regime badge, KPI tiles, rule-chip grid…) |
-| `ui/Home.py` + `pages/1–3` | Overview, Portfolio, Today's Signals, Paper Journal |
+| `ui/Home.py` + `pages/1–4` | Overview, Kite Portfolio, Today's Signals, Paper Journal, Paper Portfolio |
 
 **`ui/data.py`** wraps each reader in `@st.cache_data(ttl=60)` (300s for OHLCV),
 keyed on args; all degrade to `None`/empty rather than raising, so pages branch on
@@ -181,11 +184,15 @@ OHLCV, and brief markdown.
 ## ⚠️ Robustness notes / open questions
 
 - **✅ (Fixed 2026-06-18) Live-run continuity for the spine (F-032).** The
-  read-only, no-broker steps (macro, sector, news, scan, OHLCV refresh, auto-open,
+  read-only, no-broker steps (macro, sector, news, scan, OHLCV refresh, plan,
   bundle) now *run* unattended via `daily_unattended` (weekday 10:00, gap-filler:
-  holiday-gated + skips days the operator already covered). Only the Kite-dependent
-  afternoon MTM still needs the interactive session — back-filling that on missed
-  days remains open.
+  holiday-gated + skips days the operator already covered). Kite-dependent steps
+  stay interactive: open-fills (so missed-day pending entries expire unfilled)
+  and the afternoon MTM — back-filling those on missed days remains open.
+- **No reminder slot for open-fills.** The `runner.py` SCHEDULE has no
+  ~09:15 open-fills slot, and `run_status` doesn't track the block (F-062) — the
+  one daily step that actually opens trades is also the one the reminder system
+  doesn't prompt for.
 - **✅ (Fixed 2026-06-16) The dashboard's headline equity curve (F-023)** now
   reflects compounded realised P&L (`compute_paper_cash`), so the Overview KPI is
   a sound track record.

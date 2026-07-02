@@ -58,12 +58,15 @@ of a Python command and (where broker data is needed) a Claude Code skill.
 ```mermaid
 flowchart TD
     subgraph PRE["Pre-open block · 08:30–08:45"]
-        A1["/kite-snapshot<br/>(holdings + GTTs → JSON)"] --> A2["trading pre-open --date date<br/>(macro, sector, news, scan, rank, auto-open, assemble bundle)"]
+        A1["/kite-snapshot<br/>(holdings + GTTs → JSON)"] --> A2["trading pre-open --date date<br/>(macro, sector, news, OHLCV refresh, scan, rank,<br/>plan → _pending_entries.json, assemble bundle)"]
         A2 --> A3["/analyst<br/>(reads _context.md → narrative .md files)"]
         A3 --> A4["trading brief compile --date date<br/>(→ brief.md)"]
     end
     subgraph IEP["IEP block · 08:55–09:00"]
         B1["/kite-quotes-snapshot<br/>(candidate quotes → JSON)"] --> B2["trading pre-open-iep --date date<br/>(gap + sector filter, rerank, rewrite bundle)"]
+    end
+    subgraph OPEN["Open-fills block · ~09:15–09:20 · post-open"]
+        E1["trading open-fills (prepare)<br/>(_pending_entries → _quote_symbols.txt)"] --> E2["/kite-quotes-snapshot"] --> E3["trading open-fills --apply<br/>(re-plan at live LTP, open funded paper-trades)"]
     end
     subgraph MID["Mid-day MTM · 12:25–12:35"]
         C1["trading mid-day (prepare)"] --> C2["/kite-quotes-snapshot"] --> C3["trading mid-day --apply<br/>(mark-to-market open paper-trades)"]
@@ -71,8 +74,42 @@ flowchart TD
     subgraph POST["Post-close · 16:05–16:15"]
         D1["trading post-close (prepare)"] --> D2["/kite-quotes-snapshot"] --> D3["trading post-close --apply<br/>(final MTM, reconcile, portfolio snapshot)"]
     end
-    PRE --> IEP --> MID --> POST
+    PRE --> IEP --> OPEN --> MID --> POST
 ```
+
+> **Plan/fill split (2026-06-23 design).** `pre-open` only *plans* — it records the
+> selected candidates to `_pending_entries.json` and opens **no** trades. The
+> **open-fills** block then fills those at the live post-open LTP (re-planning qty/
+> stop/target from the LTP via the same daily-budget planner), so the paper book
+> reflects an obtainable market-order price rather than an unfillable previous
+> close. A stale/missing quote snapshot aborts open-fills (exit 2) rather than
+> filling on old prices.
+
+### The decision funnel (universe → paper trade)
+
+How a symbol travels from candidate to position — each stage can only *shrink*
+the set:
+
+```mermaid
+flowchart LR
+    U["Nifty 50<br/>(nifty50.txt)"] --> A["Layer A<br/>10 hard rules"]
+    A --> B["Layer B<br/>LightGBM top-K<br/>(cold-start: keep all)"]
+    B --> G["IEP gap filter<br/>(regime-scaled)"]
+    G --> PEND["_pending_entries.json<br/>(plans, no trades)"]
+    PEND --> LTP["Open-fills @ live LTP<br/>stop = LTP − 1.5×ATR"]
+    LTP --> BUD["Daily-budget planner<br/>cash · p_win calibration ·<br/>lot + sector caps"]
+    BUD -->|funded| T["paper_trades row<br/>(created_by=open_fills)"]
+    BUD -->|unfunded| V["visibility signal only"]
+    T --> MTM["MTM (mid-day + post-close)<br/>stop / target / 25d time / trail"]
+    MTM --> REC["reconcile → predictions,<br/>portfolio_snapshots (equity curve)"]
+    REC -.->|matured outcomes| BUD
+    REC -.->|labels| B
+```
+
+The two dotted feedbacks are the learning loops: matured trade outcomes
+re-calibrate the score→p_win mapping the budget planner uses, and realized
+forward returns become the labels the weekly retrain fits — both gated so a
+young system degrades to rules-only rather than trusting itself early.
 
 Cadence beyond the daily loop:
 
@@ -92,7 +129,7 @@ Scheduler import, troubleshooting) lives in [`docs/operations.md`](../operations
 | Package manager | `uv` |
 | Lint / format | `ruff` (line length 100, broad rule set) |
 | Type checking | `mypy --strict` on `src/trading` |
-| Tests | `pytest` (markers: `live`, `integration`, `slow`); 84 test files |
+| Tests | `pytest` (markers: `live`, `integration`, `slow`); 91 test files |
 | Data / numerics | `pandas`, `polars`, `pyarrow`, `numpy`, `ta` |
 | Storage | SQLite (`data/app.db`) + Parquet (per-symbol OHLCV) |
 | Sources | `kiteconnect` (fallback), `yfinance`, `nsepython`, `feedparser` |
@@ -115,16 +152,22 @@ Scheduler import, troubleshooting) lives in [`docs/operations.md`](../operations
 src/trading/
 ├── config.py            # Paths + Settings (frozen dataclasses); .env loading
 ├── cli.py               # Typer app — the entire operator command surface
+├── clock.py             # canonical IST clock (now_ist / today_ist)
 ├── data/                # Layer 1: ingestion (decoupled from analysis)
 │   ├── yfinance.py      #   historical OHLCV fetch (parquet I/O is store/ohlcv.py)
+│   ├── ohlcv_refresh.py #   incremental OHLCV top-up used by pre_open
 │   ├── cache.py         #   requests-cache for HTTP fetchers
 │   ├── kite.py          #   kiteconnect SDK wrapper (emergency fallback only)
 │   ├── kite_snapshot.py #   reads broker JSON written by /kite-snapshot skill
-│   ├── quotes_snapshot.py #  reads intraday quote JSON
+│   ├── quotes_snapshot.py #  reads intraday quote JSON (freshness-checked)
+│   ├── snapshot_schema.py #  validates the skill-written JSON contract
+│   ├── reconcile.py     #   predicted-vs-actual outcome reconciliation
 │   ├── macro.py         #   global indices, USDINR, VIX, FII/DII
+│   ├── macro_cross.py   #   /macro-doctor second-source cross-check reader
+│   ├── fno_ban.py       #   NSE F&O ban-list fetch (rules filter input)
 │   ├── news.py          #   RSS aggregator + NSE event calendar
 │   ├── sector.py        #   11 NSE sectoral indices + relative strength
-│   └── universe.py      #   symbol universe loader
+│   └── universe.py      #   universe loaders (ingest list + Nifty-50 candidates)
 ├── features/            # Layer 2: analysis
 │   ├── technicals.py    #   indicator suite (RSI, MACD, ATR, EMA, ADX, …)
 │   ├── sentiment.py     #   FinBERT headline scoring
@@ -133,27 +176,39 @@ src/trading/
 │   ├── rules.py         #   Layer A — 10 hard filters
 │   ├── sizing.py        #   position sizing (risk budget × regime × caps)
 │   ├── exits.py         #   stop / target / time / trailing exit logic
-│   ├── ranker*.py       #   Layer B — LightGBM (features, labels, train, io)
-│   └── ranker.py        #   scoring + cold-start + backtest signal provider
+│   ├── daily_budget.py  #   daily-deploy planner (cash, lot & sector caps)
+│   ├── calibration.py   #   score → p_win calibration from matured outcomes
+│   ├── trajectory.py    #   entry-trajectory / dip-quality evidence
+│   └── factors.py       #   cross-sectional factor library (research only)
+├── ranking/             # Layer B — LightGBM ranker
+│   ├── ranker.py        #   scoring + cold-start + backtest signal provider
+│   └── ranker_{features,labels,train,io}.py
 ├── backtest/            # costs, event-loop engine, walk-forward, metrics
 ├── portfolio/           # holdings health, GTT Monte-Carlo, SIP allocator
-├── paper/               # paper-trade ledger, mark-to-market, reconciliation
+├── paper/               # ledger, positions, funds, pending entries, journal,
+│                        #   mark-to-market, cash reconciliation
 ├── llm/                 # context-bundle assembly + brief compilation
-├── jobs/                # orchestrators: pre_open, pre_open_iep, mid_day,
-│                        #   post_close, weekly_train, monthly_sip
+├── jobs/                # orchestrators: pre_open, pre_open_iep, open_fills,
+│                        #   mid_day, post_close, weekly_train, monthly_sip,
+│                        #   daily_unattended (broker-free spine)
 ├── store/               # SQLite (db, migrations, repos) + parquet + registry
-├── ops/                 # runner/SCHEDULE, holiday calendar, logging, notify
-└── ui/                  # Streamlit dashboard (Home + 3 pages)
+├── ops/                 # runner/SCHEDULE, holiday calendar, logging, notify,
+│                        #   run_status (half-run detection), retention (prune)
+└── ui/                  # Streamlit dashboard (Home + 4 pages: Kite Portfolio,
+                         #   Today Signals, Paper Journal, Paper Portfolio)
 
 data/                    # gitignored runtime data
 ├── app.db               # SQLite (all tabular state)
-├── parquet/             # per-symbol OHLCV history
-├── raw/<date>/          # broker JSON snapshots (holdings, gtts, quotes_HHMM)
-├── research/<date>/     # context bundle + analyst .md + brief.md
+├── parquet/             # per-symbol OHLCV history (subdir "nifty200" is a
+│                        #   historical misnomer — it holds the whole universe)
+├── raw/<date>/          # broker JSON snapshots (holdings, gtts, quotes_HHMM,
+│                        #   _quote_symbols.txt, macro_cross_HHMM)
+├── research/<date>/     # context bundle + analyst .md + brief.md + open_fills.md
 ├── cache/               # HTTP cache + FinBERT model cache
-└── logs/                # rotating per-job loguru logs
+└── logs/                # rotating per-job loguru logs + failures.log
 models/                  # LightGBM pickles + registry.csv
-.claude/skills/          # analyst, kite-snapshot, kite-quotes-snapshot, macro-doctor
+.claude/skills/          # analyst, kite-snapshot, kite-quotes-snapshot,
+                         #   macro-doctor, daily-workflow (day orchestrator)
 docs/scheduler/          # Windows Task Scheduler XML (one per reminder slot)
 ```
 
@@ -164,15 +219,15 @@ purpose:
 
 | Group | Commands |
 |---|---|
-| **Daily jobs** | `pre-open`, `pre-open-iep`, `mid-day`, `post-close` |
+| **Daily jobs** | `pre-open`, `pre-open-iep`, `open-fills` (prepare / `--apply`), `mid-day`, `post-close`, `daily-unattended` |
 | **Periodic** | `weekly-train`, `sip` |
 | **Brief** | `brief assemble-context`, `brief compile` |
-| **Data ingest** | `ingest-history`, `ingest-news`, `macro snapshot`, `macro refresh`, `macro verify`, `sector` |
-| **Analysis** | `scan`, `backtest` |
-| **Portfolio / paper** | `portfolio`, `paper-open`, `paper-mtm`, `paper-status`, `paper-reconcile` |
+| **Data ingest** | `ingest-history`, `refresh-ohlcv`, `ingest-news`, `macro snapshot`, `macro refresh`, `macro verify`, `sector` |
+| **Analysis** | `scan`, `backtest`, `factor-eval` |
+| **Portfolio / paper** | `portfolio`, `paper-open`, `paper-mtm`, `paper-status`, `paper-reconcile`, `funds add`, `funds top-up`, `funds list`, `funds balance` |
 | **Ranker (Layer B)** | `train-ranker`, `ranker-status` |
 | **Broker fallback** | `kite-emergency-login`, `kite-emergency-snapshot` |
-| **Ops** | `remind --slot <name>`, `notify-test` |
+| **Ops** | `remind --slot <name>`, `notify-test`, `status` (run-status of the day's blocks), `prune` (retention) |
 
 ## 6. Core design principles
 
@@ -219,12 +274,15 @@ Surfaced here at the overview level; each is expanded in its layer doc.
 
 - **Single operator, manual sequencing.** The daily flow depends on a human
   running ~13 commands in order at the right times. A missed step (e.g. skipping
-  IEP) silently leaves the bundle un-reranked. No orchestrator enforces ordering
-  or detects a half-run day.
+  IEP) silently leaves the bundle un-reranked. `ops/run_status.py` + the `status`
+  command now detect a half-run day after the fact, but nothing *enforces*
+  ordering, and the open-fills prepare step is not tracked (F-062) — a day can
+  read "complete" with zero entries filled.
 - **Broker data via LLM skill is a trust/consistency boundary.** The JSON
-  contract between the `/kite-*` skills and `data/*_snapshot.py` is enforced only
-  by the skill following its `SKILL.md`. A malformed write (wrong exchange,
-  missing field) is caught only partially by readers. Worth a schema validator.
+  contract between the `/kite-*` skills and `data/*_snapshot.py` is validated by
+  `data/snapshot_schema.py` on read. That checks shape and types; it cannot catch
+  semantically wrong-but-well-formed writes (wrong exchange, stale copy-paste),
+  which remain a residual risk of the skill boundary.
 - **Dependency vs. reality drift.** ~~`vectorbt`/`anthropic` are installed but
   unused in production; conversely the real engine is custom.~~ Resolved by F-001:
   both placeholder deps were pruned and the manifest now carries a breadcrumb note
@@ -233,5 +291,7 @@ Surfaced here at the overview level; each is expanded in its layer doc.
   Phase 19 (real money) is gated on ≥3 months OOS Sharpe > 1.0 and will need its
   own risk/kill-switch design — currently absent.
 - **Time-zone correctness is load-bearing.** Everything keys off IST
-  (`Asia/Kolkata`); date handling is centralised but every job re-derives "today"
-  independently. A single canonical clock would reduce drift risk.
+  (`Asia/Kolkata`); `clock.py` is now the canonical clock (`now_ist` /
+  `today_ist`) and the jobs use it. A few call sites still read the naive host
+  clock — notably the quote-snapshot freshness check (F-058) — so a host not set
+  to IST can mis-judge quote staleness.

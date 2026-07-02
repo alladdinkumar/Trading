@@ -1,7 +1,9 @@
 # 07 — Jobs & Workflows (`jobs/`)
 
 > Part of the [`docs/architecture/`](./PROGRESS.md) set. The orchestration layer:
-> six jobs that wire the lower layers into the daily/weekly/monthly cadence. This
+> eight jobs (pre_open, pre_open_iep, open_fills, mid_day, post_close,
+> weekly_train, monthly_sip, daily_unattended) that wire the lower layers into
+> the daily/weekly/monthly cadence. This
 > phase originally **confirmed F-018** (no OHLCV refresh; ✅ fixed 2026-06-16 —
 > `pre_open` now refreshes OHLCV + a staleness guard) and **F-019** (dead
 > risk gates; ✅ fixed 2026-06-16 — `build_scan_context` wires them), and shows
@@ -22,8 +24,9 @@ Every job follows the same skeleton — a genuinely clean, consistent design:
   `warnings`, and continue; only the snapshot prerequisite aborts.
 - **Idempotency:** SQLite UPSERTs + guards (`_already_opened_today`,
   `has_row_for_train_end`) + atomic file writes.
-- **Two-phase (mid_day/post_close):** `prepare` writes `_quote_symbols.txt`;
-  the `/kite-quotes-snapshot` skill runs; `apply` consumes the quotes.
+- **Two-phase (open_fills/mid_day/post_close):** `prepare` writes
+  `_quote_symbols.txt`; the `/kite-quotes-snapshot` skill runs; `apply` consumes
+  the quotes.
 
 ## 2. The daily lifecycle
 
@@ -38,7 +41,7 @@ sequenceDiagram
     User->>Skill: /kite-snapshot
     Skill->>DB: holdings.json, gtts.json, _meta.json
     User->>Job: trading pre-open
-    Job->>DB: macro, sector, news, signals, _context.md
+    Job->>DB: macro, sector, news, signals, _pending_entries.json, _context.md
     User->>Skill: /analyst
     Skill->>DB: macro_brief/candidates/*.md
     User->>Job: trading brief compile → brief.md
@@ -46,6 +49,13 @@ sequenceDiagram
     Note over User,DB: IEP 08:55–09:00
     User->>Skill: /kite-quotes-snapshot
     User->>Job: trading pre-open-iep (rewrites _context.md)
+
+    Note over User,DB: Open-fills ~09:15–09:20 (post-open)
+    User->>Job: trading open-fills (prepare)
+    Job->>DB: _quote_symbols.txt (from _pending_entries.json)
+    User->>Skill: /kite-quotes-snapshot
+    User->>Job: trading open-fills --apply
+    Job->>DB: paper trades at live LTP + open_fills.md
 
     Note over User,DB: Mid-day 12:25–12:35
     User->>Job: trading mid-day (prepare)
@@ -60,17 +70,20 @@ sequenceDiagram
 
 ## 3. `pre_open` — the morning pipeline
 
-`run_pre_open` runs eight steps in dependency order, all inside one connection:
+`run_pre_open` runs eleven steps in dependency order, all inside one connection:
 
 ```mermaid
 flowchart TD
     M["_step_macro<br/>snapshot+classify → regime"] --> SEC["_step_sector"]
     SEC --> N["_step_news<br/>fetch+score+aggregate"]
-    N --> SC["_step_scan<br/>Layer A (empty ScanContext)"]
+    N --> OH["_step_ohlcv<br/>incremental parquet refresh"]
+    OH --> FB["_step_fno_ban<br/>NSE ban list"]
+    FB --> SC["_step_scan<br/>Layer A (build_scan_context)"]
     SC --> RK["_step_rank<br/>Layer B (cold-start)"]
     RK --> PF["_step_portfolio<br/>holdings health (Kite snapshot)"]
-    PF --> AO["_step_auto_open<br/>signals + paper-trades"]
-    AO --> AS["_step_assemble → _context.md"]
+    PF --> CC["_step_cross_check<br/>Kite close vs parquet"]
+    CC --> PL["_step_plan_and_record<br/>visibility signals + _pending_entries.json<br/>(opens NO trades — see open-fills)"]
+    PL --> AS["_step_assemble → _context.md"]
 ```
 
 **Degradation matrix:**
@@ -82,12 +95,14 @@ flowchart TD
 | news | warn, `(0,0)` | no |
 | scan | (reads parquet; missing symbol skipped) | no |
 | rank | warn, cold-start (all selected) | no |
-| **portfolio** | **`PreOpenAborted` → exit 2** | **yes** (missing/stale Kite snapshot) |
-| auto_open | per-candidate warn (sizing 0, ATR≥close) | no |
+| **portfolio** | **`PreOpenAborted` → exit 2** (missing/stale Kite snapshot) | **yes**, unless `require_snapshot=False` (the `daily-unattended` broker-free spine degrades to empty holdings) |
+| plan_and_record | per-candidate warn (ATR≥close skip) | no |
 | assemble | always writes bundle | no |
 
-**Idempotency:** `_already_opened_today` prevents a duplicate paper-trade for a
-symbol+date on re-run. Macro/sector/news/sentiment all UPSERT.
+**Idempotency:** `already_opened_today` keeps an already-held symbol out of
+`_pending_entries.json` on re-run; visibility signals dedupe via
+`insert_signal(or_ignore=True)` on the v8 partial unique index (F-030).
+Macro/sector/news/sentiment all UPSERT.
 
 This single job is where four findings from earlier phases concretely originate:
 
@@ -114,11 +129,16 @@ This single job is where four findings from earlier phases concretely originate:
   signal. Calibration buckets are meaningful and `signal.target` agrees with the
   exit engine.
 
-> **F-030 (new):** for non-selected (visibility-only) candidates, `_step_auto_open`
-> calls `insert_signal` **unconditionally** — no idempotency guard (the guard only
-> covers *opened* trades). Re-running `pre-open` for the same date inserts
-> duplicate `signals` rows, inflating dashboard signal counts. (SIP dedupes by
-> symbol so it's unaffected.)
+> **F-030 (✅ fixed 2026-06-29):** visibility-only signals ~~were inserted
+> unconditionally, duplicating on re-run~~ now dedupe via migration v8's partial
+> unique index (`symbol, ts WHERE created_by='pre_open'`) +
+> `insert_signal(or_ignore=True)`, scoped so selected/open_fills rows are
+> unaffected.
+
+> **Plan/fill split (2026-06-23 design).** The old `_step_auto_open` (paper
+> trades at the D-1 close) is gone: `_step_plan_and_record` only *records* the
+> selected candidates to `_pending_entries.json`. Fills happen post-open in the
+> dedicated `open_fills` job (§4a) at the live LTP.
 
 ## 4. `pre_open_iep` — the 08:55 gap filter
 
@@ -130,6 +150,31 @@ missing → warns, `quotes={}`, no gaps (degrades to "keep all"). Regime missing
 NEUTRAL. This is the one job that mutates a bundle another tool produced — it
 must preserve the `### SYM — passes N/M rules` heading format the briefing parser
 expects (F-027).
+
+## 4a. `open_fills` — the post-open fill block (~09:15)
+
+`run_open_fills` (2026-06-23 design) is two-phase like the MTM jobs:
+
+- **prepare** — reads `_pending_entries.json` (missing file → graceful no-op
+  with a warning, so a day with no candidates needs no quotes) and writes
+  `_quote_symbols.txt` for the skill.
+- **apply** — `read_latest_quotes` (missing/stale snapshot →
+  `OpenFillsAborted` → exit 2: *never* fill on old prices); per pending symbol
+  recomputes `stop = LTP − 1.5×ATR₁₄` and `target = target_price(LTP, stop)`;
+  drops symbols with no quote, `LTP ≤ stop`, or `already_opened_today`; then
+  re-runs the **same daily-budget planner** as a real morning would —
+  `plan_daily_entries` with live cash (`compute_paper_cash`), open-lot and
+  sector caps (F-048), and the score→p_win calibration. Funded entries open via
+  `log_signal_and_open_trade` with `created_by="open_fills"` and
+  `ts = quote capture time`; selected-but-unfunded symbols get a
+  visibility signal + a skip-reason warning. Writes
+  `data/research/<date>/open_fills.md` (LTP vs `ref_close` drift table).
+
+The point of the split: the paper book records a price an actual market order
+could have gotten (~09:15 LTP), not the unfillable previous close — so the
+Phase 18.5 OOS-Sharpe gate isn't flattered by fantasy fills. Note the drift is
+also a measurement: `open_fills.md` shows per-symbol LTP-vs-close drift, i.e.
+the gap risk the IEP filter (§4) was supposed to absorb.
 
 ## 5. `mid_day` & `post_close` — the MTM jobs
 
@@ -198,8 +243,9 @@ the 1st even if a holiday.
 
 | Job | Hard prereq (abort) | Re-run safety |
 |---|---|---|
-| pre_open | Kite snapshot | UPSERTs + `_already_opened_today` (but F-030 dups visibility signals) |
+| pre_open | Kite snapshot (unless broker-free spine) | UPSERTs + `already_opened_today`; visibility signals dedupe via v8 partial index (F-030 ✅) |
 | pre_open_iep | `_context.md` present | rewrites in place (idempotent-ish) |
+| open_fills | fresh quotes (`OpenFillsAborted` → exit 2); no pending file → no-op | `already_opened_today` keeps re-runs from double-opening; markdown overwrite by date |
 | mid_day | fresh quotes | MTM persists; re-run re-evaluates (days_held derived, no double-count — F-024 ✅) |
 | post_close | fresh quotes | snapshot UPSERT by date; MTM persists |
 | weekly_train | none (review always written) | `has_row_for_train_end` guard |
@@ -229,7 +275,12 @@ the 1st even if a holiday.
   `monthly_sip` now feed the latest `sentiment_daily` rollup + static-CSV
   fundamentals into health via `build_holding_context`, so the critical-news EXIT
   veto fires on holdings and the votes_cast-scaled verdict isn't TRIM-pinned.
-- **Visibility-only signals duplicate on re-run (F-030).**
+- **✅ Visibility-only signals no longer duplicate on re-run (F-030, 2026-06-29).**
+  Migration v8 partial unique index + `insert_signal(or_ignore=True)`.
+- **Open-fills is invisible to run-status (F-062, open).** `ops/run_status.py`
+  doesn't track the open-fills block, so `trading status` can report a complete
+  day when no entries were ever filled. Second-phase finding — see
+  `findings_second_phase.md`.
 - **✅ Train/serve feature parity (F-031, 2026-06-18).** `negative_news_count_7d`
   used to be empty in training (`negative_news_lookup={}`) but populated at
   inference. Now a single `news_store.negative_news_count_7d` is the source of

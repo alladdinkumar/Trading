@@ -225,7 +225,7 @@ The logic that *decides* anything is a pure function taking a dataclass and
 returning a dataclass — no IO, no globals:
 `rules.passes_*` / `evaluate_symbol`, `sizing.position_size`, `exits.evaluate_exit`,
 `regime.classify_regime`, `health` scorer, `gtt.simulate_target_hit`,
-`allocator.allocate_sip`. This is why the test suite is large and fast (84 test
+`allocator.allocate_sip`. This is why the test suite is large and fast (91 test
 files) and why these cores can be reasoned about in isolation.
 
 ### 4.4 Frozen dataclass DTOs as the inter-layer contract

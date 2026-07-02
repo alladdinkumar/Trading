@@ -145,7 +145,7 @@ These 8 tables have live writers and drive the daily flow.
 
 | Table | PK | Written by | Purpose |
 |---|---|---|---|
-| `signals` | `id` auto | `paper.ledger` / `pre_open` | One row per emitted trade idea: entry/stop/target, `rules_passed_json`, optional `ml_score` + `conviction`. `created_by` distinguishes `auto` vs manual. |
+| `signals` | `id` auto | `paper.ledger` / `pre_open` / `open_fills` | One row per emitted trade idea: entry/stop/target, `rules_passed_json`, optional `ml_score` + `conviction`. `created_by` records the origin: `pre_open` (visibility rows, deduped by the v8 partial unique index), `open_fills` (live-LTP fills + unfunded-skip rows), `manual` (`paper-open`), `auto` (legacy default). |
 | `paper_trades` | `id` auto | `paper.ledger` / `paper.mtm` | The simulated position lifecycle. Opens with `ts_exit=NULL`; MTM fills `exit_*`, `pnl*`, `days_held`. v2 columns hold trailing-stop state. FK → `signals`. |
 | `predictions` | `id` auto | `paper.reconcile` (+ ledger) | Predicted return vs. realised at horizon; `error_pct` filled at `evaluated_at`. Feeds the calibration view. |
 | `portfolio_snapshots` | `date` | `post_close` / `reconcile` | Daily equity mark: `cash`, `holdings_json` (serialised holdings), `equity`, `drawdown_pct`. Drives the equity curve. |
@@ -229,7 +229,8 @@ with a remediation, rather than splatting `Holding(**row)` unchecked.
 | `gtts.json` | `/kite-snapshot` | `kite_snapshot.read_gtts` | list of `GttOrder` rows (id, type, status, tradingsymbol, exchange, trigger_values[], last_price, created_at, orders[]) |
 | `positions.json` | `/kite-snapshot` (optional) | `kite_snapshot.read_positions` | list of `Position` rows |
 | `_meta.json` | both skills | snapshot readers | `{snapshot_at, source: "mcp"|"sdk-fallback", skill_version, quotes_at}` — readers validate the date matches `<date>` |
-| `_quote_symbols.txt` | `trading mid-day`/`post-close` (prepare) | `/kite-quotes-snapshot` | one ticker per line; the symbol list to quote |
+| `_quote_symbols.txt` | `trading open-fills`/`mid-day`/`post-close` (prepare) | `/kite-quotes-snapshot` | one ticker per line; the symbol list to quote |
+| `_pending_entries.json` | `pre_open._step_plan_and_record` (Python, not a skill) | `paper.pending.read_pending_entries` (open_fills) | the day's regime + selected candidates (symbol, ATR₁₄, ml_score, ref close) awaiting a live-LTP fill in the open-fills block |
 | `quotes_HHMM.json` | `/kite-quotes-snapshot` | `quotes_snapshot.read_latest_quotes` | list of `Quote` rows; **HHMM in the filename is the capture time** and the staleness source of truth |
 
 Staleness: `read_latest_quotes` picks the newest `quotes_HHMM.json` and checks

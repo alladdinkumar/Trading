@@ -106,7 +106,7 @@ single `brief.md` in a fixed section order:
 Each skill is a `SKILL.md` the Claude Code session executes. They are the only
 place MCP / the LLM is invoked. Three drive the daily narrative/broker loop
 (below); a fourth, `/macro-doctor` (§4.4), is the F-036 reconciliation
-orchestrator.
+orchestrator; a fifth, `/daily-workflow` (§4.5), orchestrates the whole day.
 
 ### 4.1 `/kite-snapshot` — broker holdings/GTTs
 Probes `mcp__kite__get_profile`; on auth failure it halts and tells the user to
@@ -117,8 +117,8 @@ row to the `data.kite` dataclass field names, and writes
 (`source: "mcp"`). Consumed by `data.kite_snapshot` ([03 §3.4](./03-data-layer.md)).
 
 ### 4.2 `/kite-quotes-snapshot` — intraday quotes
-Reads `_quote_symbols.txt` (written by `mid-day`/`post-close` prepare). Halts if
-absent. Calls `mcp__kite__get_quotes` for the (NSE-defaulted) symbols, writes
+Reads `_quote_symbols.txt` (written by `open-fills`/`mid-day`/`post-close`
+prepare). Halts if absent. Calls `mcp__kite__get_quotes` for the (NSE-defaulted) symbols, writes
 `quotes_HHMM.json` (HHMM = capture time, the staleness source of truth), and
 merges `quotes_at` into `_meta.json`. Consumed by `data.quotes_snapshot`.
 
@@ -143,6 +143,14 @@ cross-checks within tolerance (exit-1 on mismatch). **Orchestrator only** — ev
 DB write goes through the CLI, and it never calls `place_order`/`modify`. Kite has
 no FII/DII feed, so those stay `unreconciled`. This is the "skill is the brain,
 deterministic code is the hands" split applied to ingestion.
+
+### 4.5 `/daily-workflow` — the day orchestrator
+Walks the four IST time-gated blocks (pre-open → IEP → open-fills → mid-day →
+post-close) end to end in one Claude Code session: runs each block's CLI steps,
+drives the `/kite-*` skills in between, pauses for Kite login when the session
+is dead, and self-schedules a wake-up for the next block. It layers *sequencing*
+on top of the reminder-driven flow but is still session-bound — if the session
+dies mid-day, the remaining blocks fall back to the human-run reminders.
 
 ## 5. Where the trust boundaries are
 
