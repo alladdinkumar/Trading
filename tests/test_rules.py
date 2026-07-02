@@ -111,6 +111,10 @@ def test_uptrend_fails_when_history_insufficient() -> None:
 
 def test_pullback_passes_when_close_near_sma() -> None:
     df = _uptrend_df()
+    # Pull the last close down to just below the 20-SMA -- a genuine dip, not
+    # the natural drift of a rising series (which sits *above* its SMA and
+    # must no longer pass under the directional band).
+    df.loc[df.index[-1], "close"] = df["sma_20"].iloc[-1] * 0.98
     r = passes_pullback(df, max_pct=0.10)  # generous band for the synthetic data
     assert r.passed
 
@@ -121,6 +125,26 @@ def test_pullback_fails_when_far_from_sma() -> None:
     df.loc[df.index[-1], "close"] = df["sma_20"].iloc[-1] * 1.5
     r = passes_pullback(df, max_pct=0.03)
     assert not r.passed
+
+
+@pytest.mark.parametrize(
+    "factor,expected",
+    [
+        (0.98, True),  # 2% below SMA -- within the max_pct floor
+        (1.0, True),  # exactly at the SMA
+        (1.02, False),  # 2% above SMA -- extended, exceeds small_tol
+        (1.029, False),  # 2.9% above SMA -- would've passed the old symmetric band
+    ],
+)
+def test_pullback_is_directional(factor: float, expected: bool) -> None:
+    """The gate must reject names extended ABOVE their SMA (F-050): only a
+    small upside tolerance (small_tol) is allowed, while the full max_pct
+    floor still applies below the SMA."""
+    df = _df([100.0] * 250)  # flat series -> sma_20 == sma_50 == 100.0
+    sma = df["sma_20"].iloc[-1]
+    df.loc[df.index[-1], "close"] = sma * factor
+    r = passes_pullback(df)
+    assert r.passed is expected
 
 
 # ---------------------------------------------------------------------------

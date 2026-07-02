@@ -96,22 +96,34 @@ def passes_uptrend(df: pd.DataFrame) -> RuleResult:
     )
 
 
-def passes_pullback(df: pd.DataFrame, max_pct: float = 0.03) -> RuleResult:
-    """|close − sma_20| ≤ max_pct OR |close − sma_50| ≤ max_pct."""
+def passes_pullback(df: pd.DataFrame, max_pct: float = 0.03, small_tol: float = 0.005) -> RuleResult:
+    """sma*(1-max_pct) <= close <= sma*(1+small_tol), for sma_20 OR sma_50.
+
+    Directional band (F-050): the old symmetric `|close - sma| <= max_pct`
+    let names *extended above* their average pass as "pullbacks". A dip entry
+    means price sitting at or below its short average, so only a small upside
+    tolerance (`small_tol`) is allowed while the full `max_pct` floor still
+    applies on the downside.
+    """
     last = df.iloc[-1]
     close = last["close"]
-    distances: list[float] = []
+    pct_from: list[tuple[str, float]] = []
     for col in ("sma_20", "sma_50"):
         val = last.get(col)
-        if val is not None and not pd.isna(val):
-            distances.append(abs(close - val) / val)
-    if not distances:
+        if val is None or pd.isna(val):
+            continue
+        pct = (close - val) / val
+        pct_from.append((col, pct))
+        if -max_pct <= pct <= small_tol:
+            return RuleResult("pullback", True, f"{pct * 100:+.1f}% from {col}")
+    if not pct_from:
         return RuleResult("pullback", False, INSUFFICIENT_HISTORY)
-    min_dist = min(distances)
-    if min_dist <= max_pct:
-        return RuleResult("pullback", True, f"{min_dist * 100:.1f}% from nearest SMA")
+    nearest_col, nearest_pct = min(pct_from, key=lambda t: abs(t[1]))
     return RuleResult(
-        "pullback", False, f"{min_dist * 100:.1f}% from nearest SMA (> {max_pct * 100:.0f}%)"
+        "pullback",
+        False,
+        f"{nearest_pct * 100:+.1f}% from {nearest_col} "
+        f"(outside [-{max_pct * 100:.0f}%, +{small_tol * 100:.1f}%])",
     )
 
 
