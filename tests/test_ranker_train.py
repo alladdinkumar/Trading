@@ -4,12 +4,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from trading.backtest.forward_return import LABEL_HORIZON_DAYS
 from trading.features.technicals import add_indicators
 from trading.ranking.ranker_train import (
     MIN_TRAIN_EXAMPLES,
     InsufficientDataError,
     _build_xy_for_window,
+    _embargo_boundary,
     _evaluate_fold_oos,
+    _train_signal_mask,
     calibrate_threshold,
     train_walkforward,
 )
@@ -216,6 +219,72 @@ def test_build_xy_exposes_magnitude_weights_and_signed_returns() -> None:
     # weight is |return|; label is the sign of the same return
     assert fx.w == pytest.approx(np.abs(fx.rets))
     assert ((fx.rets > 0).astype(int) == fx.y).all()
+
+
+def test_embargo_boundary_is_label_horizon_trading_days_before_train_end() -> None:
+    """F-055: the embargo boundary must sit exactly LABEL_HORIZON_DAYS trading
+    days before train_end, so a training signal 10 trading days before
+    train_end (well inside the 25-day label horizon) is excluded, while one
+    40 trading days before (well outside it) is included."""
+    assert 10 < LABEL_HORIZON_DAYS < 40, "fixture offsets must straddle the label horizon"
+    train_end = pd.Timestamp("2024-06-03")  # a Monday
+    index = pd.bdate_range("2022-01-03", "2024-08-01")
+    boundary_pos = index.get_loc(train_end)
+
+    near_boundary = index[boundary_pos - 10]  # 10 trading days before train_end
+    far_before = index[boundary_pos - 40]  # 40 trading days before train_end
+
+    boundary = _embargo_boundary(train_end)
+    assert near_boundary >= boundary, "10-trading-day-old signal must fall inside the embargo"
+    assert far_before < boundary, "40-trading-day-old signal must fall outside the embargo"
+
+    mask = _train_signal_mask(index, index[0], train_end)
+    assert not mask[boundary_pos - 10], "signal 10 trading days before train_end must be excluded"
+    assert mask[boundary_pos - 40], "signal 40 trading days before train_end must still be included"
+
+
+def test_build_xy_embargoes_training_signals_near_train_end() -> None:
+    """F-055: `_build_xy_for_window` must not include training signals whose
+    label outcome window (up to LABEL_HORIZON_DAYS forward bars) reaches into
+    the immediately-following OOS test fold. Replaying the same rules-pass +
+    realized_return logic but truncated at the embargo boundary (instead of
+    train_end) must yield the same example count `_build_xy_for_window`
+    produces — proving the embargo is actually wired into training, not just
+    available as a helper."""
+    from trading.ranking.ranker_labels import realized_return
+    from trading.strategy.rules import MIN_HISTORY_BARS, ScanContext, evaluate_symbol
+
+    enriched = {
+        f"SYM{i}": add_indicators(_separable_ohlcv(seed=i, n=1300)) for i in range(5)
+    }
+    train_start = pd.Timestamp("2022-06-01")
+    train_end = pd.Timestamp("2024-06-03")
+
+    def _count(upper_bound: pd.Timestamp) -> int:
+        n = 0
+        for sym, df in enriched.items():
+            mask = (df.index >= train_start) & (df.index < upper_bound)
+            for sd in df.index[mask]:
+                sub = df.loc[:sd]
+                if len(sub) < MIN_HISTORY_BARS:
+                    continue
+                if not evaluate_symbol(sym, sub, ScanContext(scan_date=sd.date())).all_passed:
+                    continue
+                if realized_return(df, sd) is not None:
+                    n += 1
+        return n
+
+    embargoed_count = _count(_embargo_boundary(train_end))
+    unembargoed_count = _count(train_end)
+    assert embargoed_count < unembargoed_count, (
+        "fixture must have at least one rules-passing, resolvable candidate "
+        "inside the embargo window for this test to be meaningful"
+    )
+
+    fx = _build_xy_for_window(
+        enriched, _empty_macro_history(), {}, {}, train_start, train_end
+    )
+    assert len(fx.X) == embargoed_count
 
 
 def test_calibrate_threshold_excludes_losers() -> None:

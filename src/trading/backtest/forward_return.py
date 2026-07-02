@@ -23,13 +23,21 @@ from trading.backtest.costs import (
 )
 from trading.strategy.exits import Bar, TradeState, evaluate_exit
 
+# Forward-looking label horizon in trading days: how far past signal_date a
+# label's outcome (`realized_return`) can be realised. This is also the
+# minimum embargo a walk-forward fold must leave between its training signals
+# and its test window (F-055) — a training label whose outcome window reaches
+# a bar on/after the fold's test_start would be graded on data the OOS fold
+# is supposed to judge, leaking information across the split.
+LABEL_HORIZON_DAYS = 25
+
 
 def realized_return(
     enriched_df: pd.DataFrame,
     signal_date: pd.Timestamp,
     *,
     atr_stop_multiple: float = 1.5,
-    max_days: int = 25,
+    max_days: int = LABEL_HORIZON_DAYS,
     cost_config: CostConfig | None = None,
 ) -> float | None:
     """Replay Phase 6 exit logic forward from signal_date+1, returning the

@@ -17,6 +17,7 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
+from trading.backtest.forward_return import LABEL_HORIZON_DAYS
 from trading.backtest.metrics import sharpe
 from trading.backtest.walkforward import WalkForwardConfig, windows
 from trading.ranking.ranker_features import (
@@ -113,6 +114,37 @@ class TrainResult:
     n_folds_total: int = 0
 
 
+def _embargo_boundary(train_end: pd.Timestamp) -> pd.Timestamp:
+    """The latest signal_date a training example may have — `LABEL_HORIZON_DAYS`
+    trading days before `train_end`.
+
+    A training label is the realised outcome of a trade held up to
+    `LABEL_HORIZON_DAYS` forward bars; `windows()` sets `test_start ==
+    train_end` with zero gap, so any training signal dated within that horizon
+    of `train_end` has its label resolved on bars inside the fold's own OOS
+    test window (F-055). Uses `numpy.busday_offset` (Mon–Fri trading-day
+    arithmetic, consistent with the rest of the codebase's trading-day math,
+    e.g. `trading.paper.journal`) rather than the exact bars of any one
+    symbol's index, since the boundary must be a single date shared across the
+    whole (multi-symbol) training set. `roll="forward"` rolls `train_end`
+    itself onto a business day first when it isn't one, which only widens
+    (never narrows) the embargo.
+    """
+    boundary = np.busday_offset(
+        train_end.date().isoformat(), -LABEL_HORIZON_DAYS, roll="forward"
+    )
+    return pd.Timestamp(boundary)
+
+
+def _train_signal_mask(
+    index: pd.Index, train_start: pd.Timestamp, train_end: pd.Timestamp
+) -> np.ndarray[Any, Any]:
+    """Boolean mask selecting `index` entries eligible as training signals for
+    a `[train_start, train_end)` fold, with the F-055 embargo applied on the
+    upper bound (see `_embargo_boundary`)."""
+    return (index >= train_start) & (index < _embargo_boundary(train_end))
+
+
 def _build_xy_for_window(
     enriched: Mapping[str, pd.DataFrame],
     macro_history: pd.DataFrame,
@@ -124,13 +156,19 @@ def _build_xy_for_window(
     """Walk each (symbol, date) in [train_start, train_end), evaluate Layer A,
     and build (X, y, w, rets) for every all-pass candidate with a resolvable
     forward window. `w` (∝ |return|) weights training toward economically large
-    outcomes; `rets` is the signed realised return (F-044)."""
+    outcomes; `rets` is the signed realised return (F-044).
+
+    The upper bound is embargoed `LABEL_HORIZON_DAYS` trading days short of
+    `train_end` (F-055): candidates dated later than that would have their
+    label's outcome window reach into this fold's own OOS test period, which
+    starts at `test_start == train_end` with zero gap.
+    """
     feat_rows: list[dict[str, float]] = []
     rets: list[float] = []
     for sym, df in enriched.items():
         if len(df) < MIN_HISTORY_BARS:
             continue
-        mask = (df.index >= train_start) & (df.index < train_end)
+        mask = _train_signal_mask(df.index, train_start, train_end)
         for sd in df.index[mask]:
             sub = df.loc[:sd]
             if len(sub) < MIN_HISTORY_BARS:
