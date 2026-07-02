@@ -80,11 +80,15 @@ def _trail_new_stop(entry: float, current_stop: float, atr_at_entry: float, clos
 def evaluate_exit(trade: TradeState, bar: Bar) -> ExitDecision:
     # 1. Intra-bar stop — conservative: stop wins ties with target.
     if bar.low <= trade.current_stop:
+        # If the bar gapped down through the stop, the only honest fill is the
+        # gap open — you couldn't have sold at the (never-traded) stop level
+        # (F-049). Otherwise the stop level itself is the fill, as before.
+        exit_price = min(trade.current_stop, bar.open)
         return ExitDecision(
             action="EXIT_STOP",
             new_stop=trade.current_stop,
-            exit_price=trade.current_stop,
-            reason=f"stop hit at ₹{trade.current_stop:.2f} (low ₹{bar.low:.2f})",
+            exit_price=exit_price,
+            reason=f"stop hit at ₹{exit_price:.2f} (low ₹{bar.low:.2f})",
         )
 
     # 2. Intra-bar target.

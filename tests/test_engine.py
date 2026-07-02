@@ -117,6 +117,27 @@ def test_exit_stop_fires_realises_loss() -> None:
     assert trade.costs_paid > 0
 
 
+def test_exit_stop_gap_down_fills_at_open_not_stop() -> None:
+    """F-049: bar opens below the stop → fill at the gap-open (+ sell slippage), not the stop."""
+    df = _bars(
+        [
+            (100, 101, 99, 100),  # signal day
+            (100, 101, 96, 97),  # buy at ~100; low 96 stays above stop 95 — no exit yet
+            (90, 91, 85, 86),  # gap down: open 90 < stop 95 → filled at 90
+        ]
+    )
+    sig = Signal(symbol="GAP", close=100.0, atr=2.0, stop_price=95.0)
+    provider = _signal_on(df.index[0], [sig])
+    config = BacktestConfig(initial_capital=100_000)
+
+    result = run_backtest({"GAP": df}, config, df.index[0], df.index[-1], signal_provider=provider)
+    assert len(result.trades) == 1
+    trade = result.trades[0]
+    assert trade.exit_reason == "EXIT_STOP"
+    # Gap open 90, slipped down on sell: 90 × 0.999 = 89.91
+    assert trade.exit_price == pytest.approx(89.91)
+
+
 def test_costs_deducted_from_pnl() -> None:
     """net_pnl = gross_pnl − costs_paid, exactly."""
     df = _bars([(100, 101, 99, 100), (102, 130, 101, 125), (125, 130, 124, 128)])

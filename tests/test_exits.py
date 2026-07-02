@@ -85,6 +85,33 @@ def test_stop_exact_touch_exits() -> None:
     assert decision.action == "EXIT_STOP"
 
 
+def test_stop_gap_down_through_stop_fills_at_open() -> None:
+    """bar.open < current_stop → filled at the gap-open, not the stop (F-049).
+
+    Prior close 95 == current_stop; the stock gapped down to 93 and never
+    traded back up to the stop, so the only honest fill is the open.
+    """
+    trade = _trade(entry=100, initial_stop=95)
+    bar = _bar(o=93, h=94, low=90, c=91)  # open 93 < stop 95 <= prior close 95
+    decision = evaluate_exit(trade, bar)
+    assert decision.action == "EXIT_STOP"
+    assert decision.exit_price == 93.0  # gap open, not 95
+    assert decision.new_stop == 95.0
+
+
+def test_stop_wins_gap_down_through_both_stop_and_target() -> None:
+    """Same-bar gap-down through stop with high also piercing target → stop still
+
+    wins (conservative tie-break) and fills at the gap-open, not the stop level.
+    """
+    trade = _trade(entry=100, initial_stop=98)  # target = 105
+    bar = _bar(o=95, h=106, low=90, c=104)  # open 95 < stop 98; high 106 >= target 105
+    decision = evaluate_exit(trade, bar)
+    assert decision.action == "EXIT_STOP"
+    assert decision.exit_price == 95.0  # gap open, not 98 and not the target
+    assert decision.new_stop == 98.0
+
+
 # ---------------------------------------------------------------------------
 # Target branch — two paths (R/R first, % first)
 # ---------------------------------------------------------------------------
