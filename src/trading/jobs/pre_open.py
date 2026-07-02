@@ -59,6 +59,11 @@ from trading.store.repo import (
     insert_signal,
 )
 from trading.store.sector_store import upsert_sector_daily
+from trading.strategy.daily_budget import (
+    DEFAULT_DAILY_DEPLOY_CAP,
+    DEFAULT_POOL_CAPITAL,
+    DEFAULT_RISK_PCT,
+)
 from trading.strategy.exits import target_price
 from trading.strategy.rules import Candidate, ScanContext, passing, scan
 
@@ -100,9 +105,9 @@ def run_pre_open(
     paths: Paths | None = None,
     settings: Settings | None = None,
     skip_news: bool = False,
-    pool_capital: float = 100_000.0,
-    daily_deploy_cap: float = 7_000.0,
-    risk_pct: float = 0.02,
+    pool_capital: float = DEFAULT_POOL_CAPITAL,
+    daily_deploy_cap: float = DEFAULT_DAILY_DEPLOY_CAP,
+    risk_pct: float = DEFAULT_RISK_PCT,
     require_snapshot: bool = True,
 ) -> PreOpenResult:
     """Orchestrate Phases 1–12 for `as_of` and write the analyst bundle.
@@ -152,6 +157,9 @@ def run_pre_open(
             regime,
             warnings,
             p,
+            pool_capital=pool_capital,
+            daily_deploy_cap=daily_deploy_cap,
+            risk_pct=risk_pct,
         )
 
         bundle_path = _step_assemble(
@@ -398,12 +406,21 @@ def _step_plan_and_record(
     regime: Regime,
     warnings: list[str],
     paths: Paths,
+    *,
+    pool_capital: float = DEFAULT_POOL_CAPITAL,
+    daily_deploy_cap: float = DEFAULT_DAILY_DEPLOY_CAP,
+    risk_pct: float = DEFAULT_RISK_PCT,
 ) -> int:
     """Log visibility signals for non-selected candidates and record the
     funding-eligible (selected) ones to `_pending_entries.json` for the
     post-open `open-fills` block. Opens no paper trades — the live-LTP fill
     happens after market open, not at D-1 close (2026-06-23 design). Returns
     the number of pending entries written.
+
+    `pool_capital`/`daily_deploy_cap`/`risk_pct` (F-056) are the operator's
+    CLI-supplied risk controls; they ride along in the pending-entries
+    payload so `open_fills` apply mode can size against them instead of the
+    hardcoded `daily_budget` defaults.
     """
     pending: list[PendingEntry] = []
     for sc in scored:
@@ -446,7 +463,15 @@ def _step_plan_and_record(
             )
         )
 
-    write_pending_entries(paths, as_of, regime=regime, entries=pending)
+    write_pending_entries(
+        paths,
+        as_of,
+        regime=regime,
+        entries=pending,
+        pool_capital=pool_capital,
+        daily_deploy_cap=daily_deploy_cap,
+        risk_pct=risk_pct,
+    )
     return len(pending)
 
 

@@ -22,6 +22,7 @@ from trading.strategy.sizing import Regime, SizingInput, position_size
 
 DEFAULT_POOL_CAPITAL = 100_000.0
 DEFAULT_DAILY_DEPLOY_CAP = 7_000.0
+DEFAULT_RISK_PCT = 0.02
 DEFAULT_MAX_PER_STOCK_PCT = 0.50  # ₹50k on the ₹100k pool; daily cap paces fill
 DEFAULT_PWIN_PRIOR = 0.5  # ml_score fallback when the ranker is absent
 # F-048: bound correlated concentration the notional caps above never catch at the
@@ -84,7 +85,7 @@ def plan_daily_entries(
     regime: Regime,
     pool_capital: float = DEFAULT_POOL_CAPITAL,
     daily_cap: float = DEFAULT_DAILY_DEPLOY_CAP,
-    risk_pct: float = 0.02,
+    risk_pct: float = DEFAULT_RISK_PCT,
     max_per_stock_pct: float = DEFAULT_MAX_PER_STOCK_PCT,
     p_win_calibration: ScoreCalibration | None = None,
     open_lots_by_symbol: dict[str, int] | None = None,

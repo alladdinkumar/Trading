@@ -230,7 +230,7 @@ with a remediation, rather than splatting `Holding(**row)` unchecked.
 | `positions.json` | `/kite-snapshot` (optional) | `kite_snapshot.read_positions` | list of `Position` rows |
 | `_meta.json` | both skills | snapshot readers | `{snapshot_at, source: "mcp"|"sdk-fallback", skill_version, quotes_at}` — readers validate the date matches `<date>` |
 | `_quote_symbols.txt` | `trading open-fills`/`mid-day`/`post-close` (prepare) | `/kite-quotes-snapshot` | one ticker per line; the symbol list to quote |
-| `_pending_entries.json` | `pre_open._step_plan_and_record` (Python, not a skill) | `paper.pending.read_pending_entries` (open_fills) | the day's regime + selected candidates (symbol, ATR₁₄, ml_score, ref close) awaiting a live-LTP fill in the open-fills block |
+| `_pending_entries.json` | `pre_open._step_plan_and_record` (Python, not a skill) | `paper.pending.read_pending_entries` (open_fills) | the day's regime + selected candidates (symbol, ATR₁₄, ml_score, ref close) awaiting a live-LTP fill in the open-fills block, plus a `risk_params` block (pool_capital, daily_deploy_cap, risk_pct) carrying the operator's `--capital`/`--daily-cap`/`--risk-pct` CLI flags through to `open_fills.plan_daily_entries` (F-056); absent on pre-F-056 files → `paper.pending.RiskParams()` defaults |
 | `quotes_HHMM.json` | `/kite-quotes-snapshot` | `quotes_snapshot.read_latest_quotes` | list of `Quote` rows; **HHMM in the filename is the capture time** and the staleness source of truth |
 
 Staleness: `read_latest_quotes` picks the newest `quotes_HHMM.json` and checks

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import replace
 from datetime import UTC, date
@@ -11,11 +12,13 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
+from freezegun import freeze_time
 
 from trading.config import Settings, get_paths
 from trading.data.news import RawHeadline
 from trading.domain import MacroSnapshot, SectorRow
 from trading.features.regime import RegimeResult
+from trading.jobs.open_fills import run_open_fills
 from trading.jobs.pre_open import (
     PreOpenResult,
     _step_macro,
@@ -96,7 +99,7 @@ def test_run_pre_open_returns_result_with_bundle_path(paths, monkeypatch) -> Non
     )
     monkeypatch.setattr(
         "trading.jobs.pre_open._step_plan_and_record",
-        lambda conn, as_of, scored, regime, warnings, paths: 0,
+        lambda conn, as_of, scored, regime, warnings, paths, **_: 0,
     )
 
     result = run_pre_open(
@@ -544,7 +547,7 @@ def test_plan_and_record_writes_pending_for_selected(conn: sqlite3.Connection, p
     assert pt_count == 0  # nothing opened at pre-open
     assert sig_count == 0  # selected candidates get no signal until open-fills
 
-    regime, entries = read_pending_entries(paths, date(2026, 5, 15))
+    regime, entries, _ = read_pending_entries(paths, date(2026, 5, 15))
     assert regime == "NEUTRAL"
     assert [e.symbol for e in entries] == ["RVNL"]
     assert entries[0].atr_14 == pytest.approx(2.0)
@@ -573,7 +576,7 @@ def test_plan_and_record_non_selected_logs_signal_only(conn: sqlite3.Connection,
     assert pt_count == 0
     assert score == pytest.approx(0.42)
 
-    _, entries = read_pending_entries(paths, date(2026, 5, 15))
+    _, entries, _rp = read_pending_entries(paths, date(2026, 5, 15))
     assert entries == []
 
 
@@ -616,7 +619,7 @@ def test_plan_and_record_skips_already_open(conn: sqlite3.Connection, paths) -> 
         conn, date(2026, 5, 15), [_sc(_candidate("RVNL", 10))], "NEUTRAL", warnings, paths
     )
     assert count == 0
-    _, entries = read_pending_entries(paths, date(2026, 5, 15))
+    _, entries, _rp = read_pending_entries(paths, date(2026, 5, 15))
     assert entries == []
 
 
@@ -627,7 +630,7 @@ def test_plan_and_record_atr_wider_than_close_skipped(conn: sqlite3.Connection, 
     count = _step_plan_and_record(conn, date(2026, 5, 15), [_sc(cand)], "NEUTRAL", warnings, paths)
     assert count == 0
     assert any("RVNL" in w for w in warnings)
-    _, entries = read_pending_entries(paths, date(2026, 5, 15))
+    _, entries, _rp = read_pending_entries(paths, date(2026, 5, 15))
     assert entries == []
 
 
@@ -655,8 +658,138 @@ def test_run_pre_open_writes_pending_and_opens_nothing(paths, monkeypatch) -> No
     with get_conn(paths.db_path) as conn2:
         opened = conn2.execute("SELECT COUNT(*) FROM paper_trades").fetchone()[0]
     assert opened == 0
-    _, entries = read_pending_entries(paths, date(2026, 5, 15))
+    _, entries, _rp = read_pending_entries(paths, date(2026, 5, 15))
     assert [e.symbol for e in entries] == ["RVNL"]
+
+
+def _write_quote(paths, as_of: date, hhmm: str, symbol: str, ltp: float) -> None:
+    base = paths.raw_dir / as_of.isoformat()
+    base.mkdir(parents=True, exist_ok=True)
+    row = {
+        "instrument_token": 1,
+        "last_price": ltp,
+        "volume": 100,
+        "open": ltp,
+        "high": ltp,
+        "low": ltp,
+        "close": ltp,
+        "bid": None,
+        "ask": None,
+        "oi": None,
+        "upper_circuit_limit": None,
+        "lower_circuit_limit": None,
+        "tradingsymbol": symbol,
+    }
+    (base / f"quotes_{hhmm}.json").write_text(json.dumps([row]), encoding="utf-8")
+
+
+def _stub_pre_open_upstream(monkeypatch, cand: Candidate) -> None:
+    monkeypatch.setattr("trading.jobs.pre_open._step_macro", lambda c, d, w: (False, "NEUTRAL"))
+    monkeypatch.setattr("trading.jobs.pre_open._step_sector", lambda c, d, w: False)
+    monkeypatch.setattr("trading.jobs.pre_open._step_news", lambda c, d, w: (0, 0))
+    monkeypatch.setattr("trading.jobs.pre_open._step_ohlcv", lambda p, d, w: 0)
+    monkeypatch.setattr("trading.jobs.pre_open._step_fno_ban", lambda c, d, w: None)
+    monkeypatch.setattr("trading.jobs.pre_open._step_scan", lambda c, p, d, w: [cand])
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_rank", lambda c, p, d, passing, w: [_sc(cand, ml_score=0.6)]
+    )
+    monkeypatch.setattr(
+        "trading.jobs.pre_open._step_portfolio",
+        lambda p, s, w, *, as_of, **_: [],
+    )
+
+
+@freeze_time("2026-05-15 09:21:00")
+def test_operator_risk_params_flow_from_pre_open_to_open_fills_planner(paths, monkeypatch) -> None:
+    """F-056: --capital/--daily-cap/--risk-pct given to run_pre_open must reach
+    plan_daily_entries in open_fills apply mode via _pending_entries.json —
+    not the hardcoded daily_budget defaults."""
+    cand = _candidate("RVNL", 10)
+    _stub_pre_open_upstream(monkeypatch, cand)
+
+    result = run_pre_open(
+        date(2026, 5, 15),
+        paths=paths,
+        skip_news=True,
+        require_snapshot=False,
+        pool_capital=20_000.0,
+        daily_deploy_cap=2_000.0,
+        risk_pct=0.01,
+    )
+    assert result.pending_entries == 1
+
+    _write_quote(paths, date(2026, 5, 15), "0920", "RVNL", 100.0)
+
+    captured: dict = {}
+    import trading.jobs.open_fills as open_fills_mod
+
+    real_plan_daily_entries = open_fills_mod.plan_daily_entries
+
+    def _capture_plan_daily_entries(*args, **kwargs):
+        captured.update(kwargs)
+        return real_plan_daily_entries(*args, **kwargs)
+
+    monkeypatch.setattr("trading.jobs.open_fills.plan_daily_entries", _capture_plan_daily_entries)
+
+    run_open_fills(date(2026, 5, 15), paths=paths, apply=True)
+
+    assert captured["pool_capital"] == pytest.approx(20_000.0)
+    assert captured["daily_cap"] == pytest.approx(2_000.0)
+    assert captured["risk_pct"] == pytest.approx(0.01)
+
+
+@freeze_time("2026-05-15 09:21:00")
+def test_open_fills_falls_back_to_defaults_when_pending_file_predates_risk_params(
+    paths, monkeypatch
+) -> None:
+    """F-056 fallback: an older _pending_entries.json (written before this
+    change, no risk_params block) must not break open_fills apply — it sizes
+    with the daily_budget defaults instead."""
+    from trading.strategy.daily_budget import (
+        DEFAULT_DAILY_DEPLOY_CAP,
+        DEFAULT_POOL_CAPITAL,
+        DEFAULT_RISK_PCT,
+    )
+
+    cand = _candidate("RVNL", 10)
+    _stub_pre_open_upstream(monkeypatch, cand)
+
+    run_pre_open(
+        date(2026, 5, 15),
+        paths=paths,
+        skip_news=True,
+        require_snapshot=False,
+        pool_capital=20_000.0,
+        daily_deploy_cap=2_000.0,
+        risk_pct=0.01,
+    )
+
+    # Simulate an older pending file by stripping the risk_params block.
+    from trading.paper.pending import _path as pending_path
+
+    pending_file = pending_path(paths, date(2026, 5, 15))
+    payload = json.loads(pending_file.read_text(encoding="utf-8"))
+    del payload["risk_params"]
+    pending_file.write_text(json.dumps(payload), encoding="utf-8")
+
+    _write_quote(paths, date(2026, 5, 15), "0920", "RVNL", 100.0)
+
+    captured: dict = {}
+    import trading.jobs.open_fills as open_fills_mod
+
+    real_plan_daily_entries = open_fills_mod.plan_daily_entries
+
+    def _capture_plan_daily_entries(*args, **kwargs):
+        captured.update(kwargs)
+        return real_plan_daily_entries(*args, **kwargs)
+
+    monkeypatch.setattr("trading.jobs.open_fills.plan_daily_entries", _capture_plan_daily_entries)
+
+    run_open_fills(date(2026, 5, 15), paths=paths, apply=True)
+
+    assert captured["pool_capital"] == pytest.approx(DEFAULT_POOL_CAPITAL)
+    assert captured["daily_cap"] == pytest.approx(DEFAULT_DAILY_DEPLOY_CAP)
+    assert captured["risk_pct"] == pytest.approx(DEFAULT_RISK_PCT)
 
 
 def test_already_opened_today_detects_open_trade(
@@ -839,7 +972,7 @@ def test_pre_open_persists_ml_score_on_all_passing(paths, monkeypatch) -> None:
     assert all(r["ml_score"] is not None for r in sig_rows)
 
     # ml_score is carried on the selected candidates too — via the handoff file.
-    _, pending = read_pending_entries(paths, date(2026, 5, 15))
+    _, pending, _rp = read_pending_entries(paths, date(2026, 5, 15))
     assert len(pending) == 5
     assert all(e.ml_score is not None for e in pending)
 

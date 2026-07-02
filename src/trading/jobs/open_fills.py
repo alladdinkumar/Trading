@@ -84,7 +84,7 @@ def run_open_fills(
 
     # No pending file → graceful no-op in both phases.
     try:
-        regime, pending = read_pending_entries(p, as_of)
+        regime, pending, risk_params = read_pending_entries(p, as_of)
     except PendingEntriesMissingError as e:
         warnings.append(str(e))
         return OpenFillsResult(as_of, None, None, None, 0, 0, warnings)
@@ -154,6 +154,9 @@ def run_open_fills(
             available_cash=compute_paper_cash(conn, as_of=as_of),
             deployed_by_symbol=deployed_by_symbol(conn),
             regime=cast(Regime, regime),
+            pool_capital=risk_params.pool_capital,
+            daily_cap=risk_params.daily_deploy_cap,
+            risk_pct=risk_params.risk_pct,
             p_win_calibration=p_win_cal,
             open_lots_by_symbol=lots_by_symbol,
             open_lots_by_sector=lots_by_sector,
