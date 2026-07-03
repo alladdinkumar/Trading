@@ -45,7 +45,16 @@ def post_slack(text: str) -> bool:
         resp = requests.post(url, json={"text": text}, timeout=_SLACK_TIMEOUT_S)
         resp.raise_for_status()
     except requests.RequestException as e:
-        logger.warning(f"Slack post failed: {e}")
+        # F-060: for a Slack incoming webhook the URL *is* the credential.
+        # str(e) for HTTPError/ConnectionError embeds the full posted URL
+        # (e.g. "... for url: https://hooks.slack.com/services/T/B/<token>"),
+        # so never log str(e)/e here — only the exception type and, if
+        # present, the HTTP status code.
+        status = getattr(getattr(e, "response", None), "status_code", None)
+        if status is not None:
+            logger.warning(f"Slack post failed: {type(e).__name__} (status={status})")
+        else:
+            logger.warning(f"Slack post failed: {type(e).__name__}")
         return False
     return True
 

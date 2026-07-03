@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import requests
+from loguru import logger
 
 
 def test_post_slack_posts_when_url_set(monkeypatch):
@@ -51,6 +52,71 @@ def test_post_slack_returns_false_on_network_error(monkeypatch):
     monkeypatch.setattr(requests, "post", boom)
     ok = notify_mod.post_slack("hello")
     assert ok is False
+
+
+def test_post_slack_does_not_log_webhook_url_on_http_error(monkeypatch):
+    """F-060: for a Slack incoming webhook, the URL *is* the credential.
+    `HTTPError.__str__` embeds the full posted URL (`... for url: <url>`), so
+    logging `str(e)` writes the live token to the on-disk rotating log. The
+    except block must log only the exception type + status code."""
+    from trading.ops import notify as notify_mod
+
+    class FakeResponse:
+        status_code = 404
+
+    secret_url = "https://hooks.slack.com/services/T/B/secret"
+
+    def boom(*a, **kw):
+        raise requests.exceptions.HTTPError(
+            f"404 Client Error: Not Found for url: {secret_url}",
+            response=FakeResponse(),
+        )
+
+    monkeypatch.setenv("SLACK_WEBHOOK_URL", secret_url)
+    monkeypatch.setattr(requests, "post", boom)
+
+    records: list[str] = []
+    handler_id = logger.add(lambda msg: records.append(str(msg)), level="WARNING")
+    try:
+        ok = notify_mod.post_slack("hello")
+    finally:
+        logger.remove(handler_id)
+
+    assert ok is False
+    combined = "\n".join(records)
+    assert "hooks.slack.com" not in combined
+    assert "secret" not in combined
+    assert "HTTPError" in combined
+    assert "404" in combined  # status code retained for diagnostics
+
+
+def test_post_slack_does_not_log_webhook_url_on_connection_error(monkeypatch):
+    """Same leak via ConnectionError/timeout — str(e) also embeds the URL."""
+    from trading.ops import notify as notify_mod
+
+    secret_url = "https://hooks.slack.com/services/T/B/secret"
+
+    def boom(*a, **kw):
+        raise requests.exceptions.ConnectionError(
+            "HTTPSConnectionPool(host='hooks.slack.com', port=443): "
+            "Max retries exceeded with url: /services/T/B/secret"
+        )
+
+    monkeypatch.setenv("SLACK_WEBHOOK_URL", secret_url)
+    monkeypatch.setattr(requests, "post", boom)
+
+    records: list[str] = []
+    handler_id = logger.add(lambda msg: records.append(str(msg)), level="WARNING")
+    try:
+        ok = notify_mod.post_slack("hello")
+    finally:
+        logger.remove(handler_id)
+
+    assert ok is False
+    combined = "\n".join(records)
+    assert "hooks.slack.com" not in combined
+    assert "secret" not in combined
+    assert "ConnectionError" in combined
 
 
 def test_post_toast_calls_plyer(monkeypatch):

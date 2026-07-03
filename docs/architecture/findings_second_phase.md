@@ -429,7 +429,7 @@ Close one paper trade for +₹5,000 with nothing else open: the page shows **Tot
 
 ---
 
-### F-060 — Slack webhook URL logged in cleartext on any post failure (`VULN`, Med, ops/notify) — Open
+### F-060 — Slack webhook URL logged in cleartext on any post failure (`VULN`, Med, ops/notify) — ✅ Fixed 2026-07-03
 
 **Where** `src/trading/ops/notify.py:44-49` (`post_slack`: `resp.raise_for_status()` inside `try`; `except requests.RequestException as e: logger.warning(f"Slack post failed: {e}")`); the WARN is persisted by the INFO-level rotating-file + stderr sinks in `ops/logging_setup.py`.
 
