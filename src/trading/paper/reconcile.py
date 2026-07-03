@@ -173,9 +173,13 @@ def compute_paper_cash(
     as_of_iso = as_of.isoformat()
     cash = initial_capital + total_funds_added(conn, as_of=as_of)
 
+    # F-058 follow-up: substr(col, 1, 10), never SQLite date() — date() converts
+    # offset-aware strings to UTC first, shifting IST 00:00–05:29 stamps back a
+    # day. The leading YYYY-MM-DD is the local IST date for aware and naive
+    # (legacy) rows alike, and compares correctly as a string.
     open_rows = conn.execute(
         """SELECT entry_price, qty FROM paper_trades
-           WHERE date(ts_entry) <= ?""",
+           WHERE substr(ts_entry, 1, 10) <= ?""",
         (as_of_iso,),
     ).fetchall()
     for row in open_rows:
@@ -185,7 +189,7 @@ def compute_paper_cash(
     closed_rows = conn.execute(
         """SELECT exit_price, qty FROM paper_trades
            WHERE ts_exit IS NOT NULL AND exit_price IS NOT NULL
-             AND date(ts_exit) <= ?""",
+             AND substr(ts_exit, 1, 10) <= ?""",
         (as_of_iso,),
     ).fetchall()
     for row in closed_rows:

@@ -76,6 +76,45 @@ def test_paper_cash_unchanged_with_empty_ledger(conn: sqlite3.Connection) -> Non
     assert compute_paper_cash(conn, as_of=date(2026, 6, 19)) == pytest.approx(100_000.0)
 
 
+def test_paper_cash_day_gating_correct_for_tz_aware_early_ist_timestamps(
+    conn: sqlite3.Connection,
+) -> None:
+    """F-058 follow-up: since F-058 the ledger persists tz-aware IST timestamps
+    (e.g. `2026-07-04T01:00:00+05:30`). SQLite's `date()` converts an offset-
+    aware string to UTC before extracting the date, so an IST stamp between
+    00:00 and 05:29 lands on the *previous* day — a paper-open at 01:00 IST on
+    the 4th would be debited from the 3rd's cash balance. Day-gating must read
+    the local date (the leading YYYY-MM-DD), for aware and naive rows alike.
+    """
+    res = log_signal_and_open_trade(
+        conn,
+        signal=_signal(entry=100),
+        entry_ts="2026-07-04T01:00:00+05:30",  # 2026-07-03T19:30Z — same IST day 4th
+        entry_price=100,
+        qty=10,
+        atr_at_entry=2.0,
+    )
+    entry_value = 100.0 * 10
+    debited = 100_000.0 - entry_value - buy_side_cost(entry_value)
+    # Opened on the 4th (IST): the 3rd's balance must not carry the debit.
+    assert compute_paper_cash(conn, as_of=date(2026, 7, 3)) == pytest.approx(100_000.0)
+    assert compute_paper_cash(conn, as_of=date(2026, 7, 4)) == pytest.approx(debited)
+
+    close_with_exit(
+        conn,
+        res.paper_trade_id,
+        exit_ts="2026-07-06T01:00:00+05:30",  # 2026-07-05T19:30Z — same IST day 6th
+        exit_price=110,
+        exit_reason="TARGET",
+        days_held=2,
+    )
+    exit_value = 110.0 * 10
+    credited = debited + exit_value - sell_side_cost(exit_value)
+    # Closed on the 6th (IST): the 5th's balance must not carry the credit.
+    assert compute_paper_cash(conn, as_of=date(2026, 7, 5)) == pytest.approx(debited)
+    assert compute_paper_cash(conn, as_of=date(2026, 7, 6)) == pytest.approx(credited)
+
+
 def test_matured_predictions_from_closed_trade(conn: sqlite3.Connection) -> None:
     res = log_signal_and_open_trade(
         conn,

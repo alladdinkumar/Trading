@@ -131,16 +131,21 @@ def compute_positions(conn: sqlite3.Connection, *, as_of: date) -> list[Position
 
     Exit-date-aware (F-059 follow-up): a trade whose `ts_exit` is *after*
     `as_of` was still held on `as_of`, so a backdated view keeps it — matching
-    `compute_paper_cash`, which only credits exits with `date(ts_exit) <=
-    as_of`. (Previously any set `ts_exit` dropped the lot, so a backdated
+    `compute_paper_cash`, which only credits exits dated `<= as_of`.
+    (Previously any set `ts_exit` dropped the lot, so a backdated
     account_value lost the position's value while cash had already paid for it.)
+
+    Day-gating uses `substr(col, 1, 10)`, never SQLite `date()` (F-058
+    follow-up): `date()` converts offset-aware strings to UTC first, shifting
+    IST 00:00–05:29 stamps back a day; the string prefix is the local IST date
+    for aware and naive (legacy) rows alike.
     """
     rows = conn.execute(
         """SELECT s.symbol AS symbol, pt.entry_price AS entry_price, pt.qty AS qty
              FROM paper_trades pt
              JOIN signals s ON s.id = pt.signal_id
-            WHERE (pt.ts_exit IS NULL OR date(pt.ts_exit) > ?)
-              AND date(pt.ts_entry) <= ?""",
+            WHERE (pt.ts_exit IS NULL OR substr(pt.ts_exit, 1, 10) > ?)
+              AND substr(pt.ts_entry, 1, 10) <= ?""",
         (as_of.isoformat(), as_of.isoformat()),
     ).fetchall()
 
@@ -188,7 +193,8 @@ def _realised_pnl(conn: sqlite3.Connection, *, as_of: date) -> float:
     """
     row = conn.execute(
         "SELECT COALESCE(SUM(pt.pnl), 0.0) AS total FROM paper_trades pt "
-        "WHERE pt.ts_exit IS NOT NULL AND pt.pnl IS NOT NULL AND date(pt.ts_exit) <= ?",
+        "WHERE pt.ts_exit IS NOT NULL AND pt.pnl IS NOT NULL "
+        "AND substr(pt.ts_exit, 1, 10) <= ?",
         (as_of.isoformat(),),
     ).fetchone()
     return float(row["total"]) if row is not None else 0.0
@@ -216,7 +222,7 @@ def _realised_today_pnl(conn: sqlite3.Connection, *, as_of: date) -> float:
                   pt.exit_price AS exit_price, pt.qty AS qty, pt.pnl AS pnl
              FROM paper_trades pt
              JOIN signals s ON s.id = pt.signal_id
-            WHERE pt.ts_exit IS NOT NULL AND date(pt.ts_exit) = ?""",
+            WHERE pt.ts_exit IS NOT NULL AND substr(pt.ts_exit, 1, 10) = ?""",
         (as_of_iso,),
     ).fetchall()
 

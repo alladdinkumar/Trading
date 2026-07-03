@@ -192,7 +192,8 @@ def sidebar_date_picker(label: str = "Date", *, key: str = "as_of") -> str:
     """
     dates = available_research_dates()
     if not dates:
-        d = st.sidebar.date_input(label, value=date.today(), key=key)
+        # F-058: default to the IST trading day, not the host clock's date.
+        d = st.sidebar.date_input(label, value=clock.today_ist(), key=key)
         return d.isoformat() if isinstance(d, date) else str(d)
     # Use a select box so the picker is constrained to dates with data
     default_idx = 0  # newest first

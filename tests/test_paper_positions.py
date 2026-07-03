@@ -32,9 +32,15 @@ def conn() -> sqlite3.Connection:
 
 def _open(conn: sqlite3.Connection, symbol: str, entry: float, qty: int, ts: str) -> None:
     sig = Signal(
-        id=None, ts=ts, symbol=symbol, side="LONG",
-        entry=entry, stop=entry * 0.9, target=entry * 1.2,
-        horizon_days=15, created_by="auto",
+        id=None,
+        ts=ts,
+        symbol=symbol,
+        side="LONG",
+        entry=entry,
+        stop=entry * 0.9,
+        target=entry * 1.2,
+        horizon_days=15,
+        created_by="auto",
     )
     log_signal_and_open_trade(
         conn, signal=sig, entry_ts=ts, entry_price=entry, qty=qty, atr_at_entry=2.0
@@ -187,6 +193,59 @@ def test_today_pnl_realised_zero_for_multiday_close_without_prev_mark(
     assert s.total_pnl == pytest.approx(closed.pnl)  # cumulative tile still honest
 
 
+def test_positions_day_gating_correct_for_tz_aware_early_ist_timestamps(
+    conn: sqlite3.Connection,
+) -> None:
+    """F-058 follow-up: tz-aware IST timestamps between 00:00 and 05:29 must not
+    shift day-attribution back a day (SQLite `date()` converts offset-aware
+    strings to UTC first). Covers compute_positions' entry gate and
+    exit-visibility gate, and _realised_pnl's exit gate.
+    """
+    _open(conn, "ACME", entry=100.0, qty=10, ts="2026-07-04T01:00:00+05:30")
+    # Entry gate: opened on the 4th (IST) → invisible on the 3rd, held on the 4th.
+    assert compute_positions(conn, as_of=date(2026, 7, 3)) == []
+    held = compute_positions(conn, as_of=date(2026, 7, 4))
+    assert [p.symbol for p in held] == ["ACME"]
+
+    trade = list_open_paper_trades(conn)[0]
+    closed = close_with_exit(
+        conn,
+        trade.id,
+        exit_ts="2026-07-06T01:00:00+05:30",  # 2026-07-05T19:30Z — same IST day 6th
+        exit_price=110.0,
+        exit_reason="TARGET",
+        days_held=2,
+    )
+    # Exit-visibility gate: still held on the 5th, gone on the 6th.
+    assert [p.symbol for p in compute_positions(conn, as_of=date(2026, 7, 5))] == ["ACME"]
+    assert compute_positions(conn, as_of=date(2026, 7, 6)) == []
+    # _realised_pnl gate: the gain lands on the 6th, not the 5th.
+    assert compute_summary(conn, as_of=date(2026, 7, 5)).realised_pnl == pytest.approx(0.0)
+    assert compute_summary(conn, as_of=date(2026, 7, 6)).realised_pnl == pytest.approx(closed.pnl)
+
+
+def test_today_pnl_same_day_round_trip_with_tz_aware_timestamps(
+    conn: sqlite3.Connection,
+) -> None:
+    """F-058 follow-up: _realised_today_pnl's `date(ts_exit) = ?` selector must
+    attribute an early-IST tz-aware close to the correct IST day — a same-day
+    round trip at 01:00–01:30 IST contributes its full net P&L to that day's
+    tile, and nothing to the previous day's.
+    """
+    _open(conn, "ACME", entry=100.0, qty=10, ts="2026-07-04T01:00:00+05:30")
+    trade = list_open_paper_trades(conn)[0]
+    closed = close_with_exit(
+        conn,
+        trade.id,
+        exit_ts="2026-07-04T01:30:00+05:30",
+        exit_price=110.0,
+        exit_reason="TARGET",
+        days_held=0,
+    )
+    assert compute_summary(conn, as_of=date(2026, 7, 4)).today_pnl == pytest.approx(closed.pnl)
+    assert compute_summary(conn, as_of=date(2026, 7, 3)).today_pnl == pytest.approx(0.0)
+
+
 def test_summary_total_pnl_identity_mixed_book(conn: sqlite3.Connection) -> None:
     """Mixed book: total_pnl is exactly account_value − capital_base.
 
@@ -222,9 +281,7 @@ def test_summary_total_pnl_identity_mixed_book(conn: sqlite3.Connection) -> None
     # (HOLD entry value 200 × 5 = 1000) which stays a drag until recovered.
     assert s.realised_pnl == pytest.approx(closed.pnl)
     assert s.unrealised_pnl == pytest.approx(1050.0 - 1000.0)  # HOLD marked at 210
-    assert s.total_pnl == pytest.approx(
-        s.realised_pnl + s.unrealised_pnl - buy_side_cost(1000.0)
-    )
+    assert s.total_pnl == pytest.approx(s.realised_pnl + s.unrealised_pnl - buy_side_cost(1000.0))
     # Pct is anchored on the capital base, not open cost basis.
     assert s.total_pnl_pct == pytest.approx(s.total_pnl / capital_base * 100.0)
     # Today: WIN's day-scoped realised move (120 → 150, net of sell costs);
