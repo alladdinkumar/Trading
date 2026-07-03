@@ -112,7 +112,7 @@ true P&L or the gate Sharpe off the system*; the rest are hygiene.
 
 ## Findings
 
-### F-049 — Gap-through-stop fills at the stop price, not the gap-open (`VULN`, High, strategy/exits) — Open
+### F-049 — Gap-through-stop fills at the stop price, not the gap-open (`VULN`, High, strategy/exits) — ✅ Fixed 2026-07-02 (`0217669`)
 
 **Where**
 - Root cause: `src/trading/strategy/exits.py:80-88` (`evaluate_exit`, stop branch).
@@ -165,7 +165,7 @@ confirm stop still wins and fills at the gap-open.
 
 ---
 
-### F-050 — Layer-A "pullback" gate is symmetric: an extended-above name passes as a pullback (`RISK`, Med, strategy/rules) — Open
+### F-050 — Layer-A "pullback" gate is symmetric: an extended-above name passes as a pullback (`RISK`, Med, strategy/rules) — ✅ Fixed 2026-07-02 (`8181633`)
 
 **Where** `src/trading/strategy/rules.py:99-115` (`passes_pullback`).
 
@@ -291,7 +291,7 @@ canonical trading-day count.
 
 ---
 
-### F-054 — Incremental OHLCV refresh never re-adjusts history → a split/bonus corrupts the series (`VULN`, High, data/ohlcv_refresh) — Open
+### F-054 — Incremental OHLCV refresh never re-adjusts history → a split/bonus corrupts the series (`VULN`, High, data/ohlcv_refresh) — ✅ Fixed 2026-07-02 (`4514b42`)
 
 **Where** `src/trading/data/ohlcv_refresh.py:81-115` (`_refresh_one`); partial
 guard `cross_check_closes` (`ohlcv_refresh.py:118-147`); fetch
@@ -345,7 +345,7 @@ does not.
 
 ---
 
-### F-055 — Walk-forward leaves zero embargo: 25-day training labels leak into the next OOS test fold (`VULN`, High, backtest/walkforward) — Open
+### F-055 — Walk-forward leaves zero embargo: 25-day training labels leak into the next OOS test fold (`VULN`, High, backtest/walkforward) — ✅ Fixed 2026-07-02 (`87b05f5`, `da590db`)
 
 **Where**
 - No-gap split: `src/trading/backtest/walkforward.py:60-61` (`windows()`: `train_end = train_start + train_delta; test_start = train_end`).
@@ -365,7 +365,7 @@ Add an embargo of `max_days` (25) trading days on the training side: either adva
 
 ---
 
-### F-056 — Pre-open risk-control flags (`--capital` / `--daily-cap` / `--risk-pct`) are wired to nothing (`GAP`, Med, jobs/pre_open) — Open
+### F-056 — Pre-open risk-control flags (`--capital` / `--daily-cap` / `--risk-pct`) are wired to nothing (`GAP`, Med, jobs/pre_open) — ✅ Fixed 2026-07-02 (`adc7ba8`)
 
 **Where** `src/trading/jobs/pre_open.py:103-105` (`run_pre_open` params `pool_capital`/`daily_deploy_cap`/`risk_pct`); the real deploy is `src/trading/jobs/open_fills.py:152` (`plan_daily_entries(...)`), which never receives them; defaults in `src/trading/strategy/daily_budget.py` (`DEFAULT_POOL_CAPITAL=100_000`, `DEFAULT_DAILY_DEPLOY_CAP=7_000`, `risk_pct=0.02`).
 
