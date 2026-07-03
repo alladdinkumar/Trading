@@ -39,6 +39,8 @@ class PortfolioSummary:
     total_pnl: float
     total_pnl_pct: float
     today_pnl: float
+    realised_pnl: float
+    unrealised_pnl: float
     cash: float
     funds_added: float
     account_value: float
@@ -152,27 +154,64 @@ def compute_positions(conn: sqlite3.Connection, *, as_of: date) -> list[Position
     return positions
 
 
+def _realised_pnl(conn: sqlite3.Connection, *, as_of: date, same_day_only: bool = False) -> float:
+    """Net realised P&L (cost-inclusive) for closed trades, as of `as_of`.
+
+    Reuses `paper_trades.pnl`, which `ledger.close_with_exit` already persists
+    net of round-trip costs at close time (F-025) — this is the same number
+    `compute_paper_cash` credits into cash, so realised P&L here can never
+    drift out of sync with the account-value tile (F-059).
+
+    `same_day_only=True` restricts to trades closed exactly on `as_of` (feeds
+    the "Today's P&L" tile); otherwise every close with `ts_exit <= as_of` is
+    summed (cumulative, feeds "Total P&L").
+    """
+    as_of_iso = as_of.isoformat()
+    clause = "date(pt.ts_exit) = ?" if same_day_only else "date(pt.ts_exit) <= ?"
+    row = conn.execute(
+        f"SELECT COALESCE(SUM(pt.pnl), 0.0) AS total FROM paper_trades pt "
+        f"WHERE pt.ts_exit IS NOT NULL AND pt.pnl IS NOT NULL AND {clause}",
+        (as_of_iso,),
+    ).fetchone()
+    return float(row["total"]) if row is not None else 0.0
+
+
 def compute_summary(
     conn: sqlite3.Connection,
     *,
     as_of: date,
     initial_capital: float = INITIAL_CAPITAL,
 ) -> PortfolioSummary:
-    """Aggregate the positions and fold in cash + funds for the summary tiles."""
+    """Aggregate the positions and fold in cash + funds for the summary tiles.
+
+    `total_pnl` / `today_pnl` are realised + unrealised together (F-059): the
+    open-only figure used to be the entirety of "Total P&L", so it silently
+    dropped every closed trade's contribution the instant it closed. Realised
+    P&L is summed straight from `paper_trades.pnl` (the same net-of-costs
+    number `compute_paper_cash` already credits into cash/account_value), so
+    there's no second source of truth for what a closed trade was worth.
+    """
     positions = compute_positions(conn, as_of=as_of)
     invested = sum(p.invested for p in positions)
     current_value = sum(p.current_value for p in positions)
-    total_pnl = current_value - invested
-    today_pnl = sum(p.today_pnl for p in positions)
+    unrealised_pnl = current_value - invested
+    unrealised_today_pnl = sum(p.today_pnl for p in positions)
+    realised_pnl = _realised_pnl(conn, as_of=as_of)
+    realised_today_pnl = _realised_pnl(conn, as_of=as_of, same_day_only=True)
+    total_pnl = realised_pnl + unrealised_pnl
+    today_pnl = realised_today_pnl + unrealised_today_pnl
     cash = compute_paper_cash(conn, as_of=as_of, initial_capital=initial_capital)
     funds_added = total_funds_added(conn, as_of=as_of)
+    capital_base = initial_capital + funds_added
     _, _, as_of_mark = _marks(conn)
     return PortfolioSummary(
         invested=invested,
         current_value=current_value,
         total_pnl=total_pnl,
-        total_pnl_pct=(total_pnl / invested * 100.0) if invested else 0.0,
+        total_pnl_pct=(total_pnl / capital_base * 100.0) if capital_base else 0.0,
         today_pnl=today_pnl,
+        realised_pnl=realised_pnl,
+        unrealised_pnl=unrealised_pnl,
         cash=cash,
         funds_added=funds_added,
         account_value=cash + current_value,

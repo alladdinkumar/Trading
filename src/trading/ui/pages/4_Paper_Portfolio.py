@@ -43,7 +43,7 @@ divider()
 # Summary tiles
 # ---------------------------------------------------------------------------
 
-k1, k2, k3, k4, k5, k6 = st.columns(6)
+k1, k2, k3, k4, k5, k6, k7 = st.columns(7)
 with k1:
     kpi_tile("Invested", format_currency(summary.invested))
 with k2:
@@ -54,12 +54,23 @@ with k3:
         format_currency(summary.total_pnl),
         delta=format_pct(summary.total_pnl_pct),
         delta_color="normal",
+        help="Realised + unrealised P&L, i.e. account value less capital in (F-059).",
     )
 with k4:
-    kpi_tile("Today's P&L", format_currency(summary.today_pnl))
+    kpi_tile(
+        "Unrealised P&L",
+        format_currency(summary.unrealised_pnl),
+        help="Open-position P&L only (mark-to-market). Excludes closed trades.",
+    )
 with k5:
-    kpi_tile("Cash available", format_currency(summary.cash))
+    kpi_tile(
+        "Today's P&L",
+        format_currency(summary.today_pnl),
+        help="Open positions' move since the prior close, plus any trade closed today.",
+    )
 with k6:
+    kpi_tile("Cash available", format_currency(summary.cash))
+with k7:
     kpi_tile("Account value", format_currency(summary.account_value))
 
 divider()

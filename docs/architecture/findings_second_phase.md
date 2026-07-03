@@ -413,7 +413,7 @@ Run the workflow on a non-IST host (a UTC-defaulted sandbox/container): dependin
 
 ---
 
-### F-059 — Paper-Portfolio "Total P&L" / "Today's P&L" tiles exclude all realised P&L (`INACC`, Med, ui/paper) — Open
+### F-059 — Paper-Portfolio "Total P&L" / "Today's P&L" tiles exclude all realised P&L (`INACC`, Med, ui/paper) — ✅ Fixed 2026-07-03
 
 **Where** `src/trading/paper/positions.py:117` (`compute_positions` filters `pt.ts_exit IS NULL` — open lots only) → `:162-166` (`compute_summary`: `total_pnl = current_value − invested`, `today_pnl = Σ p.today_pnl`, both over that open-only list) → `src/trading/ui/pages/4_Paper_Portfolio.py:54,60` (tiles labelled plainly "Total P&L" / "Today's P&L"). Realised P&L already lives correctly in `cash`/`account_value` (`reconcile.compute_paper_cash` credits every closed trade's proceeds).
 

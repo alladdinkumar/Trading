@@ -8,7 +8,7 @@ from datetime import date
 
 import pytest
 
-from trading.paper.ledger import log_signal_and_open_trade
+from trading.paper.ledger import close_with_exit, log_signal_and_open_trade
 from trading.paper.positions import (
     already_opened_today,
     compute_positions,
@@ -17,7 +17,7 @@ from trading.paper.positions import (
     open_lots_by_symbol,
 )
 from trading.store.migrations import run_migrations
-from trading.store.repo import Signal
+from trading.store.repo import Signal, list_open_paper_trades
 
 
 @pytest.fixture
@@ -108,6 +108,55 @@ def test_summary_totals_include_cash_and_funds(conn: sqlite3.Connection) -> None
     assert s.as_of_mark == "2026-06-02"
     # account_value = cash + current_value; cash already includes the top-up.
     assert s.account_value == pytest.approx(s.cash + s.current_value)
+
+
+def test_summary_total_pnl_includes_realised_gain_from_closed_trade(
+    conn: sqlite3.Connection,
+) -> None:
+    """F-059: closing a winning trade must not vanish from the P&L tiles.
+
+    Open one lot, close it for a profit, and leave nothing open. The old
+    `compute_summary` derived `total_pnl` purely from open positions, so it
+    silently reported 0 the instant the trade closed even though the account
+    was up materially.
+    """
+    _open(conn, "ACME", entry=100.0, qty=10, ts="2026-06-01T09:20:00")
+    trade = list_open_paper_trades(conn)[0]
+    closed = close_with_exit(
+        conn,
+        trade.id,
+        exit_ts="2026-06-03T09:20:00",
+        exit_price=150.0,
+        exit_reason="TARGET",
+        days_held=2,
+    )
+    assert closed.pnl is not None and closed.pnl > 0  # sanity: a real winner
+
+    s = compute_summary(conn, as_of=date(2026, 6, 3))
+    assert compute_positions(conn, as_of=date(2026, 6, 3)) == []  # nothing open
+    assert s.total_pnl == pytest.approx(closed.pnl)
+    assert s.total_pnl != 0.0
+    # Same-day close also lands in "today's" tile, not just the cumulative one.
+    assert s.today_pnl == pytest.approx(closed.pnl)
+
+
+def test_summary_realised_pnl_only_counts_closes_up_to_as_of(
+    conn: sqlite3.Connection,
+) -> None:
+    """A trade closed *after* `as_of` must not leak into an earlier summary."""
+    _open(conn, "ACME", entry=100.0, qty=10, ts="2026-06-01T09:20:00")
+    trade = list_open_paper_trades(conn)[0]
+    close_with_exit(
+        conn,
+        trade.id,
+        exit_ts="2026-06-05T09:20:00",
+        exit_price=150.0,
+        exit_reason="TARGET",
+        days_held=4,
+    )
+    s = compute_summary(conn, as_of=date(2026, 6, 3))
+    assert s.total_pnl == pytest.approx(0.0)
+    assert s.today_pnl == pytest.approx(0.0)
 
 
 def test_summary_empty_when_no_trades(conn: sqlite3.Connection) -> None:
