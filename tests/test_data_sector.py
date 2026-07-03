@@ -17,6 +17,7 @@ from trading.data.sector import (
     compute_rs,
     load_sector_map,
 )
+from trading.data.universe import load_candidate_universe
 
 
 def _series(values: list[float]) -> pd.Series:
@@ -82,6 +83,16 @@ def test_load_sector_map_reads_csv_with_comments_and_blanks(
     )
     paths = get_paths()
     assert load_sector_map(paths) == {"INFY": "IT", "HDFCBANK": "NIFTYBANK"}
+
+
+def test_every_candidate_universe_symbol_resolves_to_a_sector() -> None:
+    """F-057 regression: every data/static/nifty50.txt symbol must have a row in
+    sector_map.csv, else daily_budget's max-2-lots-per-sector cap silently skips
+    it (a `sector=None` candidate is never gated — see daily_budget.py:130)."""
+    universe = set(load_candidate_universe())
+    mapped = set(load_sector_map())
+    missing = universe - mapped
+    assert not missing, f"nifty50.txt symbols missing from sector_map.csv: {sorted(missing)}"
 
 
 def test_load_sector_map_returns_empty_when_file_missing(

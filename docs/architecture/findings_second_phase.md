@@ -381,7 +381,7 @@ Add an embargo of `max_days` (25) trading days on the training side: either adva
 
 ---
 
-### F-057 — Five Nifty-50 candidates are missing from `sector_map.csv`, exempting them from the sector concentration cap (`GAP`, Med, data/sector) — Open
+### F-057 — Five Nifty-50 candidates are missing from `sector_map.csv`, exempting them from the sector concentration cap (`GAP`, Med, data/sector) — ✅ Fixed 2026-07-03
 
 **Where** `data/static/sector_map.csv` (no rows for `BHARTIARTL`, `ETERNAL`, `INDIGO`, `TITAN`, `TRENT`); consumed via `src/trading/data/sector.py` (`load_sector_map`) → `src/trading/jobs/open_fills.py:137,147` → `src/trading/strategy/daily_budget.py:105-138` (a `sector=None` candidate is **never** gated by the max-2-lots-per-sector cap, F-048).
 
