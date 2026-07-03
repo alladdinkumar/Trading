@@ -8,6 +8,7 @@ from datetime import date
 
 import pytest
 
+from trading.costs import buy_side_cost, sell_side_cost
 from trading.paper.ledger import close_with_exit, log_signal_and_open_trade
 from trading.paper.positions import (
     already_opened_today,
@@ -103,7 +104,10 @@ def test_summary_totals_include_cash_and_funds(conn: sqlite3.Connection) -> None
     s = compute_summary(conn, as_of=date(2026, 6, 3))
     assert s.invested == pytest.approx(1000.0)
     assert s.current_value == pytest.approx(1300.0)
-    assert s.total_pnl == pytest.approx(300.0)
+    assert s.unrealised_pnl == pytest.approx(300.0)
+    # Total P&L = account_value − capital_base: the open lot's buy-side cost
+    # counts as drag until recovered (F-059 follow-up).
+    assert s.total_pnl == pytest.approx(300.0 - buy_side_cost(1000.0))
     assert s.funds_added == pytest.approx(20_000.0)
     assert s.as_of_mark == "2026-06-02"
     # account_value = cash + current_value; cash already includes the top-up.
@@ -121,6 +125,7 @@ def test_summary_total_pnl_includes_realised_gain_from_closed_trade(
     was up materially.
     """
     _open(conn, "ACME", entry=100.0, qty=10, ts="2026-06-01T09:20:00")
+    _snapshot(conn, "2026-06-02", {"ACME": {"qty": 10, "value": 1200.0}})  # prev close 120
     trade = list_open_paper_trades(conn)[0]
     closed = close_with_exit(
         conn,
@@ -134,10 +139,104 @@ def test_summary_total_pnl_includes_realised_gain_from_closed_trade(
 
     s = compute_summary(conn, as_of=date(2026, 6, 3))
     assert compute_positions(conn, as_of=date(2026, 6, 3)) == []  # nothing open
+    # Nothing open → no open-lot cost drag: total P&L is exactly the realised gain.
     assert s.total_pnl == pytest.approx(closed.pnl)
     assert s.total_pnl != 0.0
-    # Same-day close also lands in "today's" tile, not just the cumulative one.
+    # Today's tile is day-scoped: only the move since yesterday's mark (120 → 150),
+    # net of sell-side costs — NOT the trade's full multi-day P&L.
+    assert s.today_pnl == pytest.approx(10 * (150.0 - 120.0) - sell_side_cost(1500.0))
+
+
+def test_today_pnl_full_realised_for_same_day_round_trip(conn: sqlite3.Connection) -> None:
+    """A trade opened and closed the same day contributes its full net P&L today."""
+    _open(conn, "ACME", entry=100.0, qty=10, ts="2026-06-03T09:20:00")
+    trade = list_open_paper_trades(conn)[0]
+    closed = close_with_exit(
+        conn,
+        trade.id,
+        exit_ts="2026-06-03T14:20:00",
+        exit_price=110.0,
+        exit_reason="TARGET",
+        days_held=0,
+    )
+    s = compute_summary(conn, as_of=date(2026, 6, 3))
     assert s.today_pnl == pytest.approx(closed.pnl)
+
+
+def test_today_pnl_realised_zero_for_multiday_close_without_prev_mark(
+    conn: sqlite3.Connection,
+) -> None:
+    """No prev-close mark for a multi-day trade → today's realised leg is 0.
+
+    Mirrors the open-position leg's fallback (prev_close missing → today_pnl 0)
+    instead of dumping days of movement into one day's tile.
+    """
+    _open(conn, "ACME", entry=100.0, qty=10, ts="2026-06-01T09:20:00")
+    trade = list_open_paper_trades(conn)[0]
+    closed = close_with_exit(
+        conn,
+        trade.id,
+        exit_ts="2026-06-03T09:20:00",
+        exit_price=150.0,
+        exit_reason="TARGET",
+        days_held=2,
+    )
+    assert closed.pnl is not None and closed.pnl > 0
+    s = compute_summary(conn, as_of=date(2026, 6, 3))
+    assert s.today_pnl == pytest.approx(0.0)
+    assert s.total_pnl == pytest.approx(closed.pnl)  # cumulative tile still honest
+
+
+def test_summary_total_pnl_identity_mixed_book(conn: sqlite3.Connection) -> None:
+    """Mixed book: total_pnl is exactly account_value − capital_base.
+
+    One closed winner + one still-open lot + a mid-run funds top-up. Pins the
+    identity the "Total P&L" tooltip states, its decomposition (realised +
+    unrealised − open-lot buy costs), and the pct denominator (capital base).
+    """
+    from trading.paper.funds import add_funds
+
+    _open(conn, "WIN", entry=100.0, qty=10, ts="2026-06-01T09:20:00")
+    _open(conn, "HOLD", entry=200.0, qty=5, ts="2026-06-01T09:25:00")
+    add_funds(conn, amount=50_000.0, date="2026-06-02")
+    _snapshot(
+        conn,
+        "2026-06-02",
+        {"WIN": {"qty": 10, "value": 1200.0}, "HOLD": {"qty": 5, "value": 1050.0}},
+    )
+    win = list_open_paper_trades(conn)[0]  # ordered by ts_entry → WIN first
+    closed = close_with_exit(
+        conn,
+        win.id,
+        exit_ts="2026-06-03T09:20:00",
+        exit_price=150.0,
+        exit_reason="TARGET",
+        days_held=2,
+    )
+    s = compute_summary(conn, as_of=date(2026, 6, 3))
+    capital_base = 100_000.0 + 50_000.0
+    assert s.funds_added == pytest.approx(50_000.0)
+    # The tooltip's identity, exactly:
+    assert s.total_pnl == pytest.approx(s.account_value - capital_base)
+    # ...decomposed: realised + unrealised, minus the open lot's buy-side cost
+    # (HOLD entry value 200 × 5 = 1000) which stays a drag until recovered.
+    assert s.realised_pnl == pytest.approx(closed.pnl)
+    assert s.unrealised_pnl == pytest.approx(1050.0 - 1000.0)  # HOLD marked at 210
+    assert s.total_pnl == pytest.approx(
+        s.realised_pnl + s.unrealised_pnl - buy_side_cost(1000.0)
+    )
+    # Pct is anchored on the capital base, not open cost basis.
+    assert s.total_pnl_pct == pytest.approx(s.total_pnl / capital_base * 100.0)
+    # Today: WIN's day-scoped realised move (120 → 150, net of sell costs);
+    # HOLD has a single snapshot → prev_close falls back to ltp → 0.
+    assert s.today_pnl == pytest.approx(10 * (150.0 - 120.0) - sell_side_cost(1500.0))
+
+
+def test_summary_pct_zero_when_capital_base_zero(conn: sqlite3.Connection) -> None:
+    """Degenerate capital_base = 0 → pct is 0.0, not a ZeroDivisionError."""
+    s = compute_summary(conn, as_of=date(2026, 6, 3), initial_capital=0.0)
+    assert s.total_pnl == pytest.approx(0.0)
+    assert s.total_pnl_pct == 0.0
 
 
 def test_summary_realised_pnl_only_counts_closes_up_to_as_of(
@@ -155,8 +254,14 @@ def test_summary_realised_pnl_only_counts_closes_up_to_as_of(
         days_held=4,
     )
     s = compute_summary(conn, as_of=date(2026, 6, 3))
-    assert s.total_pnl == pytest.approx(0.0)
+    assert s.realised_pnl == pytest.approx(0.0)
     assert s.today_pnl == pytest.approx(0.0)
+    # As of 6/3 the lot was still held: it must appear in the backdated view
+    # (exit-date-aware, matching compute_paper_cash's exit filter)...
+    positions = compute_positions(conn, as_of=date(2026, 6, 3))
+    assert [p.symbol for p in positions] == ["ACME"]
+    # ...and total P&L carries only its buy-cost drag, not a phantom −₹1000.
+    assert s.total_pnl == pytest.approx(-buy_side_cost(1000.0))
 
 
 def test_summary_empty_when_no_trades(conn: sqlite3.Connection) -> None:

@@ -54,19 +54,25 @@ with k3:
         format_currency(summary.total_pnl),
         delta=format_pct(summary.total_pnl_pct),
         delta_color="normal",
-        help="Realised + unrealised P&L, i.e. account value less capital in (F-059).",
+        help=(
+            "Account value minus capital in (initial + top-ups): realised + unrealised, "
+            "with open lots' buy-side costs counted as drag until recovered (F-059)."
+        ),
     )
 with k4:
     kpi_tile(
         "Unrealised P&L",
         format_currency(summary.unrealised_pnl),
-        help="Open-position P&L only (mark-to-market). Excludes closed trades.",
+        help="Open-position P&L only (mark minus cost). Excludes closed trades and entry costs.",
     )
 with k5:
     kpi_tile(
         "Today's P&L",
         format_currency(summary.today_pnl),
-        help="Open positions' move since the prior close, plus any trade closed today.",
+        help=(
+            "Open positions' move since the prior close, plus — for trades closed "
+            "today — only their move since the prior close, net of sell-side costs."
+        ),
     )
 with k6:
     kpi_tile("Cash available", format_currency(summary.cash))
