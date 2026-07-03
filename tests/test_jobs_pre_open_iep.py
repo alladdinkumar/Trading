@@ -325,9 +325,7 @@ bajaj body
 coal body
 """
 
-    updated = _update_context_markdown(
-        context_md, ["BAJAJ-AUTO", "COALINDIA"], removed_symbols=[]
-    )
+    updated = _update_context_markdown(context_md, ["BAJAJ-AUTO", "COALINDIA"], removed_symbols=[])
     assert "### BAJAJ-AUTO — passes 10/10 rules" in updated
     assert "bajaj body" in updated
 
@@ -493,19 +491,14 @@ def test_run_pre_open_iep_risk_on_filters_and_reorders(paths, monkeypatch) -> No
     """End-to-end: RISK_ON regime drops down-gapper and reranks survivors by gap."""
     from datetime import datetime as _real_dt
 
-    from trading.data import quotes_snapshot
+    from trading import clock
 
     as_of = date(2026, 5, 22)
 
-    # Freeze quotes_snapshot.datetime.now() so the 08:55 file is fresh.
-    fake_now = _real_dt(2026, 5, 22, 8, 56)
-
-    class FrozenDT(_real_dt):
-        @classmethod
-        def now(cls, tz=None):
-            return fake_now
-
-    monkeypatch.setattr(quotes_snapshot, "datetime", FrozenDT)
+    # F-058: freeze trading.clock.now_ist() (not the host clock) so the 08:55
+    # snapshot reads as fresh.
+    fake_now = _real_dt(2026, 5, 22, 8, 56, tzinfo=clock.IST)
+    monkeypatch.setattr(clock, "now_ist", lambda: fake_now)
 
     _seed_context(paths, as_of, ["RVNL", "NTPC", "COALINDIA"])
     _seed_parquet(paths, "RVNL", 304.0)
@@ -634,10 +627,24 @@ def test_pre_open_iep_autoloads_sector_map_and_momentum(
         upsert_sector_daily(
             conn,
             [
-                SectorRow(date="2026-05-26", sector="IT", close=36000.0,
-                          rs_5d=0.02, rs_20d=0.035, rs_60d=0.01, regime="LEADING"),
-                SectorRow(date="2026-05-26", sector="METAL", close=9000.0,
-                          rs_5d=-0.01, rs_20d=-0.03, rs_60d=-0.02, regime="LAGGING"),
+                SectorRow(
+                    date="2026-05-26",
+                    sector="IT",
+                    close=36000.0,
+                    rs_5d=0.02,
+                    rs_20d=0.035,
+                    rs_60d=0.01,
+                    regime="LEADING",
+                ),
+                SectorRow(
+                    date="2026-05-26",
+                    sector="METAL",
+                    close=9000.0,
+                    rs_5d=-0.01,
+                    rs_20d=-0.03,
+                    rs_60d=-0.02,
+                    regime="LAGGING",
+                ),
             ],
         )
 
@@ -663,8 +670,17 @@ def test_pre_open_iep_falls_back_to_d_minus_1_sector_data(
         run_migrations(conn)
         upsert_sector_daily(
             conn,
-            [SectorRow(date="2026-05-25", sector="IT", close=36000.0,
-                       rs_5d=0.02, rs_20d=0.035, rs_60d=0.01, regime="LEADING")],
+            [
+                SectorRow(
+                    date="2026-05-25",
+                    sector="IT",
+                    close=36000.0,
+                    rs_5d=0.02,
+                    rs_20d=0.035,
+                    rs_60d=0.01,
+                    regime="LEADING",
+                )
+            ],
         )
 
     result = run_pre_open_iep(as_of)
@@ -699,8 +715,17 @@ def test_pre_open_iep_explicit_empty_dicts_suppress_autoload(
         run_migrations(conn)
         upsert_sector_daily(
             conn,
-            [SectorRow(date="2026-05-26", sector="IT", close=36000.0,
-                       rs_5d=0.02, rs_20d=0.035, rs_60d=0.01, regime="LEADING")],
+            [
+                SectorRow(
+                    date="2026-05-26",
+                    sector="IT",
+                    close=36000.0,
+                    rs_5d=0.02,
+                    rs_20d=0.035,
+                    rs_60d=0.01,
+                    regime="LEADING",
+                )
+            ],
         )
 
     result = run_pre_open_iep(as_of, sector_map={}, sector_momentum={})

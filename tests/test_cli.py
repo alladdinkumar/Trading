@@ -406,9 +406,7 @@ def test_brief_compile_allow_stale_overrides(tmp_path: Path, monkeypatch) -> Non
         encoding="utf-8",
     )
     (date_dir / "macro_brief.md").write_text("x\n", encoding="utf-8")
-    result = runner.invoke(
-        app, ["brief", "compile", "--date", "2026-05-15", "--allow-stale"]
-    )
+    result = runner.invoke(app, ["brief", "compile", "--date", "2026-05-15", "--allow-stale"])
     assert result.exit_code == 0, result.stdout
     assert (date_dir / "brief.md").is_file()
 
@@ -531,6 +529,14 @@ def test_kite_emergency_snapshot_writes_files(tmp_path: Path, monkeypatch) -> No
 
     meta = _j.loads((base / "_meta.json").read_text(encoding="utf-8"))
     assert meta["source"] == "sdk-fallback"
+    # F-058: snapshot_at is stamped with the canonical IST clock — its date
+    # part gates _validate_meta, so a host-clock stamp on a non-IST host
+    # would mark the snapshot with the wrong trading day.
+    from datetime import datetime as _dt
+
+    from trading.clock import IST
+
+    assert _dt.fromisoformat(meta["snapshot_at"]).utcoffset() == IST.utcoffset(None)
 
 
 def test_mid_day_cli_prepare_writes_symbol_file(tmp_path: Path, monkeypatch) -> None:

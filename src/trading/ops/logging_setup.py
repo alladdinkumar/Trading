@@ -18,11 +18,11 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import date
 from pathlib import Path
 
 from loguru import logger
 
+from trading.clock import today_ist
 from trading.config import get_paths
 
 _configured: set[str] = set()
@@ -113,7 +113,8 @@ def configure_logging(job: str, *, slack_on_error: bool | None = None) -> Path:
 
 
 def _current_log_path(job: str) -> Path:
-    return get_paths().logs_dir / f"{job}_{date.today().isoformat()}.log"
+    # F-058: today_ist(), never the host clock's date.today() (drift on non-IST hosts).
+    return get_paths().logs_dir / f"{job}_{today_ist().isoformat()}.log"
 
 
 def _install_slack_sink(job: str, log_path: Path) -> None:

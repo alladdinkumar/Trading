@@ -12,6 +12,7 @@ import pytest
 from freezegun import freeze_time
 
 from tests.conftest import seed_kite_snapshot
+from trading.clock import IST
 from trading.config import get_paths
 from trading.jobs.post_close import (
     PostCloseAborted,
@@ -108,7 +109,7 @@ def test_run_post_close_prepare_writes_symbol_file(paths) -> None:
     assert result.trades_evaluated == 0
 
 
-@freeze_time("2026-05-16T16:01:23")
+@freeze_time("2026-05-16T16:01:23+05:30")
 def test_run_post_close_apply_closes_time_stop_and_writes_summary(paths) -> None:
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(paths.db_path) as file_conn:
@@ -117,7 +118,7 @@ def test_run_post_close_apply_closes_time_stop_and_writes_summary(paths) -> None
     _write_quotes(paths, date(2026, 5, 16), "1601", [_QUOTE_ROW_RVNL_TIME])
     result = run_post_close(date(2026, 5, 16), paths=paths, apply=True, initial_capital=100_000.0)
     assert isinstance(result, PostCloseResult)
-    assert result.quotes_capture_ts == _dt(2026, 5, 16, 16, 1)
+    assert result.quotes_capture_ts == _dt(2026, 5, 16, 16, 1, tzinfo=IST)
     assert result.bars_built == 1
     assert result.trades_evaluated == 1
     assert result.trades_closed == 1  # 25 business days held → TIME exit
@@ -157,7 +158,7 @@ def test_run_post_close_apply_closes_time_stop_and_writes_summary(paths) -> None
     assert "₹" in body  # equity formatted
 
 
-@freeze_time("2026-05-16T16:01:23")
+@freeze_time("2026-05-16T16:01:23+05:30")
 def test_run_post_close_apply_aborts_when_quotes_missing(paths) -> None:
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(paths.db_path) as file_conn:
@@ -168,7 +169,7 @@ def test_run_post_close_apply_aborts_when_quotes_missing(paths) -> None:
     assert "/kite-quotes-snapshot" in str(exc.value)
 
 
-@freeze_time("2026-05-17T10:00:00")
+@freeze_time("2026-05-17T10:00:00+05:30")
 def test_run_post_close_apply_honors_max_age_for_backfill(paths) -> None:
     """Next-day backfill: quotes captured 2026-05-16 16:01, run on 2026-05-17.
 
@@ -187,15 +188,13 @@ def test_run_post_close_apply_honors_max_age_for_backfill(paths) -> None:
     assert "stale" in str(exc.value)
 
     # Explicit override lifts the ceiling for the backfill.
-    result = run_post_close(
-        date(2026, 5, 16), paths=paths, apply=True, max_age_minutes=100_000
-    )
-    assert result.quotes_capture_ts == _dt(2026, 5, 16, 16, 1)
+    result = run_post_close(date(2026, 5, 16), paths=paths, apply=True, max_age_minutes=100_000)
+    assert result.quotes_capture_ts == _dt(2026, 5, 16, 16, 1, tzinfo=IST)
     assert result.trades_closed == 1
     assert result.summary_path is not None
 
 
-@freeze_time("2026-05-16T16:01:23")
+@freeze_time("2026-05-16T16:01:23+05:30")
 def test_run_post_close_apply_idempotent_on_rerun(paths) -> None:
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(paths.db_path) as file_conn:
@@ -217,7 +216,7 @@ def test_run_post_close_apply_idempotent_on_rerun(paths) -> None:
     assert n == 1
 
 
-@freeze_time("2026-05-16T16:01:23")
+@freeze_time("2026-05-16T16:01:23+05:30")
 def test_run_post_close_apply_no_open_trades_still_writes_summary(paths) -> None:
     """Quiet day: no open trades, no matured predictions. Summary still written."""
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)

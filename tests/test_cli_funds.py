@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -16,6 +17,29 @@ def test_funds_add_writes_row_and_prints_balance(tmp_path: Path, monkeypatch) ->
     )
     assert result.exit_code == 0, result.output
     assert "50,000" in result.output or "50000" in result.output
+
+
+def test_funds_add_default_date_uses_ist_clock_not_host(tmp_path: Path, monkeypatch) -> None:
+    """F-058: `funds add` without `--date` must stamp the cash-ledger row with
+    `trading.clock.today_ist()`, not the host clock's `date.today()` --
+    otherwise a deposit made near the UTC/IST midnight boundary on a
+    non-IST host lands in the wrong day's ledger."""
+    import trading.cli as cli_mod
+    from trading.config import get_paths
+    from trading.store.db import get_conn
+    from trading.store.migrations import run_migrations
+
+    monkeypatch.setenv("TRADING_PROJECT_ROOT", str(tmp_path))
+    # A date that would never coincide with the real host date in CI/dev.
+    monkeypatch.setattr(cli_mod, "today_ist", lambda: date(2031, 1, 1))
+
+    result = CliRunner().invoke(app, ["funds", "add", "50000", "--note", "June"])
+    assert result.exit_code == 0, result.output
+
+    with get_conn(get_paths().db_path) as conn:
+        run_migrations(conn)
+        row = conn.execute("SELECT date FROM cash_ledger").fetchone()
+    assert row["date"] == "2031-01-01"
 
 
 def test_funds_add_rejects_non_positive(tmp_path: Path, monkeypatch) -> None:

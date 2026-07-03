@@ -76,6 +76,24 @@ def test_log_dir_is_created(tmp_path, monkeypatch, isolated_logger):
     assert log_dir.is_dir()
 
 
+def test_log_filename_uses_ist_clock_not_host(tmp_path, monkeypatch, isolated_logger):
+    """F-058: the log filename must be dated via `trading.clock.today_ist()`,
+    not the host clock's `date.today()` -- otherwise a host running near the
+    UTC/IST midnight boundary (or defaulted to UTC) can log to the wrong
+    day's file."""
+    from datetime import date
+
+    from trading.ops import logging_setup
+
+    fake_paths = _make_fake_paths(tmp_path)
+    monkeypatch.setattr(logging_setup, "get_paths", lambda: fake_paths)
+    # A date that would never coincide with the real host date in CI/dev.
+    monkeypatch.setattr(logging_setup, "today_ist", lambda: date(2031, 1, 1))
+
+    log_path = logging_setup.configure_logging("test_job", slack_on_error=False)
+    assert log_path.name == "test_job_2031-01-01.log"
+
+
 def test_slack_sink_fires_on_error(tmp_path, monkeypatch, isolated_logger):
     from trading.ops import logging_setup
     from trading.ops import notify as notify_mod

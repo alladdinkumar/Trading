@@ -9,10 +9,9 @@ intentional UI writer; everything else is read-only.
 
 from __future__ import annotations
 
-from datetime import date
-
 import streamlit as st
 
+from trading.clock import today_ist
 from trading.config import get_paths
 from trading.paper.funds import add_funds
 from trading.store.db import get_conn
@@ -31,7 +30,7 @@ st.set_page_config(page_title="Paper Portfolio · Trading", page_icon="🧪", la
 st.sidebar.title("🧪 Paper Portfolio")
 
 st.markdown("## Paper Portfolio")
-as_of = date.today().isoformat()
+as_of = today_ist().isoformat()
 summary = data.load_paper_summary(as_of)
 
 if summary.as_of_mark:
@@ -141,7 +140,7 @@ with f2:
             paths = get_paths()
             with get_conn(paths.db_path) as conn:
                 run_migrations(conn)
-                add_funds(conn, amount=amount, date=date.today().isoformat(), note=note or None)
+                add_funds(conn, amount=amount, date=today_ist().isoformat(), note=note or None)
             st.cache_data.clear()
             st.success(f"Added {format_currency(amount)}.")
             st.rerun()

@@ -12,6 +12,7 @@ import pytest
 from freezegun import freeze_time
 
 from tests.conftest import seed_kite_snapshot
+from trading.clock import IST
 from trading.config import get_paths
 from trading.data.kite import Quote
 from trading.jobs.mid_day import (
@@ -157,7 +158,7 @@ def test_quotes_to_bars_uses_last_price_as_close() -> None:
     )
 
 
-@freeze_time("2026-05-16T12:33:00")
+@freeze_time("2026-05-16T12:33:00+05:30")
 def test_run_mid_day_apply_closes_stop_hit_and_writes_markdown(paths) -> None:
     from trading.store.db import get_conn
 
@@ -168,7 +169,7 @@ def test_run_mid_day_apply_closes_stop_hit_and_writes_markdown(paths) -> None:
     _write_quotes(paths, date(2026, 5, 16), "1232", [_QUOTE_ROW_RVNL])
     result = run_mid_day(date(2026, 5, 16), paths=paths, apply=True)
     assert isinstance(result, MidDayResult)
-    assert result.quotes_capture_ts == _dt(2026, 5, 16, 12, 32)
+    assert result.quotes_capture_ts == _dt(2026, 5, 16, 12, 32, tzinfo=IST)
     assert result.bars_built == 1
     assert result.trades_evaluated == 1
     assert result.trades_closed == 1
@@ -188,7 +189,7 @@ def test_run_mid_day_apply_closes_stop_hit_and_writes_markdown(paths) -> None:
     assert "EXIT_STOP" in body
 
 
-@freeze_time("2026-05-16T12:33:00")
+@freeze_time("2026-05-16T12:33:00+05:30")
 def test_run_mid_day_apply_aborts_when_quotes_missing(paths) -> None:
     from trading.store.db import get_conn
 
@@ -201,7 +202,7 @@ def test_run_mid_day_apply_aborts_when_quotes_missing(paths) -> None:
     assert "/kite-quotes-snapshot" in str(exc.value)
 
 
-@freeze_time("2026-05-16T12:33:00")
+@freeze_time("2026-05-16T12:33:00+05:30")
 def test_run_mid_day_apply_idempotent_on_rerun(paths) -> None:
     from trading.store.db import get_conn
 

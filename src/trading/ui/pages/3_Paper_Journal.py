@@ -7,11 +7,11 @@ Sharpe, win-loss donut, prediction calibration scatter.
 from __future__ import annotations
 
 import math
-from datetime import date
 
 import pandas as pd
 import streamlit as st
 
+from trading.clock import today_ist
 from trading.paper.journal import deviation_label, expected_target_date
 from trading.ui import data
 from trading.ui.charts import (
@@ -46,12 +46,8 @@ trades = data.load_paper_trades()
 snapshots = data.load_portfolio_snapshots()
 predictions = data.load_predictions()
 
-open_trades = (
-    trades[trades["ts_exit"].isna()] if not trades.empty else pd.DataFrame()
-)
-closed_trades = (
-    trades[trades["ts_exit"].notna()] if not trades.empty else pd.DataFrame()
-)
+open_trades = trades[trades["ts_exit"].isna()] if not trades.empty else pd.DataFrame()
+closed_trades = trades[trades["ts_exit"].notna()] if not trades.empty else pd.DataFrame()
 
 # ---------------------------------------------------------------------------
 # Metric tiles
@@ -94,7 +90,7 @@ def _expectancy(df: pd.DataFrame) -> float | None:
 def _schedule_cols(df: pd.DataFrame, *, closed: bool) -> pd.DataFrame:
     """Add Bought / Target date / Deviation columns from ts_entry + horizon_days."""
     out = df.copy()
-    today = date.today()
+    today = today_ist()
     boughts, targets, deviations = [], [], []
     for _, row in out.iterrows():
         entry_iso = str(row["ts_entry"])

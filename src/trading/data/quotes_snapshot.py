@@ -2,9 +2,11 @@
 
 Production code reads quotes through this module, never the SDK. The
 filename's HHMM component is the single source of truth for capture
-time (`_meta.quotes_at` is informational only). Staleness is measured
-against real-time `datetime.now()` — a snapshot is "stale" if more
-than `max_age_minutes` of wall-clock time has passed since capture.
+time (`_meta.quotes_at` is informational only) and is IST wall-clock,
+same as the rest of the system (`trading.clock`). Staleness is measured
+against `trading.clock.now_ist()` — a snapshot is "stale" if more
+than `max_age_minutes` of IST wall-clock time has passed since capture
+(F-058: never the host clock, which may not be IST).
 Each row's `tradingsymbol` field is popped before splatting into
 `Quote(**row)` since the dataclass uses `instrument_token` and we
 key the dict by symbol externally.
@@ -17,6 +19,7 @@ import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from trading import clock
 from trading.config import Paths
 from trading.data.kite import Quote
 from trading.data.snapshot_schema import SnapshotSchemaError, validate_row
@@ -40,7 +43,8 @@ def read_latest_quotes(
 ) -> tuple[dict[str, Quote], datetime]:
     """Find the most recent quotes_HHMM.json for `as_of`, parse → dict[symbol, Quote].
 
-    Returns (quotes_by_symbol, capture_ts). Raises:
+    Returns (quotes_by_symbol, capture_ts) — `capture_ts` is tz-aware
+    (`trading.clock.IST`), not naive (F-058). Raises:
       - QuoteSnapshotMissingError: no quotes_*.json present for the date
       - QuoteSnapshotStaleError: newest exists but capture > max_age_minutes ago
 
@@ -66,10 +70,14 @@ def read_latest_quotes(
     candidates.sort(key=lambda x: (x[0], x[1]))  # ascending HH then MM
     hh, mm, target = candidates[-1]
     capture_ts = datetime(
-        as_of.year, as_of.month, as_of.day,
-        int(hh), int(mm),
+        as_of.year,
+        as_of.month,
+        as_of.day,
+        int(hh),
+        int(mm),
+        tzinfo=clock.IST,
     )
-    age = datetime.now() - capture_ts
+    age = clock.now_ist() - capture_ts
     if age > timedelta(minutes=max_age_minutes):
         raise QuoteSnapshotStaleError(
             f"Newest quotes snapshot is stale: captured at {hh}:{mm} "

@@ -30,7 +30,7 @@ from trading.backtest import (
     run_backtest,
 )
 from trading.backtest.factor_eval import factor_gated_metrics, information_coefficient
-from trading.clock import today_ist
+from trading.clock import now_ist, today_ist
 from trading.config import get_paths, get_settings, update_env_var
 from trading.data.kite import (
     KiteAuthError,
@@ -174,7 +174,7 @@ def ingest_history(
 ) -> None:
     """Fetch historical OHLCV from yfinance and write per-symbol parquet files."""
     paths = get_paths()
-    end_str = end or date.today().isoformat()
+    end_str = end or today_ist().isoformat()
     tickers = list(symbols) if symbols else load_universe()
     if not tickers:
         console.print("[yellow]No symbols to ingest.[/yellow]")
@@ -241,7 +241,7 @@ def refresh_ohlcv_cmd(
 ) -> None:
     """Append any OHLCV bars missing up to D-1 for each symbol (F-018)."""
     paths = get_paths()
-    as_of = date.fromisoformat(date_str) if date_str else date.today()
+    as_of = date.fromisoformat(date_str) if date_str else today_ist()
     result = refresh_ohlcv(paths, as_of, symbols=list(symbols) if symbols else None)
     console.print(
         f"[green]{result.symbols_refreshed} refreshed[/green]"
@@ -350,7 +350,9 @@ def kite_emergency_snapshot(
     _atomic_dump(gtts_list, "gtts.json")
 
     meta = {
-        "snapshot_at": datetime.now().isoformat(),
+        # F-058: snapshot_at's date part gates kite_snapshot._validate_meta —
+        # stamp it with the canonical IST clock, not the host clock.
+        "snapshot_at": now_ist().isoformat(),
         "source": "sdk-fallback",
         "skill_version": "1",
     }
@@ -719,7 +721,7 @@ def ingest_news(
 ) -> None:
     """Fetch news from all sources, score with FinBERT, write news_items and sentiment_daily."""
     paths = get_paths()
-    target_date = date.fromisoformat(as_of) if as_of else date.today()
+    target_date = date.fromisoformat(as_of) if as_of else today_ist()
 
     console.print("[bold]Fetching news from all sources…[/bold]")
     items = fetch_all_news()
@@ -796,7 +798,7 @@ def macro_snapshot_cmd(
 ) -> None:
     """Pull macro indicators, classify the risk regime, write macro_snapshot."""
     paths = get_paths()
-    target_date = date.fromisoformat(as_of) if as_of else date.today()
+    target_date = date.fromisoformat(as_of) if as_of else today_ist()
 
     console.print(f"[bold]Pulling macro snapshot for {target_date}…[/bold]")
     snap, result = snapshot_and_classify(target_date)
@@ -855,7 +857,7 @@ def macro_refresh_cmd(
     the gap-fill, and every DB write through validated boundaries.
     """
     paths = get_paths()
-    target_date = date.fromisoformat(as_of) if as_of else date.today()
+    target_date = date.fromisoformat(as_of) if as_of else today_ist()
 
     console.print(f"[bold]Refreshing macro snapshot for {target_date}…[/bold]")
     snap, _result = snapshot_and_classify(target_date)
@@ -972,7 +974,7 @@ def funds_add_cmd(
 ) -> None:
     """Record a capital top-up and print the new balance breakdown."""
     paths = get_paths()
-    deposit_date = as_of or date.today().isoformat()
+    deposit_date = as_of or today_ist().isoformat()
     with get_conn(paths.db_path) as conn:
         run_migrations(conn)
         try:
@@ -1006,7 +1008,7 @@ def funds_top_up_cmd(
     Idempotent: if cash is already at or above the target, writes nothing.
     """
     paths = get_paths()
-    deposit_date = as_of or date.today().isoformat()
+    deposit_date = as_of or today_ist().isoformat()
     target_day = date.fromisoformat(deposit_date)
     with get_conn(paths.db_path) as conn:
         run_migrations(conn)
@@ -1038,7 +1040,7 @@ def funds_list_cmd() -> None:
     with get_conn(paths.db_path) as conn:
         run_migrations(conn)
         deposits = list_funds(conn)
-        total_added = total_funds_added(conn, as_of=date.today())
+        total_added = total_funds_added(conn, as_of=today_ist())
     table = Table(show_header=True, header_style="bold")
     table.add_column("Date")
     table.add_column("Amount", justify="right")
@@ -1059,7 +1061,7 @@ def funds_balance_cmd(
 ) -> None:
     """Print total funds in, cash available, invested, holdings value, account value."""
     paths = get_paths()
-    target = date.fromisoformat(as_of) if as_of else date.today()
+    target = date.fromisoformat(as_of) if as_of else today_ist()
     with get_conn(paths.db_path) as conn:
         run_migrations(conn)
         summary = compute_summary(conn, as_of=target)
@@ -1090,7 +1092,7 @@ def sector_cmd(
 ) -> None:
     """Pull NSE sectoral indices, compute RS vs Nifty 50, upsert sector_daily."""
     paths = get_paths()
-    target_date = date.fromisoformat(as_of) if as_of else date.today()
+    target_date = date.fromisoformat(as_of) if as_of else today_ist()
 
     console.print(f"[bold]Pulling sector snapshot for {target_date}…[/bold]")
     rows = fetch_all_sectors(target_date)
@@ -1181,7 +1183,7 @@ def portfolio_cmd(
     # Enrich each holding with parquet history + sentiment
     enriched: dict[str, pd.DataFrame] = {}
     health_rows = []
-    today_iso = date.today().isoformat()
+    today_iso = today_ist().isoformat()
     with get_conn(paths.db_path) as conn:
         run_migrations(conn)
         for h in holdings_list:
@@ -1294,7 +1296,7 @@ def _print_gtt_table(viabilities: list) -> None:  # type: ignore[type-arg]
 
 def _render_portfolio_report(health_rows: list, viabilities: list) -> str:  # type: ignore[type-arg]
     lines: list[str] = []
-    lines.append(f"# Portfolio analysis — {date.today().isoformat()}")
+    lines.append(f"# Portfolio analysis — {today_ist().isoformat()}")
     lines.append("")
     lines.append("## Holdings health")
     lines.append("")
@@ -1335,9 +1337,12 @@ def paper_open_cmd(
 ) -> None:
     """Manually log a signal and open a paper trade — ad-hoc seeding."""
     paths = get_paths()
+    # F-058: one IST timestamp, reused for both the signal and the trade open,
+    # instead of two independent host-clock reads that could disagree.
+    entry_ts = now_ist()
     signal = Signal(
         id=None,
-        ts=datetime.now().isoformat(),
+        ts=entry_ts.isoformat(),
         symbol=symbol.upper(),
         side="LONG",
         entry=entry,
@@ -1352,7 +1357,7 @@ def paper_open_cmd(
         result = log_signal_and_open_trade(
             conn,
             signal=signal,
-            entry_ts=datetime.now(),
+            entry_ts=entry_ts,
             entry_price=entry,
             qty=qty,
             atr_at_entry=atr,
@@ -1373,7 +1378,7 @@ def paper_mtm_cmd(
 ) -> None:
     """Run MTM against parquet bars for the given date."""
     paths = get_paths()
-    target_date = date.fromisoformat(as_of) if as_of else date.today()
+    target_date = date.fromisoformat(as_of) if as_of else today_ist()
     target_dt = datetime.combine(target_date, datetime.min.time().replace(hour=15, minute=30))
 
     with get_conn(paths.db_path) as conn:
@@ -1523,7 +1528,7 @@ def paper_reconcile_cmd(
 ) -> None:
     """Evaluate matured predictions + write today's portfolio_snapshots row."""
     paths = get_paths()
-    target_date = date.fromisoformat(as_of) if as_of else date.today()
+    target_date = date.fromisoformat(as_of) if as_of else today_ist()
     target_dt = datetime.combine(target_date, datetime.min.time().replace(hour=15, minute=30))
 
     with get_conn(paths.db_path) as conn:

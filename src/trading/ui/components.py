@@ -13,6 +13,7 @@ from typing import Literal
 
 import streamlit as st
 
+from trading import clock
 from trading.strategy.rules import LAYER_A_RULE_NAMES
 from trading.ui.charts import (
     COLOR_INFO,
@@ -170,7 +171,12 @@ def stale_quote_tag(capture_iso: str | None) -> None:
         captured = datetime.fromisoformat(capture_iso)
     except ValueError:
         return
-    age_min = int((datetime.now() - captured).total_seconds() // 60)
+    # F-058: compare against the canonical IST clock, not the host clock.
+    # `captured` is IST wall-clock; treat a naive value (older cached data)
+    # as IST too so the subtraction is never a naive/aware mismatch.
+    if captured.tzinfo is None:
+        captured = captured.replace(tzinfo=clock.IST)
+    age_min = int((clock.now_ist() - captured).total_seconds() // 60)
     color = COLOR_NEUTRAL if age_min > 30 else COLOR_MUTED
     label = f"quote captured {captured.strftime('%H:%M')} ({age_min} min ago)"
     st.markdown(

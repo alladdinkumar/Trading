@@ -699,7 +699,7 @@ def _stub_pre_open_upstream(monkeypatch, cand: Candidate) -> None:
     )
 
 
-@freeze_time("2026-05-15 09:21:00")
+@freeze_time("2026-05-15 09:21:00+05:30")
 def test_operator_risk_params_flow_from_pre_open_to_open_fills_planner(paths, monkeypatch) -> None:
     """F-056: --capital/--daily-cap/--risk-pct given to run_pre_open must reach
     plan_daily_entries in open_fills apply mode via _pending_entries.json —
@@ -738,7 +738,7 @@ def test_operator_risk_params_flow_from_pre_open_to_open_fills_planner(paths, mo
     assert captured["risk_pct"] == pytest.approx(0.01)
 
 
-@freeze_time("2026-05-15 09:21:00")
+@freeze_time("2026-05-15 09:21:00+05:30")
 def test_open_fills_falls_back_to_defaults_when_pending_file_predates_risk_params(
     paths, monkeypatch
 ) -> None:

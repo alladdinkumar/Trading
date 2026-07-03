@@ -397,7 +397,7 @@ On a broad risk-on day, `BHARTIARTL`, `INDIGO` and `TITAN` (and `ETERNAL`/`TRENT
 
 ---
 
-### F-058 — Quote-staleness gate (and several date defaults) use the host's local clock, not the canonical IST clock (`RISK`, Med, data/quotes_snapshot) — Open
+### F-058 — Quote-staleness gate (and several date defaults) use the host's local clock, not the canonical IST clock (`RISK`, Med, data/quotes_snapshot) — ✅ Fixed 2026-07-03
 
 **Where** `src/trading/data/quotes_snapshot.py:68-72` (`capture_ts` naive from filename; `age = datetime.now() - capture_ts`); same anti-pattern in `src/trading/ops/logging_setup.py:116` and CLI ad-hoc date defaults (`cli.py` funds-add/top-up, refresh-ohlcv, ingest-news, macro-*). `clock.py` exists precisely so nothing re-derives the IST offset locally — the original **F-004**.
 
