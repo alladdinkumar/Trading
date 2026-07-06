@@ -464,7 +464,7 @@ An operator eyeballing "OOS Sharpe (pooled): 1.3" or the Journal's "Sharpe 1.1" 
 
 ---
 
-### F-062 — IEP health checkpoints are permanently unsatisfiable, so `trading status` reports a false "half-run" every day (`GAP`, Med, ops/run_status) — Open
+### F-062 — IEP health checkpoints are permanently unsatisfiable, so `trading status` reports a false "half-run" every day (`GAP`, Med, ops/run_status) — ✅ Fixed 2026-07-03
 
 **Where** `src/trading/ops/run_status.py` (`_probe_iep_quotes`/`_probe_iep_filter` hard-depend on `_iep_quote_file` finding a pre-10:30-IST `quotes_HHMM.json`); `cli.py:1931-1933` (`status` exits 1 on `has_due_failure()`).
 

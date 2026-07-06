@@ -5,8 +5,11 @@ The daily pipeline is ~13 manually-sequenced commands (see
 given date, so skipping IEP or running blocks out of order failed silently.
 
 `compute_status` infers, purely from the durable artifacts each step leaves on
-disk (or in the DB), which checkpoints have run — no job or skill needs to
-stamp anything. It tracks **8 checkpoints across the 4 IST blocks** (the
+disk (or in the DB), which checkpoints have run — almost no job or skill needs
+to stamp anything (the one exception: `pre_open_iep` stamps an in-place
+"ran" marker in `_context.md`, since nothing writes an IEP-band
+`_quote_symbols.txt`/quotes capture for it to be detected from otherwise —
+F-062). It tracks **8 checkpoints across the 4 IST blocks** (the
 meaningful per-block completion signals; the two prepare steps share one
 overwritten `_quote_symbols.txt` and so aren't independently detectable, and a
 block's "apply" output is what proves it finished).
@@ -20,6 +23,7 @@ caller (CLI exit code, cron) keys on.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -34,6 +38,29 @@ from trading.ops.calendar import is_trading_day
 # market open, so an IEP-band capture is anything stamped before 10:30 IST;
 # mid-day and post-close captures fall later in the day.
 _IEP_QUOTE_CUTOFF_HHMM = 1030
+
+# --- IEP-ran marker: single source of truth (F-062) ---------------------------
+# `trading.jobs.pre_open_iep` rewrites `_context.md` in place and stamps this
+# marker on every run — even on the (known, separately-tracked) day nothing
+# writes `_quote_symbols.txt` for the IEP block, so no overnight quotes exist
+# and the gap filter degrades to a benign no-op. Without it, this module had
+# no way to tell "ran benignly with no quotes" from "never ran", and reported
+# a false half-run every trading day. Lives here (not `trading.llm.context`,
+# where the sibling `CANDIDATE_HEADING_RE` marker lives) because the L0-L6
+# layering contract (F-009) forbids `ops` importing `llm`; `jobs` sits above
+# both and imports this module for the writer side.
+IEP_MARKER_FMT = "<!-- pre-open-iep: ran_at={ran_at} quotes_available={quotes_available} -->"
+IEP_MARKER_RE = re.compile(
+    r"<!-- pre-open-iep: ran_at=(?P<ran_at>\S+) quotes_available=(?P<quotes_available>true|false) -->"
+)
+
+
+def render_iep_marker(ran_at: datetime, quotes_available: bool) -> str:
+    """Render the canonical `pre_open_iep`-ran marker line (F-062 single source)."""
+    return IEP_MARKER_FMT.format(
+        ran_at=ran_at.isoformat(),
+        quotes_available="true" if quotes_available else "false",
+    )
 
 
 @dataclass(frozen=True)
@@ -114,21 +141,43 @@ def _probe_compile(ctx: _DayContext) -> tuple[bool, str]:
     return (True, f.name) if f.is_file() else (False, "")
 
 
+def _iep_marker(ctx: _DayContext) -> tuple[str, bool] | None:
+    """Parse `pre_open_iep`'s own "ran" marker out of `_context.md`, if present.
+
+    F-062: nothing writes `_quote_symbols.txt` for the IEP block, so no
+    overnight quotes snapshot is ever captured and `_iep_quote_file` returns
+    `None` unconditionally — pre_open_iep still runs and degrades gracefully,
+    but there was no durable signal distinguishing that from "never ran".
+    pre_open_iep now stamps this marker on every run (see
+    `trading.jobs.pre_open_iep._write_iep_marker`), so this is the primary
+    "did IEP run today" signal; the quotes file above is used when present.
+    """
+    ctxmd = _research_dir(ctx) / "_context.md"
+    if not ctxmd.is_file():
+        return None
+    m = IEP_MARKER_RE.search(ctxmd.read_text(encoding="utf-8"))
+    if not m:
+        return None
+    return m.group("ran_at"), m.group("quotes_available") == "true"
+
+
 def _probe_iep_quotes(ctx: _DayContext) -> tuple[bool, str]:
     f = _iep_quote_file(ctx)
-    return (True, f.name) if f is not None else (False, "")
+    if f is not None:
+        return True, f.name
+    marker = _iep_marker(ctx)
+    if marker is not None and not marker[1]:
+        return True, "no overnight quotes captured (pre_open_iep ran without them)"
+    return False, ""
 
 
 def _probe_iep_filter(ctx: _DayContext) -> tuple[bool, str]:
-    # pre-open-iep rewrites _context.md in place after reading IEP quotes, so it
-    # has run iff _context.md was last touched at/after the IEP quotes capture.
-    ctxmd = _research_dir(ctx) / "_context.md"
-    qfile = _iep_quote_file(ctx)
-    if not ctxmd.is_file() or qfile is None:
+    marker = _iep_marker(ctx)
+    if marker is None:
         return False, ""
-    if ctxmd.stat().st_mtime >= qfile.stat().st_mtime:
-        return True, "re-filtered after IEP quotes"
-    return False, ""
+    _ran_at, quotes_available = marker
+    detail = "re-filtered" if quotes_available else "re-filtered (no overnight quotes)"
+    return True, detail
 
 
 def _probe_mid_day(ctx: _DayContext) -> tuple[bool, str]:

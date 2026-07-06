@@ -9,7 +9,6 @@ passed, else `pending`. Non-trading days are `n/a`.
 from __future__ import annotations
 
 import json
-import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -124,32 +123,55 @@ def test_midday_quotes_do_not_satisfy_iep_band(paths):
     assert _state(statuses, "iep_quotes") == "missing"
 
 
-def test_iep_filter_detected_by_mtime_after_quotes(paths):
-    raw = _raw(paths, TODAY)
+def test_iep_filter_detected_by_marker(paths):
+    # pre_open_iep (F-062) stamps _context.md with its own "ran" marker,
+    # which is what iep_filter now keys on (not quotes-file mtime).
     research = _research(paths, TODAY)
-    qfile = raw / "quotes_0856.json"
-    qfile.write_text("{}", encoding="utf-8")
     ctx = research / "_context.md"
-    ctx.write_text("filtered", encoding="utf-8")
-    # Force _context.md mtime strictly after the IEP quotes file.
-    q_mtime = qfile.stat().st_mtime
-    os.utime(ctx, (q_mtime + 10, q_mtime + 10))
+    ctx.write_text(
+        "filtered\n\n<!-- pre-open-iep: ran_at="
+        + _ist(TODAY, 8, 56).isoformat()
+        + " quotes_available=true -->\n",
+        encoding="utf-8",
+    )
     statuses = compute_status(paths, TODAY, now=_ist(TODAY, 9, 30))
     assert _state(statuses, "iep_filter") == "done"
 
 
-def test_iep_filter_not_done_when_context_predates_quotes(paths):
-    raw = _raw(paths, TODAY)
+def test_iep_filter_not_done_when_no_marker(paths):
     research = _research(paths, TODAY)
     ctx = research / "_context.md"
-    ctx.write_text("pre-iep", encoding="utf-8")
-    qfile = raw / "quotes_0856.json"
-    qfile.write_text("{}", encoding="utf-8")
-    # _context.md older than the quotes file → IEP filter hasn't re-run.
-    c_mtime = ctx.stat().st_mtime
-    os.utime(qfile, (c_mtime + 10, c_mtime + 10))
+    ctx.write_text("pre-iep, never re-filtered", encoding="utf-8")
     statuses = compute_status(paths, TODAY, now=_ist(TODAY, 9, 30))
     assert _state(statuses, "iep_filter") == "missing"
+
+
+def test_iep_checks_done_when_marker_shows_quotes_unavailable(paths):
+    """F-062: nothing writes `_quote_symbols.txt` for the IEP block, so
+    `pre_open_iep` degrades gracefully and runs with no overnight quotes —
+    that must read as `done`, not a false half-run, on every trading day."""
+    research = _research(paths, TODAY)
+    ctx = research / "_context.md"
+    ctx.write_text(
+        "filtered\n\n<!-- pre-open-iep: ran_at="
+        + _ist(TODAY, 8, 56).isoformat()
+        + " quotes_available=false -->\n",
+        encoding="utf-8",
+    )
+    statuses = compute_status(paths, TODAY, now=_ist(TODAY, 9, 30))
+    assert _state(statuses, "iep_quotes") == "done"
+    assert _state(statuses, "iep_filter") == "done"
+    iep_statuses = [s for s in statuses if s.block == "iep"]
+    assert not has_due_failure(iep_statuses)
+
+
+def test_iep_quotes_real_file_still_preferred_over_marker(paths):
+    """If the quotes-file gap is ever closed, a real IEP-band capture still
+    reports via its own filename, independent of the marker."""
+    raw = _raw(paths, TODAY)
+    (raw / "quotes_0856.json").write_text("{}", encoding="utf-8")
+    statuses = compute_status(paths, TODAY, now=_ist(TODAY, 9, 5))
+    assert _state(statuses, "iep_quotes") == "done"
 
 
 def test_mid_day_detected_by_update_file(paths):

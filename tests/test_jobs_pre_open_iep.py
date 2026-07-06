@@ -25,6 +25,7 @@ from trading.jobs.pre_open_iep import (
     _update_context_markdown,
     run_pre_open_iep,
 )
+from trading.ops.run_status import IEP_MARKER_RE
 from trading.store.db import get_conn
 from trading.store.macro_store import upsert_macro_snapshot
 from trading.store.migrations import run_migrations
@@ -552,6 +553,85 @@ def test_run_pre_open_iep_neutral_when_regime_missing(paths) -> None:
     assert result.candidates_removed == 0
     assert any("Regime" in w for w in result.warnings)
     assert any("quotes" in w.lower() for w in result.warnings)
+
+
+# ---------------------------------------------------------------------------
+# F-062 — pre_open_iep must leave durable proof it ran, even with no
+# overnight quotes (the `_quote_symbols.txt` gap), so `ops.run_status` can
+# tell "ran benignly" from "never ran".
+# ---------------------------------------------------------------------------
+
+
+def test_run_pre_open_iep_writes_marker_quotes_unavailable(paths) -> None:
+    """No quotes snapshot on disk → marker records quotes_available=false."""
+    as_of = date(2026, 5, 22)
+    _seed_context(paths, as_of, ["RVNL", "NTPC"])
+    _seed_parquet(paths, "RVNL", 304.0)
+    _seed_parquet(paths, "NTPC", 175.0)
+
+    result = run_pre_open_iep(as_of, paths=paths)
+
+    updated = result.context_path.read_text(encoding="utf-8")
+    m = IEP_MARKER_RE.search(updated)
+    assert m is not None
+    assert m.group("quotes_available") == "false"
+
+
+def test_run_pre_open_iep_writes_marker_quotes_available(paths, monkeypatch) -> None:
+    """A fresh quotes snapshot on disk → marker records quotes_available=true."""
+    from datetime import datetime as _real_dt
+
+    from trading import clock
+
+    as_of = date(2026, 5, 22)
+    fake_now = _real_dt(2026, 5, 22, 8, 56, tzinfo=clock.IST)
+    monkeypatch.setattr(clock, "now_ist", lambda: fake_now)
+
+    _seed_context(paths, as_of, ["RVNL", "NTPC"])
+    _seed_parquet(paths, "RVNL", 304.0)
+    _seed_parquet(paths, "NTPC", 175.0)
+    _seed_quotes(
+        paths,
+        as_of,
+        "0855",
+        [_quote_row("RVNL", 312.0), _quote_row("NTPC", 177.0)],
+    )
+
+    result = run_pre_open_iep(as_of, paths=paths)
+
+    updated = result.context_path.read_text(encoding="utf-8")
+    m = IEP_MARKER_RE.search(updated)
+    assert m is not None
+    assert m.group("quotes_available") == "true"
+    assert m.group("ran_at") == fake_now.isoformat()
+
+
+def test_run_pre_open_iep_no_candidates_still_writes_marker(paths) -> None:
+    """Even a no-candidates day must be marked as ran (F-062)."""
+    as_of = date(2026, 5, 22)
+    base = paths.research_dir / as_of.isoformat()
+    base.mkdir(parents=True, exist_ok=True)
+    (base / "_context.md").write_text("# header\n\n## Macro\n", encoding="utf-8")
+
+    result = run_pre_open_iep(as_of, paths=paths)
+
+    assert result.context_path is not None
+    updated = result.context_path.read_text(encoding="utf-8")
+    assert IEP_MARKER_RE.search(updated) is not None
+
+
+def test_run_pre_open_iep_marker_not_duplicated_on_rerun(paths) -> None:
+    """Re-running the same day replaces the marker rather than appending another."""
+    as_of = date(2026, 5, 22)
+    _seed_context(paths, as_of, ["RVNL", "NTPC"])
+    _seed_parquet(paths, "RVNL", 304.0)
+    _seed_parquet(paths, "NTPC", 175.0)
+
+    run_pre_open_iep(as_of, paths=paths)
+    result = run_pre_open_iep(as_of, paths=paths)
+
+    updated = result.context_path.read_text(encoding="utf-8")
+    assert len(IEP_MARKER_RE.findall(updated)) == 1
 
 
 def test_pre_open_iep_main_logging_and_failure(monkeypatch, tmp_path):

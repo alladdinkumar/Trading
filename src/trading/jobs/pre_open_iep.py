@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 
+from trading import clock
 from trading.config import Paths, get_paths
 from trading.data.kite import Quote
 from trading.data.quotes_snapshot import (
@@ -23,6 +24,7 @@ from trading.data.sector import load_sector_map
 from trading.features.regime import Regime
 from trading.llm.context import CANDIDATE_HEADING_RE
 from trading.ops.logging_setup import configure_logging
+from trading.ops.run_status import IEP_MARKER_RE, render_iep_marker
 from trading.store.db import get_conn
 from trading.store.macro_store import get_macro_snapshot
 from trading.store.migrations import run_migrations
@@ -77,7 +79,18 @@ def run_pre_open_iep(
         )
     context_md = context_path.read_text(encoding="utf-8")
     candidates = _parse_candidates_from_context(context_md)
+
+    try:
+        quotes, _capture_ts = read_latest_quotes(p, as_of)
+        quotes_available = True
+    except (QuoteSnapshotMissingError, QuoteSnapshotStaleError) as e:
+        warnings.append(f"Overnight quotes unavailable: {e!s}")
+        quotes = {}
+        quotes_available = False
+
     if not candidates:
+        warnings.append("No candidates in _context.md — nothing to filter.")
+        _write_iep_marker(context_path, context_md, quotes_available)
         return PreOpenIepResult(
             as_of=as_of,
             regime="NEUTRAL",
@@ -87,18 +100,12 @@ def run_pre_open_iep(
             rerank_applied=False,
             context_path=context_path,
             removed_symbols=[],
-            warnings=["No candidates in _context.md — nothing to filter."],
+            warnings=warnings,
         )
 
     with get_conn(p.db_path) as conn:
         run_migrations(conn)
         regime = _load_regime(conn, as_of, warnings)
-
-    try:
-        quotes, _capture_ts = read_latest_quotes(p, as_of)
-    except (QuoteSnapshotMissingError, QuoteSnapshotStaleError) as e:
-        warnings.append(f"Overnight quotes unavailable: {e!s}")
-        quotes = {}
 
     yesterday_closes = _load_yesterday_closes(p, as_of, candidates, warnings)
     gaps = _compute_gaps(set(candidates), quotes, yesterday_closes)
@@ -126,7 +133,7 @@ def run_pre_open_iep(
     new_order = _rerank(kept, gaps, candidate_sector_pcts) if rerank_applied else kept
 
     updated_md = _update_context_markdown(context_md, new_order, removed)
-    context_path.write_text(updated_md, encoding="utf-8")
+    _write_iep_marker(context_path, updated_md, quotes_available)
 
     return PreOpenIepResult(
         as_of=as_of,
@@ -139,6 +146,19 @@ def run_pre_open_iep(
         removed_symbols=removed,
         warnings=warnings,
     )
+
+
+def _write_iep_marker(context_path: Path, context_md: str, quotes_available: bool) -> None:
+    """Persist proof that pre_open_iep ran, replacing any prior same-day marker.
+
+    F-062: `ops.run_status` can't otherwise distinguish "ran benignly with no
+    overnight quotes" (the known `_quote_symbols.txt` gap) from "never ran",
+    and flagged a false half-run every trading day. This marker is the durable
+    signal it now keys on, so it's written regardless of `quotes_available`.
+    """
+    stripped = IEP_MARKER_RE.sub("", context_md).rstrip("\n")
+    marker = render_iep_marker(clock.now_ist(), quotes_available)
+    context_path.write_text(f"{stripped}\n\n{marker}\n", encoding="utf-8")
 
 
 def _load_regime(conn: sqlite3.Connection, as_of: date, warnings: list[str]) -> Regime:
