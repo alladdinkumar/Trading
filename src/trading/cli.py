@@ -605,7 +605,7 @@ def factor_eval_cmd(
     cmp_table.add_column("Factor-gated", justify="right")
     for label, attr, fmt in [
         ("Trades", "n", "{}"),
-        ("Sharpe (x12)", "sharpe", "{:.2f}"),
+        ("Sharpe (x12/trade — not the gate Sharpe)", "sharpe", "{:.2f}"),
         ("Profit factor", "profit_factor", "{:.2f}"),
         ("Hit rate", "hit_rate", "{:.2%}"),
         ("Payoff", "payoff", "{:.2f}"),
@@ -1816,6 +1816,10 @@ def post_close_cmd(
         "drawdown_pct",
         f"{result.drawdown_pct:+.2f}%" if result.drawdown_pct is not None else "—",
     )
+    table.add_row(
+        "Gate Sharpe (daily, ann.)",
+        f"{result.gate_sharpe:.2f}" if result.gate_sharpe is not None else "n/a",
+    )
     console.print(table)
     if result.warnings:
         console.print("[yellow]Warnings:[/yellow]")
@@ -1951,7 +1955,7 @@ def ranker_status() -> None:
     table = Table(title="Model registry")
     table.add_column("version")
     table.add_column("trained_at")
-    table.add_column("OOS Sharpe", justify="right")
+    table.add_column("OOS Sharpe (x12/trade — not the gate Sharpe)", justify="right")
     table.add_column("OOS hit", justify="right")
     table.add_column("examples", justify="right")
     table.add_column("active")
@@ -2031,7 +2035,7 @@ def train_ranker(
     table.add_column("test")
     table.add_column("examples", justify="right")
     table.add_column("OOS trades", justify="right")
-    table.add_column("OOS Sharpe", justify="right")
+    table.add_column("OOS Sharpe (x12/trade — not the gate Sharpe)", justify="right")
     table.add_column("OOS hit", justify="right")
     table.add_column("skipped")
     for f in result.folds:
@@ -2046,7 +2050,8 @@ def train_ranker(
         )
     console.print(table)
     console.print(
-        f"OOS Sharpe (pooled): {result.oos_sharpe_pooled:.3f} | "
+        f"OOS Sharpe (pooled, x12/trade — not the daily-annualised gate Sharpe): "
+        f"{result.oos_sharpe_pooled:.3f} | "
         f"hit (pooled): {result.oos_hit_pooled:.3f} | "
         f"N={result.n_oos_total} folds {result.n_folds_positive}/{result.n_folds_total} | "
         f"final examples: {result.n_final_examples}"
@@ -2082,7 +2087,8 @@ def train_ranker(
             f"# Ranker training run {version}\n\n"
             f"- Train period: {result.final_train_start.date()} → {result.final_train_end.date()}\n"
             f"- Final examples: {result.n_final_examples}\n"
-            f"- OOS Sharpe (pooled): {result.oos_sharpe_pooled:.3f} "
+            f"- OOS Sharpe (pooled, x12/trade — not the daily-annualised gate Sharpe): "
+            f"{result.oos_sharpe_pooled:.3f} "
             f"over N={result.n_oos_total} ({result.n_folds_positive}/"
             f"{result.n_folds_total} folds positive)\n"
             f"- OOS hit-rate (pooled): {result.oos_hit_pooled:.3f}\n"

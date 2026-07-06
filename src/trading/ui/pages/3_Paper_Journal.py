@@ -11,6 +11,7 @@ import math
 import pandas as pd
 import streamlit as st
 
+from trading.backtest.metrics import gate_sharpe
 from trading.clock import today_ist
 from trading.paper.journal import deviation_label, expected_target_date
 from trading.ui import data
@@ -72,13 +73,25 @@ def _profit_factor(df: pd.DataFrame) -> float | None:
 
 
 def _sharpe(df: pd.DataFrame) -> float | None:
+    """Per-trade mean/std of pnl_pct — NOT annualised, NOT the go-live gate
+    metric (F-061). Enough for a quick "are we in the black" read; see
+    `_gate_sharpe` for the daily-annualised figure the go-live bar is on."""
     if df.empty or "pnl_pct" not in df.columns:
         return None
     series = df["pnl_pct"].dropna()
     if len(series) < 2 or series.std(ddof=1) == 0:
         return None
-    # Per-trade Sharpe (not annualised) — enough for a "are we in the black" tile
     return float(series.mean() / series.std(ddof=1))
+
+
+def _gate_sharpe(snapshots: pd.DataFrame) -> float | None:
+    """Daily-annualised Sharpe of the live paper equity curve (F-061) — the
+    actual go-live-gate metric ("≥3 months OOS Sharpe > 1.0" on daily-
+    annualised returns). None ("n/a") until there's enough snapshot history."""
+    if snapshots.empty or "equity" not in snapshots.columns:
+        return None
+    equity = snapshots.sort_values("date")["equity"]
+    return gate_sharpe(equity)
 
 
 def _expectancy(df: pd.DataFrame) -> float | None:
@@ -106,7 +119,7 @@ def _schedule_cols(df: pd.DataFrame, *, closed: bool) -> pd.DataFrame:
     return out
 
 
-k1, k2, k3, k4, k5 = st.columns(5)
+k1, k2, k3, k4, k5, k6 = st.columns(6)
 with k1:
     kpi_tile("Closed trades", str(len(closed_trades)))
 with k2:
@@ -120,10 +133,13 @@ with k3:
     )
 with k4:
     sr = _sharpe(closed_trades)
-    kpi_tile("Sharpe (per-trade)", f"{sr:.2f}" if sr is not None else "—")
+    kpi_tile("Sharpe (per-trade, not annualised)", f"{sr:.2f}" if sr is not None else "—")
 with k5:
     exp = _expectancy(closed_trades)
     kpi_tile("Expectancy", format_currency(exp))
+with k6:
+    gs = _gate_sharpe(snapshots)
+    kpi_tile("Gate Sharpe (daily, annualised)", f"{gs:.2f}" if gs is not None else "n/a")
 
 divider()
 

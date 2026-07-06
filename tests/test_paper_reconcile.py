@@ -6,6 +6,7 @@ import json
 import sqlite3
 from datetime import date
 
+import pandas as pd
 import pytest
 
 from trading.paper.ledger import (
@@ -17,7 +18,9 @@ from trading.paper.ledger import (
 from trading.paper.reconcile import (
     compute_paper_cash,
     compute_portfolio_snapshot,
+    equity_series,
     evaluate_matured_predictions,
+    portfolio_gate_sharpe,
     reconcile_day,
     upsert_portfolio_snapshot,
 )
@@ -508,3 +511,63 @@ def test_reconcile_day_writes_snapshot_and_returns_updates(conn: sqlite3.Connect
     assert row is not None
     expected_equity = 100_000 - 1000 - buy_side_cost(1000) + 1150 - sell_side_cost(1150)
     assert row["equity"] == pytest.approx(expected_equity)
+
+
+# ---------------------------------------------------------------------------
+# equity_series / portfolio_gate_sharpe (F-061)
+# ---------------------------------------------------------------------------
+
+
+def _seed_snapshots(conn: sqlite3.Connection, rows: list[tuple[str, float]]) -> None:
+    for d, equity in rows:
+        conn.execute(
+            "INSERT INTO portfolio_snapshots (date, cash, holdings_json, equity) "
+            "VALUES (?, ?, '{}', ?)",
+            (d, equity, equity),
+        )
+    conn.commit()
+
+
+def test_equity_series_empty_when_no_snapshots(conn: sqlite3.Connection) -> None:
+    s = equity_series(conn)
+    assert s.empty
+
+
+def test_equity_series_ordered_ascending_by_date(conn: sqlite3.Connection) -> None:
+    _seed_snapshots(
+        conn,
+        [
+            ("2026-06-02", 101_000.0),
+            ("2026-06-01", 100_000.0),
+            ("2026-06-03", 100_500.0),
+        ],
+    )
+    s = equity_series(conn)
+    assert list(s.index) == ["2026-06-01", "2026-06-02", "2026-06-03"]
+    assert list(s) == [100_000.0, 101_000.0, 100_500.0]
+
+
+def test_portfolio_gate_sharpe_matches_pure_function(conn: sqlite3.Connection) -> None:
+    from trading.backtest.metrics import gate_sharpe
+
+    rows = [
+        ("2026-06-01", 100_000.0),
+        ("2026-06-02", 101_000.0),
+        ("2026-06-03", 100_500.0),
+        ("2026-06-04", 102_000.0),
+        ("2026-06-05", 103_000.0),
+    ]
+    _seed_snapshots(conn, rows)
+    expected = gate_sharpe(pd.Series([r[1] for r in rows]))
+    assert portfolio_gate_sharpe(conn) == pytest.approx(expected)
+
+
+def test_portfolio_gate_sharpe_none_when_insufficient_snapshots(
+    conn: sqlite3.Connection,
+) -> None:
+    _seed_snapshots(conn, [("2026-06-01", 100_000.0)])
+    assert portfolio_gate_sharpe(conn) is None
+
+
+def test_portfolio_gate_sharpe_none_with_no_snapshots(conn: sqlite3.Connection) -> None:
+    assert portfolio_gate_sharpe(conn) is None

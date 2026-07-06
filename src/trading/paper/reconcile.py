@@ -20,6 +20,9 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+import pandas as pd
+
+from trading.backtest.metrics import gate_sharpe
 from trading.costs import buy_side_cost, sell_side_cost
 from trading.paper.funds import total_funds_added
 from trading.paper.ledger import open_trades
@@ -271,6 +274,37 @@ def upsert_portfolio_snapshot(conn: sqlite3.Connection, snap: PortfolioSnapshot)
         """,
         (snap.date, snap.cash, snap.holdings_json, snap.equity, snap.drawdown_pct),
     )
+
+
+# ---------------------------------------------------------------------------
+# Gate Sharpe (F-061) — the go-live metric, read off the live paper equity
+# ---------------------------------------------------------------------------
+
+
+def equity_series(conn: sqlite3.Connection) -> pd.Series:
+    """Full `portfolio_snapshots.equity` history, oldest first.
+
+    Index is the ISO date string (matching the table's primary key); empty
+    when no snapshots exist yet. Pure read — no marks, no derived cash.
+    """
+    rows = conn.execute("SELECT date, equity FROM portfolio_snapshots ORDER BY date").fetchall()
+    return pd.Series(
+        [float(r["equity"]) for r in rows],
+        index=[str(r["date"]) for r in rows],
+        dtype=float,
+    )
+
+
+def portfolio_gate_sharpe(conn: sqlite3.Connection) -> float | None:
+    """Daily-annualised Sharpe of the live paper equity curve (F-061).
+
+    This is the actual go-live-gate metric ("≥3 months OOS Sharpe > 1.0" on
+    daily-annualised returns) — reads `portfolio_snapshots.equity` and
+    delegates to `backtest.metrics.gate_sharpe`, which itself delegates to
+    `metrics.sharpe(..., periods_per_year=252)`. Returns `None` (render as
+    "n/a") when there isn't yet enough snapshot history to measure it.
+    """
+    return gate_sharpe(equity_series(conn))
 
 
 # ---------------------------------------------------------------------------

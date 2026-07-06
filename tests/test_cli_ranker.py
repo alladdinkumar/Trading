@@ -71,13 +71,15 @@ def test_ranker_status_lists_rows(isolated_paths: Paths) -> None:
     assert result.exit_code == 0
     assert "test" in result.output
     assert "1.23" in result.output or "1.2" in result.output
+    # F-061: the pooled per-trade OOS figure must be labelled distinctly from
+    # the daily-annualised go-live gate Sharpe, not printed as a bare "Sharpe".
+    assert "x12" in result.output
+    assert "Gate Sharpe" not in result.output
 
 
 def test_train_ranker_refuses_when_no_parquet(isolated_paths: Paths) -> None:
     runner = CliRunner()
-    result = runner.invoke(
-        app, ["train-ranker", "--start", "2024-01-01", "--end", "2024-06-01"]
-    )
+    result = runner.invoke(app, ["train-ranker", "--start", "2024-01-01", "--end", "2024-06-01"])
     # Empty parquet dir → exit 2 with "no parquet symbols".
     assert result.exit_code == 2
     assert "no parquet symbols" in result.output.lower()

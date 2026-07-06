@@ -159,6 +159,52 @@ def test_run_post_close_apply_closes_time_stop_and_writes_summary(paths) -> None
 
 
 @freeze_time("2026-05-16T16:01:23+05:30")
+def test_run_post_close_apply_gate_sharpe_is_na_with_thin_history(paths) -> None:
+    """F-061: with fewer than 2 daily returns of equity history the go-live
+    gate Sharpe must be None / "n/a" — not a crash, not a misleading 0.0."""
+    paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with get_conn(paths.db_path) as file_conn:
+        run_migrations(file_conn)
+    _write_quotes(paths, date(2026, 5, 16), "1601", [_QUOTE_ROW_RVNL_TIME])
+    result = run_post_close(date(2026, 5, 16), paths=paths, apply=True, initial_capital=100_000.0)
+    assert result.gate_sharpe is None
+    body = result.summary_path.read_text(encoding="utf-8")
+    assert "Gate Sharpe (daily, annualised): n/a" in body
+
+
+@freeze_time("2026-05-20T16:01:23+05:30")
+def test_run_post_close_apply_computes_gate_sharpe_from_full_equity_history(paths) -> None:
+    """F-061: PostCloseResult.gate_sharpe is the daily-annualised Sharpe of the
+    *full* portfolio_snapshots.equity history (matching `portfolio_gate_sharpe`
+    directly), not the per-trade ratios shown elsewhere."""
+    from trading.paper.reconcile import portfolio_gate_sharpe
+
+    paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with get_conn(paths.db_path) as file_conn:
+        run_migrations(file_conn)
+        for d, equity in [
+            ("2026-05-16", 100_000.0),
+            ("2026-05-17", 101_000.0),
+            ("2026-05-18", 100_500.0),
+            ("2026-05-19", 102_000.0),
+        ]:
+            file_conn.execute(
+                "INSERT INTO portfolio_snapshots (date, cash, holdings_json, equity) "
+                "VALUES (?, ?, '{}', ?)",
+                (d, equity, equity),
+            )
+        file_conn.commit()
+    _write_quotes(paths, date(2026, 5, 20), "1601", [_QUOTE_ROW_RVNL_TIME])
+    result = run_post_close(date(2026, 5, 20), paths=paths, apply=True, initial_capital=100_000.0)
+    with get_conn(paths.db_path) as file_conn:
+        expected = portfolio_gate_sharpe(file_conn)
+    assert expected is not None
+    assert result.gate_sharpe == pytest.approx(expected)
+    body = result.summary_path.read_text(encoding="utf-8")
+    assert f"Gate Sharpe (daily, annualised): {expected:.2f}" in body
+
+
+@freeze_time("2026-05-16T16:01:23+05:30")
 def test_run_post_close_apply_aborts_when_quotes_missing(paths) -> None:
     paths.db_path.parent.mkdir(parents=True, exist_ok=True)
     with get_conn(paths.db_path) as file_conn:

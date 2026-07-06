@@ -12,6 +12,7 @@ import contextlib
 from datetime import date
 from pathlib import Path
 
+import pandas as pd
 import pytest
 from streamlit.testing.v1 import AppTest
 
@@ -171,12 +172,23 @@ def test_paper_portfolio_renders_with_seeded_position(empty_project):
     paths = empty_project
     with get_conn(paths.db_path) as conn:
         sig = Signal(
-            id=None, ts="2026-06-01T09:20:00", symbol="ACME", side="LONG",
-            entry=100.0, stop=90.0, target=120.0, horizon_days=15, created_by="auto",
+            id=None,
+            ts="2026-06-01T09:20:00",
+            symbol="ACME",
+            side="LONG",
+            entry=100.0,
+            stop=90.0,
+            target=120.0,
+            horizon_days=15,
+            created_by="auto",
         )
         log_signal_and_open_trade(
-            conn, signal=sig, entry_ts="2026-06-01T09:20:00",
-            entry_price=100.0, qty=10, atr_at_entry=2.0,
+            conn,
+            signal=sig,
+            entry_ts="2026-06-01T09:20:00",
+            entry_price=100.0,
+            qty=10,
+            atr_at_entry=2.0,
         )
         conn.execute(
             "INSERT INTO portfolio_snapshots (date, cash, holdings_json, equity) VALUES (?,?,?,?)",
@@ -230,6 +242,49 @@ def test_paper_journal_renders_metric_tiles(empty_project):
     assert "Profit factor" in labels
 
 
+def test_paper_journal_gate_sharpe_tile_distinct_from_per_trade_and_na_when_thin(
+    empty_project,
+):
+    """F-061: the go-live-gate Sharpe must be its own tile, labelled so it
+    cannot be confused with the per-trade ratio, and must read "n/a" (never
+    a bare 0.0) when there isn't enough equity history to measure it."""
+    at = AppTest.from_file(str(PAGE_JOURNAL), default_timeout=DEFAULT_TIMEOUT).run()
+    assert not at.exception
+    tiles = {m.label: m.value for m in at.metric}
+    assert "Gate Sharpe (daily, annualised)" in tiles
+    assert "Sharpe (per-trade, not annualised)" in tiles
+    assert tiles["Gate Sharpe (daily, annualised)"] == "n/a"
+
+
+def test_paper_journal_gate_sharpe_computed_from_portfolio_snapshots(empty_project):
+    """With enough daily equity history the gate tile shows the daily-
+    annualised Sharpe of `portfolio_snapshots.equity` — the pure `gate_sharpe`
+    function's output, not the per-trade ratio."""
+    from trading.backtest.metrics import gate_sharpe
+
+    paths = empty_project
+    rows = [
+        ("2026-06-01", 100_000.0),
+        ("2026-06-02", 101_000.0),
+        ("2026-06-03", 100_500.0),
+        ("2026-06-04", 102_000.0),
+        ("2026-06-05", 103_000.0),
+    ]
+    with get_conn(paths.db_path) as conn:
+        for d, equity in rows:
+            conn.execute(
+                "INSERT INTO portfolio_snapshots (date, cash, holdings_json, equity) "
+                "VALUES (?, ?, '{}', ?)",
+                (d, equity, equity),
+            )
+        conn.commit()
+    at = AppTest.from_file(str(PAGE_JOURNAL), default_timeout=DEFAULT_TIMEOUT).run()
+    assert not at.exception
+    tiles = {m.label: m.value for m in at.metric}
+    expected = gate_sharpe(pd.Series([r[1] for r in rows]))
+    assert tiles["Gate Sharpe (daily, annualised)"] == f"{expected:.2f}"
+
+
 def test_paper_journal_renders_deviation_columns_for_trades(empty_project):
     """A seeded open + closed trade exercises the Bought/Target/Deviation path."""
     from trading.paper.ledger import close_with_exit, log_signal_and_open_trade
@@ -239,25 +294,51 @@ def test_paper_journal_renders_deviation_columns_for_trades(empty_project):
     with get_conn(paths.db_path) as conn:
         # Open trade — still running.
         open_sig = Signal(
-            id=None, ts="2026-06-01T09:20:00", symbol="ACME", side="LONG",
-            entry=100.0, stop=90.0, target=120.0, horizon_days=5, created_by="auto",
+            id=None,
+            ts="2026-06-01T09:20:00",
+            symbol="ACME",
+            side="LONG",
+            entry=100.0,
+            stop=90.0,
+            target=120.0,
+            horizon_days=5,
+            created_by="auto",
         )
         log_signal_and_open_trade(
-            conn, signal=open_sig, entry_ts="2026-06-01T09:20:00",
-            entry_price=100.0, qty=10, atr_at_entry=2.0,
+            conn,
+            signal=open_sig,
+            entry_ts="2026-06-01T09:20:00",
+            entry_price=100.0,
+            qty=10,
+            atr_at_entry=2.0,
         )
         # Closed trade — exited.
         closed_sig = Signal(
-            id=None, ts="2026-06-01T09:20:00", symbol="BETA", side="LONG",
-            entry=50.0, stop=45.0, target=60.0, horizon_days=5, created_by="auto",
+            id=None,
+            ts="2026-06-01T09:20:00",
+            symbol="BETA",
+            side="LONG",
+            entry=50.0,
+            stop=45.0,
+            target=60.0,
+            horizon_days=5,
+            created_by="auto",
         )
         res = log_signal_and_open_trade(
-            conn, signal=closed_sig, entry_ts="2026-06-01T09:20:00",
-            entry_price=50.0, qty=20, atr_at_entry=1.0,
+            conn,
+            signal=closed_sig,
+            entry_ts="2026-06-01T09:20:00",
+            entry_price=50.0,
+            qty=20,
+            atr_at_entry=1.0,
         )
         close_with_exit(
-            conn, res.paper_trade_id, exit_ts="2026-06-05T15:30:00",
-            exit_price=60.0, exit_reason="TARGET", days_held=4,
+            conn,
+            res.paper_trade_id,
+            exit_ts="2026-06-05T15:30:00",
+            exit_price=60.0,
+            exit_reason="TARGET",
+            days_held=4,
         )
         conn.commit()
     at = AppTest.from_file(str(PAGE_JOURNAL), default_timeout=DEFAULT_TIMEOUT).run()

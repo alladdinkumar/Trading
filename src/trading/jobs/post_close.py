@@ -23,7 +23,12 @@ from trading.data.quotes_snapshot import (
 from trading.jobs.mid_day import _quotes_to_bars, gather_quote_symbols
 from trading.ops.logging_setup import configure_logging
 from trading.paper.mtm import MtmResult, mtm_open_trades
-from trading.paper.reconcile import INITIAL_CAPITAL, ReconcileResult, reconcile_day
+from trading.paper.reconcile import (
+    INITIAL_CAPITAL,
+    ReconcileResult,
+    portfolio_gate_sharpe,
+    reconcile_day,
+)
 from trading.store.db import get_conn
 from trading.store.migrations import run_migrations
 
@@ -51,6 +56,7 @@ class PostCloseResult:
     predictions_matured: int
     equity: float | None
     drawdown_pct: float | None
+    gate_sharpe: float | None
     summary_path: Path | None
     symbols_path: Path | None
     warnings: list[str] = field(default_factory=list)
@@ -96,6 +102,7 @@ def run_post_close(
                 predictions_matured=0,
                 equity=None,
                 drawdown_pct=None,
+                gate_sharpe=None,
                 summary_path=None,
                 symbols_path=symbols_path,
                 warnings=warnings,
@@ -118,11 +125,16 @@ def run_post_close(
             conn, as_of=as_of, bars=bars, initial_capital=initial_capital
         )
 
+        # F-061: the actual go-live-gate metric — daily-annualised Sharpe of the
+        # *full* live paper equity curve, computed fresh after today's snapshot
+        # lands. None ("n/a") until there's enough daily history to measure it.
+        gate_sh = portfolio_gate_sharpe(conn)
+
         summary_dir = p.research_dir / as_of.isoformat()
         summary_dir.mkdir(parents=True, exist_ok=True)
         summary_path = summary_dir / "post_close_summary.md"
         summary_path.write_text(
-            _render_post_close_summary(capture_ts, mtm_results, reconcile_result),
+            _render_post_close_summary(capture_ts, mtm_results, reconcile_result, gate_sh),
             encoding="utf-8",
         )
 
@@ -137,6 +149,7 @@ def run_post_close(
             predictions_matured=len(reconcile_result.prediction_updates),
             equity=reconcile_result.snapshot.equity,
             drawdown_pct=reconcile_result.snapshot.drawdown_pct,
+            gate_sharpe=gate_sh,
             summary_path=summary_path,
             symbols_path=None,
             warnings=warnings,
@@ -147,6 +160,7 @@ def _render_post_close_summary(
     capture_ts: datetime,
     mtm_results: list[MtmResult],
     reconcile_result: ReconcileResult,
+    gate_sharpe: float | None,
 ) -> str:
     closed = [r for r in mtm_results if r.action.startswith("EXIT_")]
     held = [r for r in mtm_results if r.action == "HOLD"]
@@ -166,12 +180,11 @@ def _render_post_close_summary(
         ep = f"{r.exit_price:.2f}" if r.exit_price is not None else "—"
         ns = f"{r.new_stop:.2f}" if r.new_stop is not None else "—"
         tk = _fmt_track(r)
-        lines.append(
-            f"| {r.symbol} | {r.action} | {ep} | {r.reason or '—'} | {ns} | {tk} |"
-        )
+        lines.append(f"| {r.symbol} | {r.action} | {ep} | {r.reason or '—'} | {ns} | {tk} |")
 
     open_positions = sum(1 for r in mtm_results if r.action == "HOLD")
     drawdown = f"{snap.drawdown_pct:+.2f}%" if snap.drawdown_pct is not None else "—"
+    gate_sharpe_txt = f"{gate_sharpe:.2f}" if gate_sharpe is not None else "n/a"
     lines.extend(
         [
             "",
@@ -181,6 +194,8 @@ def _render_post_close_summary(
             f"- cash: ₹{snap.cash:,.0f}",
             f"- drawdown from peak: {drawdown}",
             f"- open positions: {open_positions}",
+            f"- Gate Sharpe (daily, annualised): {gate_sharpe_txt}"
+            " — the go-live-gate metric (≥3mo, >1.0)",
             "",
             f"### Matured predictions ({len(updates)})",
             "",

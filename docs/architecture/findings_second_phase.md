@@ -445,7 +445,7 @@ Any non-2xx or network hiccup (rotated/revoked hook, rate-limit, transient DNS) 
 
 ---
 
-### F-061 — Three inconsistent "Sharpe" definitions; the daily-annualised gate Sharpe is never computed on the live paper equity (`INACC`, Med, backtest/ui) — Open
+### F-061 — Three inconsistent "Sharpe" definitions; the daily-annualised gate Sharpe is never computed on the live paper equity (`INACC`, Med, backtest/ui) — ✅ Fixed 2026-07-03
 
 **Where**
 - Ranker/factor: `src/trading/ranking/ranker_train.py:212,292,315` and `backtest/factor_eval.py:106` call `metrics.sharpe(..., periods_per_year=12)` on **per-trade** returns → stored as `RegistryRow.oos_sharpe`, printed "OOS Sharpe (pooled)".

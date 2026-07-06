@@ -18,6 +18,7 @@ from trading.backtest.metrics import (
     avg_r_multiple,
     cagr,
     expectancy,
+    gate_sharpe,
     hit_rate,
     max_drawdown,
     profit_factor,
@@ -93,6 +94,52 @@ def test_sortino_no_losses_returns_zero() -> None:
     """No negative bars → can't compute downside stdev with ddof=1; return 0."""
     returns = pd.Series([0.01, 0.02, 0.005])
     assert sortino(returns) == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Gate Sharpe (F-061) — daily-annualised Sharpe of an equity curve
+# ---------------------------------------------------------------------------
+
+
+def test_gate_sharpe_known_value() -> None:
+    """Equity curve → daily pct-change returns → mean/std × √252 via `sharpe()`."""
+    dates = pd.date_range("2024-01-01", periods=5, freq="D")
+    equity = pd.Series([100_000.0, 101_000.0, 100_500.0, 102_000.0, 103_000.0], index=dates)
+    returns = equity.pct_change().dropna()
+    expected = float(returns.mean() / returns.std(ddof=1) * math.sqrt(252))
+    assert gate_sharpe(equity) == pytest.approx(expected)
+
+
+def test_gate_sharpe_matches_sharpe_on_same_returns() -> None:
+    """Must delegate to `sharpe(..., periods_per_year=252)`, not re-derive it."""
+    dates = pd.date_range("2024-01-01", periods=6, freq="D")
+    equity = pd.Series([50_000.0, 50_500.0, 50_100.0, 51_000.0, 50_800.0, 51_500.0], index=dates)
+    returns = equity.pct_change().dropna()
+    assert gate_sharpe(equity) == pytest.approx(sharpe(returns, periods_per_year=252))
+
+
+def test_gate_sharpe_empty_series_is_none() -> None:
+    assert gate_sharpe(pd.Series(dtype=float)) is None
+
+
+def test_gate_sharpe_single_point_is_none() -> None:
+    dates = pd.date_range("2024-01-01", periods=1, freq="D")
+    assert gate_sharpe(pd.Series([100_000.0], index=dates)) is None
+
+
+def test_gate_sharpe_two_points_one_return_is_none() -> None:
+    """One daily return can't produce a stdev — n/a, not a crash or a 0.0."""
+    dates = pd.date_range("2024-01-01", periods=2, freq="D")
+    equity = pd.Series([100_000.0, 101_000.0], index=dates)
+    assert gate_sharpe(equity) is None
+
+
+def test_gate_sharpe_zero_variance_is_none_not_zero() -> None:
+    """Flat equity curve → constant (zero) daily returns → n/a, never a
+    measured-looking 0.0 (F-061 guard rail)."""
+    dates = pd.date_range("2024-01-01", periods=5, freq="D")
+    equity = pd.Series([100_000.0] * 5, index=dates)
+    assert gate_sharpe(equity) is None
 
 
 # ---------------------------------------------------------------------------

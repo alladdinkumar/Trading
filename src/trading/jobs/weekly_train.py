@@ -20,9 +20,9 @@ from loguru import logger
 from trading.backtest.metrics import (
     avg_r_multiple,
     expectancy,
+    gate_sharpe,
     hit_rate,
     profit_factor,
-    sharpe,
 )
 from trading.clock import today_ist
 from trading.config import Paths, get_paths
@@ -68,6 +68,7 @@ def walkforward_start(window_end: date) -> date:
     gracefully by `_build_xy_for_window`.
     """
     return (pd.Timestamp(window_end) - pd.DateOffset(years=WF_LOOKBACK_YEARS)).date()
+
 
 _NO_DATA = "_(no data)_"
 
@@ -346,9 +347,13 @@ def render_weekly_review(data: ReviewData, retrain: RetrainOutcome) -> str:
             _stats_row("Week", data.closed_week),
             _stats_row("All time", data.closed_all),
         ]
-        if len(data.equity) >= 3:
-            eq_sharpe = sharpe(data.equity.pct_change().dropna())
-            lines += ["", f"Cumulative Sharpe (portfolio snapshots): {eq_sharpe:.2f}"]
+        # F-061: the daily-annualised go-live-gate Sharpe, delegated to the one
+        # pure function (`backtest.metrics.gate_sharpe`) so this never re-derives
+        # the math or diverges from the Journal / post-close surfaces. Omitted
+        # (not printed as 0.0) when there isn't yet enough equity history.
+        gs = gate_sharpe(data.equity)
+        if gs is not None:
+            lines += ["", f"Gate Sharpe (daily, annualised): {gs:.2f}"]
     else:
         lines.append(_NO_DATA)
 
@@ -406,8 +411,7 @@ def render_weekly_review(data: ReviewData, retrain: RetrainOutcome) -> str:
             f"Ranker {'USABLE' if retrain.usable else 'NOT usable'}: pooled OOS "
             f"Sharpe {retrain.pooled_sharpe:.2f} over N={retrain.n_oos} — "
             f"{'promoting' if retrain.promoted else 'staying silent'}."
-            if retrain.pooled_sharpe is not None
-            and not math.isnan(retrain.pooled_sharpe)
+            if retrain.pooled_sharpe is not None and not math.isnan(retrain.pooled_sharpe)
             else "Ranker: pooled OOS stat unavailable — staying silent."
         )
         lines += [
@@ -554,8 +558,7 @@ def _slack_body(data: ReviewData, retrain: RetrainOutcome) -> str:
         lines.append(
             f"Ranker {'usable' if retrain.usable else 'NOT usable'} "
             f"(pooled Sharpe {retrain.pooled_sharpe:.2f}, N={retrain.n_oos})"
-            if retrain.pooled_sharpe is not None
-            and not math.isnan(retrain.pooled_sharpe)
+            if retrain.pooled_sharpe is not None and not math.isnan(retrain.pooled_sharpe)
             else "Ranker: pooled stat unavailable — silent"
         )
     else:

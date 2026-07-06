@@ -290,6 +290,52 @@ def test_render_review_empty_placeholders() -> None:
     assert "Trained: no — skip_train requested" in text
 
 
+def test_render_review_gate_sharpe_relabeled_and_reuses_pure_function() -> None:
+    """F-061: weekly_train must not re-derive the Sharpe math inline — it
+    delegates to `backtest.metrics.gate_sharpe` and labels the line so it
+    can't be confused with the per-trade / ×12 figures shown elsewhere."""
+    from trading.backtest.metrics import gate_sharpe
+    from trading.jobs.weekly_train import (
+        ClosedTrade,
+        RetrainOutcome,
+        ReviewData,
+        render_weekly_review,
+    )
+
+    trade = ClosedTrade(
+        symbol="RVNL",
+        ts_entry="2026-06-08T09:15:00",
+        ts_exit="2026-06-12T15:30:00",
+        entry_price=100.0,
+        exit_price=106.0,
+        qty=10,
+        exit_reason="TARGET",
+        days_held=4,
+        net_pnl=60.0,
+        gross_pnl=60.0,
+        initial_stop=95.0,
+        pnl_pct=6.0,
+    )
+    dates = pd.date_range("2026-06-01", periods=5, freq="D")
+    equity = pd.Series([100_000.0, 101_000.0, 100_500.0, 102_000.0, 103_000.0], index=dates)
+    data = ReviewData(
+        week_start=date(2026, 6, 7),
+        as_of=AS_OF,
+        closed_week=[trade],
+        closed_all=[trade],
+        open_trades=[],
+        equity=equity,
+        calibration=[],
+    )
+    text = render_weekly_review(
+        data, RetrainOutcome(False, "skip_train requested", None, None, False, None)
+    )
+    expected = gate_sharpe(equity)
+    assert expected is not None
+    assert f"Gate Sharpe (daily, annualised): {expected:.2f}" in text
+    assert "Cumulative Sharpe" not in text
+
+
 def test_render_review_seeded_snapshot(snapshot) -> None:
     from trading.jobs.weekly_train import (
         RetrainOutcome,
@@ -486,22 +532,29 @@ def test_first_usable_verdict_records_but_does_not_promote(paths, monkeypatch) -
     from trading.store.repo import latest_ranker_eval
 
     monkeypatch.setattr(
-        wt, "load_training_inputs",
+        wt,
+        "load_training_inputs",
         lambda p, c: TrainingInputs(
             enriched={"RVNL": pd.DataFrame({"close": [1.0]})},
-            macro_history=pd.DataFrame(), sentiment_lookup={},
+            macro_history=pd.DataFrame(),
+            sentiment_lookup={},
             negative_news_lookup={},
         ),
     )
     usable_stub = TrainResult(
-        folds=(), final_model=lgb.LGBMClassifier(),
+        folds=(),
+        final_model=lgb.LGBMClassifier(),
         final_train_start=pd.Timestamp("2023-06-14"),
         final_train_end=pd.Timestamp("2026-06-14"),
         n_final_examples=42,
-        oos_sharpe_mean=float("nan"), oos_hit_rate_mean=float("nan"),
+        oos_sharpe_mean=float("nan"),
+        oos_hit_rate_mean=float("nan"),
         feature_names=FEATURE_NAMES,
-        oos_sharpe_pooled=1.5, oos_hit_pooled=0.55,
-        n_oos_total=60, n_folds_positive=4, n_folds_total=6,
+        oos_sharpe_pooled=1.5,
+        oos_hit_pooled=0.55,
+        n_oos_total=60,
+        n_folds_positive=4,
+        n_folds_total=6,
     )
     monkeypatch.setattr(wt, "train_walkforward", lambda **_kw: usable_stub)
 
@@ -511,7 +564,7 @@ def test_first_usable_verdict_records_but_does_not_promote(paths, monkeypatch) -
         run_migrations(conn)
         out = wt._step_retrain(paths, conn, date(2026, 6, 21), skip_train=False)
         assert out.usable is True
-        assert out.promoted is False          # first usable -> records, no promote
+        assert out.promoted is False  # first usable -> records, no promote
         latest = latest_ranker_eval(conn)
         assert latest is not None
         assert latest.as_of == "2026-06-21"
@@ -529,10 +582,12 @@ def test_two_consecutive_usable_verdicts_promote(paths, monkeypatch) -> None:
     from trading.store.db import get_conn
 
     monkeypatch.setattr(
-        wt, "load_training_inputs",
+        wt,
+        "load_training_inputs",
         lambda p, c: TrainingInputs(
             enriched={"RVNL": pd.DataFrame({"close": [1.0]})},
-            macro_history=pd.DataFrame(), sentiment_lookup={},
+            macro_history=pd.DataFrame(),
+            sentiment_lookup={},
             negative_news_lookup={},
         ),
     )
@@ -540,14 +595,22 @@ def test_two_consecutive_usable_verdicts_promote(paths, monkeypatch) -> None:
     def _usable(end: pd.Timestamp) -> TrainResult:
         m = lgb.LGBMClassifier()
         import numpy as np
+
         m.fit(np.array([[0.0], [1.0]]), np.array([0, 1]))
         return TrainResult(
-            folds=(), final_model=m,
-            final_train_start=pd.Timestamp("2023-06-14"), final_train_end=end,
-            n_final_examples=42, oos_sharpe_mean=float("nan"),
-            oos_hit_rate_mean=float("nan"), feature_names=FEATURE_NAMES,
-            oos_sharpe_pooled=1.5, oos_hit_pooled=0.55,
-            n_oos_total=60, n_folds_positive=4, n_folds_total=6,
+            folds=(),
+            final_model=m,
+            final_train_start=pd.Timestamp("2023-06-14"),
+            final_train_end=end,
+            n_final_examples=42,
+            oos_sharpe_mean=float("nan"),
+            oos_hit_rate_mean=float("nan"),
+            feature_names=FEATURE_NAMES,
+            oos_sharpe_pooled=1.5,
+            oos_hit_pooled=0.55,
+            n_oos_total=60,
+            n_folds_positive=4,
+            n_folds_total=6,
         )
 
     paths.models_dir.mkdir(parents=True, exist_ok=True)
@@ -555,15 +618,17 @@ def test_two_consecutive_usable_verdicts_promote(paths, monkeypatch) -> None:
     with get_conn(paths.db_path) as conn:
         run_migrations(conn)
         monkeypatch.setattr(
-            wt, "train_walkforward",
+            wt,
+            "train_walkforward",
             lambda **_kw: _usable(pd.Timestamp("2026-06-21")),
         )
         out1 = wt._step_retrain(paths, conn, date(2026, 6, 21), skip_train=False)
         assert out1.promoted is False
         monkeypatch.setattr(
-            wt, "train_walkforward",
+            wt,
+            "train_walkforward",
             lambda **_kw: _usable(pd.Timestamp("2026-06-28")),
         )
         out2 = wt._step_retrain(paths, conn, date(2026, 6, 28), skip_train=False)
         assert out2.usable is True
-        assert out2.promoted is True          # 2 consecutive -> promote
+        assert out2.promoted is True  # 2 consecutive -> promote

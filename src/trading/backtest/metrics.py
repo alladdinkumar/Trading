@@ -83,6 +83,31 @@ def sharpe(returns: pd.Series, periods_per_year: int = TRADING_DAYS_PER_YEAR) ->
     return (mean / std) * math.sqrt(periods_per_year)
 
 
+def gate_sharpe(equity: pd.Series) -> float | None:
+    """Daily-annualised Sharpe of an equity curve — the go-live gate metric (F-061).
+
+    The go-live bar ("≥3 months OOS Sharpe > 1.0") is defined on daily-annualised
+    returns. This is the *only* function that measures it: convert `equity`
+    (indexed by date, values = account value, e.g. `portfolio_snapshots.equity`)
+    to daily pct-change returns and delegate to `sharpe(..., periods_per_year=
+    TRADING_DAYS_PER_YEAR)` — it does not re-derive the Sharpe math.
+
+    Unlike `sharpe()`, which returns 0.0 for zero-variance/empty input (a
+    genuinely-measured flat Sharpe), this returns `None` when there isn't
+    enough data to measure anything at all: fewer than 2 daily returns, or a
+    return series with ~zero variance. Callers must render that as "n/a", not
+    as a 0.0 that looks like a measurement.
+    """
+    if len(equity) < 2:
+        return None
+    returns = equity.pct_change().dropna()
+    if len(returns) < 2:
+        return None
+    if float(returns.std(ddof=1)) < 1e-12:
+        return None
+    return sharpe(returns, periods_per_year=TRADING_DAYS_PER_YEAR)
+
+
 def sortino(returns: pd.Series, periods_per_year: int = TRADING_DAYS_PER_YEAR) -> float:
     """Annualised Sortino — downside-stdev denominator."""
     if len(returns) == 0:
