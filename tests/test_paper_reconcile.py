@@ -12,6 +12,7 @@ import pytest
 from trading.paper.ledger import (
     buy_side_cost,
     close_with_exit,
+    compute_trade_pnl,
     log_signal_and_open_trade,
     sell_side_cost,
 )
@@ -25,7 +26,7 @@ from trading.paper.reconcile import (
     upsert_portfolio_snapshot,
 )
 from trading.store.migrations import run_migrations
-from trading.store.repo import Signal, list_predictions_by_symbol
+from trading.store.repo import Signal, list_predictions_by_symbol, matured_score_outcomes
 from trading.strategy.exits import Bar
 
 
@@ -38,7 +39,9 @@ def conn() -> sqlite3.Connection:
     return c
 
 
-def _signal(symbol: str = "X", entry: float = 100.0, horizon: int = 15) -> Signal:
+def _signal(
+    symbol: str = "X", entry: float = 100.0, horizon: int = 15, ml_score: float | None = None
+) -> Signal:
     return Signal(
         id=None,
         ts="2026-05-01T09:15:00",
@@ -49,6 +52,7 @@ def _signal(symbol: str = "X", entry: float = 100.0, horizon: int = 15) -> Signa
         target=entry * 1.2,
         horizon_days=horizon,
         created_by="auto",
+        ml_score=ml_score,
     )
 
 
@@ -138,18 +142,56 @@ def test_matured_predictions_from_closed_trade(conn: sqlite3.Connection) -> None
     updates = evaluate_matured_predictions(conn, as_of=date(2026, 5, 11), bars={})
     assert len(updates) == 1
     u = updates[0]
-    # Actual = (115 - 100) / 100 = +15%; predicted = +20% (from signal.target)
-    assert u.actual_return_pct == pytest.approx(15.0)
+    # F-051: actual must be net of round-trip costs (same yardstick as the
+    # ledger's pnl_pct), not the gross (115-100)/100 = +15% price move.
+    _, expected_net_pct = compute_trade_pnl(entry_price=100, exit_price=115, qty=10)
+    assert u.actual_return_pct == pytest.approx(expected_net_pct)
+    assert u.actual_return_pct < 15.0  # net must be below the gross figure
     assert u.predicted_return_pct == pytest.approx(20.0)
-    assert u.error_pct == pytest.approx(-5.0)
+    assert u.error_pct == pytest.approx(expected_net_pct - 20.0)
 
     pred = list_predictions_by_symbol(conn, "X")[0]
-    assert pred.actual_return_at_horizon == pytest.approx(15.0)
+    assert pred.actual_return_at_horizon == pytest.approx(expected_net_pct)
     assert pred.evaluated_at is not None
 
 
+def test_matured_predictions_win_label_flips_net_of_costs(conn: sqlite3.Connection) -> None:
+    """F-051: a small gross gain that costs eat through must be a net loss.
+
+    entry=100, exit=100.3 is +0.3% gross (a 'win' under the old gross rule)
+    but round-trip costs (~0.4-0.5%) push the net return negative — the
+    matured actual (and hence the calibration 'won' label) must reflect that.
+    """
+    res = log_signal_and_open_trade(
+        conn,
+        signal=_signal(entry=100, ml_score=0.7),
+        entry_ts="2026-05-01T09:20:00",
+        entry_price=100,
+        qty=100,
+        atr_at_entry=2.0,
+    )
+    close_with_exit(
+        conn,
+        res.paper_trade_id,
+        exit_ts="2026-05-10T15:30:00",
+        exit_price=100.3,
+        exit_reason="TIME",
+        days_held=9,
+    )
+    updates = evaluate_matured_predictions(conn, as_of=date(2026, 5, 11), bars={})
+    assert len(updates) == 1
+    assert updates[0].actual_return_pct < 0.0  # net loss despite +0.3% gross
+
+    pred = list_predictions_by_symbol(conn, "X")[0]
+    assert pred.actual_return_at_horizon is not None
+    assert pred.actual_return_at_horizon < 0.0
+
+    won = matured_score_outcomes(conn)
+    assert won == [(pytest.approx(0.7), False)]
+
+
 def test_matured_predictions_bar_path_when_trade_still_open(conn: sqlite3.Connection) -> None:
-    """Horizon elapsed but trade still open → use bar.close vs entry."""
+    """Horizon elapsed but trade still open → use bar.close vs entry, net of costs."""
     log_signal_and_open_trade(
         conn,
         signal=_signal(entry=100, horizon=5),
@@ -165,7 +207,9 @@ def test_matured_predictions_bar_path_when_trade_still_open(conn: sqlite3.Connec
         bars=bars,
     )
     assert len(updates) == 1
-    assert updates[0].actual_return_pct == pytest.approx(10.0)
+    _, expected_net_pct = compute_trade_pnl(entry_price=100, exit_price=110, qty=10)
+    assert updates[0].actual_return_pct == pytest.approx(expected_net_pct)
+    assert updates[0].actual_return_pct < 10.0  # net must be below the gross figure
 
 
 def test_matured_predictions_skips_unmatured(conn: sqlite3.Connection) -> None:

@@ -360,7 +360,10 @@ def matured_score_outcomes(conn: sqlite3.Connection) -> list[tuple[float, bool]]
     """`(ml_score, won)` pairs for every matured, ml-scored prediction (F-041).
 
     Feeds `strategy.calibration.build_score_calibration` so the planner can
-    correct `p_win` with realised win-rate. `won` is `actual_return_at_horizon > 0`.
+    correct `p_win` with realised win-rate. `won` is `actual_return_at_horizon > 0`;
+    since F-051, `actual_return_at_horizon` is itself net of round-trip costs
+    (`paper.reconcile.evaluate_matured_predictions` writes `compute_trade_pnl`'s
+    `pnl_pct`), so `won` here already means *net*-positive, not gross-positive.
     """
     rows = conn.execute(
         "SELECT ml_score, actual_return_at_horizon FROM predictions "

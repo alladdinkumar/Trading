@@ -25,7 +25,7 @@ import pandas as pd
 from trading.backtest.metrics import gate_sharpe
 from trading.costs import buy_side_cost, sell_side_cost
 from trading.paper.funds import total_funds_added
-from trading.paper.ledger import open_trades
+from trading.paper.ledger import compute_trade_pnl, open_trades
 from trading.strategy.exits import Bar
 
 # Starting paper capital. The *live* cash balance is not this constant — it is
@@ -76,6 +76,13 @@ def evaluate_matured_predictions(
     For the bar-based path we use `bars[symbol].close` as the realised
     price at horizon. Predictions with no bar in `bars` and no closed
     trade are left untouched for the next day's reconcile.
+
+    `actual_pct` is net of round-trip costs (F-051): it is `compute_trade_pnl`'s
+    `pnl_pct`, the same costed yardstick the paper ledger uses for realised P&L,
+    rather than the raw price return. This keeps the calibration "won" label
+    (`matured_score_outcomes`, `actual_return_at_horizon > 0`) and the weekly
+    review hit-rate honest — a gross +0.3% move that round-trip costs
+    (~0.4-0.5%) turn into a net loss is no longer counted as a win.
     """
     rows = conn.execute(
         """SELECT id, ts, symbol, predicted_return_pct, predicted_horizon_days
@@ -94,7 +101,7 @@ def evaluate_matured_predictions(
         # Predictions are emitted at trade-open so signals.ts == predictions.ts
         # for auto-logged signals.
         trade_row = conn.execute(
-            """SELECT pt.entry_price, pt.exit_price, pt.ts_exit
+            """SELECT pt.entry_price, pt.exit_price, pt.qty, pt.ts_exit
                FROM paper_trades pt
                JOIN signals s ON s.id = pt.signal_id
                WHERE s.symbol = ? AND pt.ts_entry = ?
@@ -104,12 +111,12 @@ def evaluate_matured_predictions(
 
         actual_pct: float | None = None
         if trade_row and trade_row["exit_price"] is not None:
-            actual_pct = (
-                (trade_row["exit_price"] - trade_row["entry_price"])
-                / trade_row["entry_price"]
-                * 100.0
-                if trade_row["entry_price"] > 0
-                else 0.0
+            # F-051: net of round-trip costs, same yardstick as the ledger's
+            # realised pnl_pct — not the raw (exit-entry)/entry price move.
+            _, actual_pct = compute_trade_pnl(
+                entry_price=trade_row["entry_price"],
+                exit_price=trade_row["exit_price"],
+                qty=trade_row["qty"],
             )
         elif as_of >= horizon_end and r["symbol"] in bars:
             bar = bars[r["symbol"]]
@@ -117,7 +124,11 @@ def evaluate_matured_predictions(
                 entry = trade_row["entry_price"]
             else:
                 continue  # no entry price to compare against
-            actual_pct = (bar.close - entry) / entry * 100.0
+            # F-051: net of round-trip costs (same yardstick as a closed trade),
+            # using bar.close as the synthetic exit price at horizon.
+            _, actual_pct = compute_trade_pnl(
+                entry_price=entry, exit_price=bar.close, qty=trade_row["qty"]
+            )
         else:
             continue  # not yet matured
 

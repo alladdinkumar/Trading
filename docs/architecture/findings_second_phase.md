@@ -200,7 +200,7 @@ and assert the above-SMA-by->tol cases now fail.
 
 ---
 
-### F-051 — Prediction "actual return" and win labelling are gross of costs (`GAP`, Med, paper/reconcile) — Open · confidence: Likely
+### F-051 — Prediction "actual return" and win labelling are gross of costs (`GAP`, Med, paper/reconcile) — ✅ Fixed 2026-07-03
 
 **Where** `src/trading/paper/reconcile.py:102-117` (`evaluate_matured_predictions`);
 interacts with the calibration consumer in `strategy/calibration.py` +
