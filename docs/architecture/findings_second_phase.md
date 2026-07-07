@@ -478,7 +478,7 @@ From ~09:00 IST every trading day, `trading status` prints `iep 0/2 ❌` and exi
 
 ---
 
-### F-063 — `read_macro_cross` has no freshness check, so a stale cross-file can gap-fill today's VIX (`GAP`, Low, data/macro_cross) — Open
+### F-063 — `read_macro_cross` has no freshness check, so a stale cross-file can gap-fill today's VIX (`GAP`, Low, data/macro_cross) — ✅ Fixed 2026-07-03
 
 **Where** `src/trading/data/macro_cross.py:38-46` (`read_macro_cross` validates shape only, takes no `as_of`); callers `cli.py` `macro_refresh_cmd`/`macro_verify_cmd` add no date check. Contrast `kite_snapshot._validate_meta`, which raises `KiteSnapshotStaleError` on a date mismatch.
 

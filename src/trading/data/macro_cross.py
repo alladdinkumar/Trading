@@ -19,9 +19,19 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from trading.data.snapshot_schema import validate_row
+
+
+class MacroCrossStaleError(RuntimeError):
+    """Raised when a cross-file's `captured_at` date ≠ the refresh date (F-063).
+
+    Mirrors `KiteSnapshotStaleError`: a stale/off-date cross-file must never
+    gap-fill or verify against today's snapshot, or a days-old VIX/USDINR could
+    silently drive today's regime multiplier.
+    """
 
 
 @dataclass(frozen=True)
@@ -35,12 +45,24 @@ class MacroCrossSource:
     usdinr: float | None = None
 
 
-def read_macro_cross(path: Path) -> MacroCrossSource:
+def read_macro_cross(path: Path, *, as_of: date | None = None) -> MacroCrossSource:
     """Parse + validate a `macro_cross_HHMM.json` file → `MacroCrossSource`.
 
     Raises `SnapshotSchemaError` (with the path and offending field) on malformed
     JSON, a non-object payload, a missing required field, or a wrong-typed figure.
+
+    When `as_of` is given, also raises `MacroCrossStaleError` if the file's
+    `captured_at` date doesn't match it — the freshness half of the F-002
+    boundary that the broker/quote snapshots already enforce (F-063).
     """
     raw = json.loads(path.read_text(encoding="utf-8"))
     cross: MacroCrossSource = validate_row(MacroCrossSource, raw, source=str(path))
+    if as_of is not None:
+        captured_date = cross.captured_at[:10]
+        if captured_date != as_of.isoformat():
+            raise MacroCrossStaleError(
+                f"Cross-source file at {path} was captured {captured_date}, "
+                f"requested {as_of.isoformat()}. Re-run /macro-doctor to refresh "
+                "it before gap-filling or verifying today's snapshot."
+            )
     return cross

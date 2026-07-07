@@ -864,7 +864,7 @@ def macro_refresh_cmd(
 
     recon_rows: list[ReconRow] = []
     if cross is not None:
-        cross_src = read_macro_cross(cross)
+        cross_src = read_macro_cross(cross, as_of=target_date)
         checked_at = datetime.now().isoformat(timespec="seconds")
         filled: dict[str, float] = {}
         for field_name, primary_source in _CROSS_FIELDS:
@@ -915,7 +915,7 @@ def macro_verify_cmd(
     the daily flow / `/macro-doctor` skill can react.
     """
     paths = get_paths()
-    cross_src = read_macro_cross(cross)
+    cross_src = read_macro_cross(cross, as_of=date.fromisoformat(date_str))
     checked_at = datetime.now().isoformat(timespec="seconds")
 
     with get_conn(paths.db_path) as conn:
