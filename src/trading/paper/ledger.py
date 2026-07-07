@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from trading.costs import buy_side_cost, sell_side_cost
 from trading.store.repo import (
@@ -179,15 +179,9 @@ def open_trades(conn: sqlite3.Connection) -> list[PaperTrade]:
     return list_open_paper_trades(conn)
 
 
-def days_between(entry_ts: str, exit_ts: datetime | str) -> int:
-    """Trading-day-agnostic day count between two ISO timestamps.
-
-    Used by MTM to compute `days_held` at close. We use calendar days
-    instead of trading days because the time-stop branch in
-    `strategy.exits` is defined in trading days at the caller; this
-    helper only matters for the closed-trade summary stat.
-    """
-    entry_dt = datetime.fromisoformat(entry_ts)
-    exit_dt = exit_ts if isinstance(exit_ts, datetime) else datetime.fromisoformat(exit_ts)
-    delta: timedelta = exit_dt - entry_dt
-    return max(0, delta.days)
+# NOTE (F-053): a calendar-day `days_between` helper used to live here. It was
+# removed as dead code — the canonical "days held" count is `mtm._days_held`
+# (numpy business days), which backs the persisted `days_held` and the 25-day
+# time stop (the F-024 fix). Do not reintroduce a calendar-day day-count under a
+# "days held" name here: calendar days over-count trading days and once made the
+# time stop fire at ~12 calendar days.

@@ -11,7 +11,6 @@ from trading.paper.ledger import (
     buy_side_cost,
     close_with_exit,
     compute_trade_pnl,
-    days_between,
     log_signal_and_open_trade,
     open_trades,
     sell_side_cost,
@@ -156,11 +155,17 @@ def test_compute_trade_pnl_zero_entry_returns_zero_pct() -> None:
     assert pct == 0.0
 
 
-def test_days_between_basic() -> None:
-    assert days_between("2026-05-01T09:15:00", "2026-05-15T15:30:00") == 14
-    assert days_between("2026-05-15T09:15:00", "2026-05-15T15:30:00") == 0
-    # Past dates clamp to 0
-    assert days_between("2026-05-20T09:15:00", "2026-05-15T09:15:00") == 0
+def test_days_between_helper_removed() -> None:
+    """F-053: the dead calendar-day `days_between` helper must stay gone.
+
+    It once shadowed the canonical trading-day count (`mtm._days_held`, numpy
+    business days). Re-adding a calendar-day "days held" helper here would risk
+    silently reinstating the F-024 double-count that fired the 25-day time stop
+    at ~12 calendar days. Guardrail against reintroduction.
+    """
+    import trading.paper.ledger as ledger_mod
+
+    assert not hasattr(ledger_mod, "days_between")
 
 
 # ---------------------------------------------------------------------------

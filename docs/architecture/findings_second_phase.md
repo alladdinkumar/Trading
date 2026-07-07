@@ -267,7 +267,7 @@ prior mark exists, mark at entry and flag the row estimated.
 
 ---
 
-### F-053 — Dead `days_between` calendar-day helper can silently reintroduce F-024 (`DEBT`, Low, paper/ledger) — Open
+### F-053 — Dead `days_between` calendar-day helper can silently reintroduce F-024 (`DEBT`, Low, paper/ledger) — ✅ Fixed 2026-07-03
 
 **Where** `src/trading/paper/ledger.py:182-193` (`days_between`).
 
