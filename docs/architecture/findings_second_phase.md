@@ -229,7 +229,7 @@ exactly how "won" is derived before sizing the fix (hence "Likely", not
 
 ---
 
-### F-052 — MTM marks a missing-quote symbol at entry price, overstating losers (`GAP`, Low, paper/reconcile) — Open
+### F-052 — MTM marks a missing-quote symbol at entry price, overstating losers (`GAP`, Low, paper/reconcile) — ✅ Fixed 2026-07-03
 
 **Where** `src/trading/paper/reconcile.py:232` (`compute_portfolio_snapshot`);
 analogous fallback in `backtest/engine.py:362-363` (`_mark_to_market`).

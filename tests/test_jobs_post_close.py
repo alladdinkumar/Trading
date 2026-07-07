@@ -159,6 +159,25 @@ def test_run_post_close_apply_closes_time_stop_and_writes_summary(paths) -> None
 
 
 @freeze_time("2026-05-16T16:01:23+05:30")
+def test_run_post_close_apply_surfaces_missing_quote_mark_warning(paths) -> None:
+    """F-052: a held symbol with no quote is marked without a fresh price, and
+    that must not be silent — the summary and PostCloseResult must name it."""
+    paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    with get_conn(paths.db_path) as file_conn:
+        run_migrations(file_conn)
+        _seed_open_trade_at_time_stop(file_conn)  # opens RVNL, still open
+    # Quotes cover an unrelated symbol only → RVNL has no bar today.
+    other = {**_QUOTE_ROW_RVNL_TIME, "tradingsymbol": "OTHER", "instrument_token": 999}
+    _write_quotes(paths, date(2026, 5, 16), "1601", [other])
+    result = run_post_close(date(2026, 5, 16), paths=paths, apply=True, initial_capital=100_000.0)
+
+    assert any("RVNL" in w for w in result.warnings)
+    body = result.summary_path.read_text(encoding="utf-8")
+    assert "Mark warnings" in body
+    assert "RVNL" in body
+
+
+@freeze_time("2026-05-16T16:01:23+05:30")
 def test_run_post_close_apply_gate_sharpe_is_na_with_thin_history(paths) -> None:
     """F-061: with fewer than 2 daily returns of equity history the go-live
     gate Sharpe must be None / "n/a" — not a crash, not a misleading 0.0."""

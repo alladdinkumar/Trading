@@ -338,6 +338,44 @@ def test_snapshot_falls_back_to_entry_price_when_bar_missing(conn: sqlite3.Conne
     # entry_price * qty = 1000 → equity = 50_000 minus the buy-side cost only.
     assert snap.cash == pytest.approx(49_000 - buy_side_cost(1000))
     assert snap.equity == pytest.approx(50_000 - buy_side_cost(1000))
+    # F-052: no bar and no prior mark → mark at entry, but flag it (estimated).
+    assert any("A" in w for w in snap.warnings)
+    assert any("entry" in w.lower() for w in snap.warnings)
+
+
+def test_snapshot_marks_missing_symbol_at_prior_close_with_warning(
+    conn: sqlite3.Connection,
+) -> None:
+    """F-052: a missing quote marks at the prior snapshot's close, not entry.
+
+    A winner up 10% intraday whose quote is absent at post-close must not be
+    snapped back to break-even (entry price) — that silently understates the
+    persisted equity/drawdown series the gate Sharpe reads back. Fall back to
+    yesterday's per-share mark and emit a visible warning naming the symbol.
+    """
+    log_signal_and_open_trade(
+        conn,
+        signal=_signal(symbol="A", entry=100),
+        entry_ts="2026-05-01T09:20:00",
+        entry_price=100,
+        qty=10,
+        atr_at_entry=2.0,
+    )
+    # Day 1: A quoted at 110 (a winner) → prior mark of 110/share persisted.
+    snap1 = compute_portfolio_snapshot(
+        conn, as_of=date(2026, 5, 14), bars={"A": Bar(108, 112, 107, 110)}, initial_capital=50_000
+    )
+    upsert_portfolio_snapshot(conn, snap1)
+
+    # Day 2: A's quote is missing. Must mark at the prior close (110), not entry (100).
+    snap2 = compute_portfolio_snapshot(
+        conn, as_of=date(2026, 5, 15), bars={}, initial_capital=50_000
+    )
+    holdings = json.loads(snap2.holdings_json)
+    assert holdings["A"]["value"] == pytest.approx(1100.0)  # 110 * 10, not 1000
+    assert any("A" in w for w in snap2.warnings)
+    # No trace-less snapping: the warning must not claim an entry-price estimate.
+    assert not any("entry" in w.lower() for w in snap2.warnings)
 
 
 def test_drawdown_computed_against_peak(conn: sqlite3.Connection) -> None:

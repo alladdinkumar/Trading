@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 import pandas as pd
@@ -36,13 +36,22 @@ INITIAL_CAPITAL = 100_000.0
 
 @dataclass(frozen=True)
 class PortfolioSnapshot:
-    """One row written to `portfolio_snapshots`."""
+    """One row written to `portfolio_snapshots`.
+
+    `warnings` is transient diagnostics only — it is *not* persisted
+    (`upsert_portfolio_snapshot` writes explicit columns) and is excluded from
+    equality/repr. It carries F-052 mark-fallback notes (a symbol whose quote
+    was missing, marked at its prior close or entry) up to the caller so they
+    surface in `post_close_summary.md` rather than distorting the equity/
+    drawdown series silently.
+    """
 
     date: str
     cash: float
     equity: float
     drawdown_pct: float | None
     holdings_json: str
+    warnings: list[str] = field(default_factory=list, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -218,6 +227,31 @@ def compute_paper_cash(
 # ---------------------------------------------------------------------------
 
 
+def _prior_per_share_marks(conn: sqlite3.Connection, *, as_of: date) -> dict[str, float]:
+    """Per-share marks from the latest snapshot strictly *before* `as_of`.
+
+    Parsed as `{symbol: value/qty}` from that snapshot's `holdings_json` — the
+    same shape `positions._marks` reads. Used as the F-052 fallback when a held
+    symbol has no bar today: its last known close is a truer mark than snapping
+    back to cost basis. Empty when no earlier snapshot exists.
+
+    Day-gating uses `date < ?` on the ISO `date` primary key (a pure YYYY-MM-DD
+    string), so no `substr`/`date()` concern applies here.
+    """
+    row = conn.execute(
+        "SELECT holdings_json FROM portfolio_snapshots WHERE date < ? ORDER BY date DESC LIMIT 1",
+        (as_of.isoformat(),),
+    ).fetchone()
+    if row is None:
+        return {}
+    out: dict[str, float] = {}
+    for sym, h in json.loads(row["holdings_json"]).items():
+        qty = float(h.get("qty") or 0.0)
+        if qty:
+            out[sym] = float(h.get("value") or 0.0) / qty
+    return out
+
+
 def compute_portfolio_snapshot(
     conn: sqlite3.Connection,
     *,
@@ -230,16 +264,25 @@ def compute_portfolio_snapshot(
     Cash is derived from the trade ledger via `compute_paper_cash`
     (`initial_capital` minus net deployed capital, plus realised proceeds),
     so closing a winner raises cash and the equity curve compounds (F-023).
-    Equity = cash + sum(qty * close) over open positions; symbols missing
-    from `bars` use last_traded entry_price as a fallback so equity is never
-    NULL.
+    Equity = cash + sum(qty * close) over open positions.
+
+    F-052 — missing-quote fallback. A symbol absent from `bars` is *not* snapped
+    to `entry_price` (cost basis): that would flatten a live winner/loser back to
+    break-even and silently distort the persisted equity/drawdown series the gate
+    Sharpe (F-061) reads back. Instead we mark it at the **prior snapshot's
+    per-share close** (its last known price) and append a warning naming the
+    symbol. Only when no prior mark exists do we fall back to entry price, and the
+    warning flags that row as an estimate. Warnings ride on the returned snapshot
+    (transient, not persisted) so they surface in `post_close_summary.md`.
 
     Drawdown computed by comparing today's equity to the peak in
     `portfolio_snapshots` so far. Returns None on the very first snapshot.
     """
     cash = compute_paper_cash(conn, as_of=as_of, initial_capital=initial_capital)
+    prior_marks = _prior_per_share_marks(conn, as_of=as_of)
     open_pts = open_trades(conn)
     by_symbol: dict[str, dict[str, float]] = {}
+    warnings: list[str] = []
     for trade in open_pts:
         sym_row = conn.execute(
             "SELECT symbol FROM signals WHERE id = ?", (trade.signal_id,)
@@ -247,7 +290,19 @@ def compute_portfolio_snapshot(
         if sym_row is None:
             continue
         symbol = sym_row["symbol"]
-        mark_price = bars[symbol].close if symbol in bars else trade.entry_price
+        if symbol in bars:
+            mark_price = bars[symbol].close
+        elif symbol in prior_marks:
+            mark_price = prior_marks[symbol]
+            warnings.append(
+                f"{symbol}: no quote today — marked at prior close ₹{mark_price:,.2f}"
+            )
+        else:
+            mark_price = trade.entry_price
+            warnings.append(
+                f"{symbol}: no quote and no prior mark — estimated at entry price "
+                f"₹{mark_price:,.2f}"
+            )
         value = mark_price * trade.qty
         h = by_symbol.setdefault(symbol, {"qty": 0.0, "value": 0.0})
         h["qty"] += trade.qty
@@ -268,6 +323,7 @@ def compute_portfolio_snapshot(
         equity=equity,
         drawdown_pct=drawdown_pct,
         holdings_json=json.dumps(by_symbol, sort_keys=True),
+        warnings=warnings,
     )
 
 

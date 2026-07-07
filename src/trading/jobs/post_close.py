@@ -124,6 +124,10 @@ def run_post_close(
         reconcile_result = reconcile_day(
             conn, as_of=as_of, bars=bars, initial_capital=initial_capital
         )
+        # F-052: surface missing-quote mark fallbacks (a held symbol marked at
+        # its prior close, or estimated at entry) so the equity/drawdown series
+        # isn't distorted silently — these ride on the snapshot, transiently.
+        warnings.extend(reconcile_result.snapshot.warnings)
 
         # F-061: the actual go-live-gate metric — daily-annualised Sharpe of the
         # *full* live paper equity curve, computed fresh after today's snapshot
@@ -197,6 +201,19 @@ def _render_post_close_summary(
             f"- Gate Sharpe (daily, annualised): {gate_sharpe_txt}"
             " — the go-live-gate metric (≥3mo, >1.0)",
             "",
+        ]
+    )
+    # F-052: name any symbol marked without a fresh quote so the equity figure
+    # above is not trusted blindly (a missing quote for an intraday mover
+    # otherwise distorts the persisted series with no trace).
+    if snap.warnings:
+        lines.append("### Mark warnings")
+        lines.append("")
+        for w in snap.warnings:
+            lines.append(f"- {w}")
+        lines.append("")
+    lines.extend(
+        [
             f"### Matured predictions ({len(updates)})",
             "",
         ]
