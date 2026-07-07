@@ -230,6 +230,10 @@ data/logs/
 data/research/
 data/raw/
 
+# Personal financial data — never publish (public repo)
+data/mutual_funds_holdings.md
+Research/
+
 # ML model artifacts (large, regeneratable)
 models/*.pkl
 models/*.joblib

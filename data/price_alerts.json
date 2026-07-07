@@ -1,0 +1,13 @@
+[
+  {
+    "symbol": "TATAPOWER",
+    "exchange": "NSE",
+    "condition": "ltp>=388",
+    "level": 388.0,
+    "direction": "reclaim_above",
+    "created_at": "2026-07-02T09:30:16.343130+05:30",
+    "created_ltp": 376.35,
+    "status": "armed",
+    "note": "Reclaim of SMA20-ish zone; watch for add/turn confirmation."
+  }
+]
