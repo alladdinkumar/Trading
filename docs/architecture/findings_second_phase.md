@@ -492,7 +492,7 @@ If `/macro-doctor` runs with (or a shell retry reuses) an off-date `--cross` pat
 
 ---
 
-### F-064 — Analyst hallucination-check silently skips any macro figure carrying a reconciliation flag (`GAP`, Low, llm/briefing) — Open
+### F-064 — Analyst hallucination-check silently skips any macro figure carrying a reconciliation flag (`GAP`, Low, llm/briefing) — ✅ Fixed 2026-07-03
 
 **Where** `src/trading/llm/context.py:112-115,138-141` (annotates a mismatched macro cell as e.g. `"19.40 ⚠ kite 22.5"`); `src/trading/llm/briefing.py:93-100,132-135` (`_macro_figure_warnings`: `try: float(val_str) except ValueError: continue`).
 

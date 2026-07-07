@@ -129,8 +129,13 @@ def _macro_figure_warnings(
         val_str = macro_table.get(field)
         if val_str is None or not any(k in brief_lower for k in keywords):
             continue
+        # A reconciliation-flagged cell is annotated ("19.40 ⚠ kite 22.5" /
+        # "83.12 (unreconciled)") — parse only the leading numeric token so the
+        # hallucination check still runs on the bare value (F-064). Skipping it
+        # here would disable the guard exactly when the figure is already flagged.
+        leading = val_str.split()[0] if val_str.split() else ""
         try:
-            v = float(val_str.replace(",", ""))
+            v = float(leading.replace(",", ""))
         except ValueError:
             continue
         if not any(round(n, 1) == round(v, 1) or round(n) == round(v) for n in nums):

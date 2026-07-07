@@ -240,6 +240,35 @@ def test_compile_brief_no_warn_when_macro_figure_matches(
     assert "hallucinated" not in err
 
 
+def test_compile_brief_warns_on_hallucination_when_macro_cell_annotated(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """F-064: a reconciliation-flagged cell ("19.40 ⚠ kite 22.5") must still be
+    cross-checked against its bare value — the guard must not switch off just
+    because the figure is already flagged unreliable."""
+    date_dir = tmp_path / "2026-05-15"
+    date_dir.mkdir()
+    _bundle_with_macro(date_dir, "| VIX | 19.40 ⚠ kite 22.5 |\n| USDINR | 83.12 |\n")
+    _write_part(date_dir, "macro_brief.md", "Regime NEUTRAL. VIX spiked to 30.0.\n")
+    compile_brief(date_dir, mode="pre_open")
+    err = capsys.readouterr().err
+    assert "VIX" in err and "hallucinated" in err
+
+
+def test_compile_brief_no_warn_when_annotated_cell_matches(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """F-064: an annotated cell whose bare value the brief cites correctly still
+    does not warn (leading numeric token parsed, annotation ignored)."""
+    date_dir = tmp_path / "2026-05-15"
+    date_dir.mkdir()
+    _bundle_with_macro(date_dir, "| VIX | 19.40 ⚠ kite 22.5 |\n| USDINR | 83.12 |\n")
+    _write_part(date_dir, "macro_brief.md", "Regime NEUTRAL. VIX at 19.4 today.\n")
+    compile_brief(date_dir, mode="pre_open")
+    err = capsys.readouterr().err
+    assert "hallucinated" not in err
+
+
 def test_compile_brief_no_warn_when_macro_field_absent_from_brief(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
