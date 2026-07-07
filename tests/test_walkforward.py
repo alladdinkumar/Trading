@@ -153,6 +153,104 @@ def test_run_walkforward_stitches_a_compounding_equity_curve() -> None:
     assert agg.equity_curve.iloc[0] == pytest.approx(bt.initial_capital)
 
 
+def test_run_walkforward_overlapping_folds_later_fold_wins_shared_day() -> None:
+    """Default config has test_months (6) > step_months (3) → adjacent test
+    windows overlap. On a shared calendar day the stitch must keep the *later*
+    fold's return (dedup keep="last"), and must neither drop a day nor
+    double-count one. This exercises the overlap branch the finding names (F-066).
+    """
+    dates = pd.date_range("2020-01-01", "2023-10-01", freq="B")
+    close = 100.0 * (1.001 ** pd.Series(range(len(dates)), index=dates).astype(float))
+    df = pd.DataFrame(
+        {
+            "open": close,
+            "high": close * 1.0001,
+            "low": close * 0.9999,
+            "close": close,
+            "volume": 1_000_000,
+            "atr_14": 1.0,
+        },
+        index=dates,
+    )
+
+    def provider(
+        d: pd.Timestamp,
+        _enriched: object,
+        _ctx: ScanContext,
+        _cfg: BacktestConfig,
+    ) -> list[Signal]:
+        price = float(close.loc[d])
+        return [Signal(symbol="X", close=price, atr=1.0, stop_price=95.0)]
+
+    bt = BacktestConfig(initial_capital=100_000, risk_pct=0.5, max_per_stock_pct=0.9)
+    wf = WalkForwardConfig(train_years=3, test_months=6, step_months=3)
+    agg, folds = run_walkforward(
+        {"X": df},
+        bt,
+        wf,
+        pd.Timestamp("2020-01-01"),
+        pd.Timestamp("2023-10-01"),
+        signal_provider=provider,
+    )
+    assert len(folds) == 2
+    assert folds[1].test_start < folds[0].test_end  # windows genuinely overlap
+
+    # Re-run each fold in isolation — identical inputs to what run_walkforward
+    # used internally, so per-date returns match exactly.
+    w0 = run_backtest(
+        {"X": df}, bt, folds[0].test_start, folds[0].test_end, signal_provider=provider
+    )
+    w1 = run_backtest(
+        {"X": df}, bt, folds[1].test_start, folds[1].test_end, signal_provider=provider
+    )
+    # The stitch drops each fold's fabricated leading row before combining.
+    r0 = w0.daily_returns.iloc[1:]
+    r1 = w1.daily_returns.iloc[1:]
+
+    shared = r0.index.intersection(r1.index)
+    assert len(shared) > 0
+    differing = [d for d in shared if abs(float(r0[d]) - float(r1[d])) > 1e-9]
+    assert differing, "folds must disagree on a shared day for the test to prove which wins"
+    for d in differing:
+        assert float(agg.daily_returns[d]) == pytest.approx(float(r1[d]))  # later fold wins
+        assert abs(float(agg.daily_returns[d]) - float(r0[d])) > 1e-9  # not the earlier
+
+    # No day dropped, none double-counted: aggregate index == unique sorted union.
+    assert agg.daily_returns.index.is_unique
+    assert list(agg.daily_returns.index) == list(r0.index.union(r1.index))
+
+
+def test_run_walkforward_all_empty_folds_returns_empty_without_crashing() -> None:
+    """A fold is enumerated by the calendar, but its test window may hold no
+    bars (data ends before the window). Every fold then yields an empty curve;
+    the stitch must fall through to the no-data result, not crash on min() over
+    an empty sequence (F-066 follow-up)."""
+    # Data ends 2022-12-30; the sole fold's test window is 2023-01→2023-07.
+    df = pd.DataFrame(
+        {
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1_000_000,
+            "atr_14": 1.0,
+        },
+        index=pd.date_range("2020-01-01", "2022-12-30", freq="B"),
+    )
+    wf = WalkForwardConfig(train_years=3, test_months=6, step_months=3)
+    agg, folds = run_walkforward(
+        {"X": df},
+        BacktestConfig(),
+        wf,
+        pd.Timestamp("2020-01-01"),
+        pd.Timestamp("2023-07-01"),
+    )
+    assert len(folds) >= 1  # a fold was enumerated…
+    assert len(agg.equity_curve) == 0  # …but produced no bars → empty result
+    assert len(agg.daily_returns) == 0
+    assert agg.trades == ()
+
+
 def test_run_walkforward_empty_when_no_folds() -> None:
     """End-date earlier than first possible test_end → 0 folds, empty result."""
     df = pd.DataFrame(

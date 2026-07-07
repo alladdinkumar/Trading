@@ -118,7 +118,11 @@ def run_walkforward(
         total_costs += fold_result.total_costs
         final_cash = fold_result.final_cash  # last fold wins
 
-    if equity_pieces:
+    # Fold windows with no trading dates yield empty per-fold curves; if *every*
+    # fold is empty there is nothing to compound (and `min()` over an empty
+    # sequence would crash), so fall through to the same no-data result.
+    non_empty_equity = [piece for piece in equity_pieces if len(piece)]
+    if non_empty_equity:
         # Each fold's `daily_returns` opens with a fabricated `fillna(0.0)` base
         # row (pct_change of the first bar). Drop it so no zero return is spliced
         # in at a fold boundary; `keep="last"` then lets a later, overlapping
@@ -128,7 +132,7 @@ def run_walkforward(
 
         # Rebuild ONE compounding equity curve off a single `initial_capital`
         # base, anchored at the earliest fold's first date.
-        first_date = min(piece.index[0] for piece in equity_pieces if len(piece))
+        first_date = min(piece.index[0] for piece in non_empty_equity)
         base = float(bt_config.initial_capital)
         body = base * (1.0 + daily_returns).cumprod()
         anchor = pd.Series({first_date: base}, dtype=float)
