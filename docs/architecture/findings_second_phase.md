@@ -92,6 +92,14 @@ ranks tomorrow's trades. F-050/F-057/F-058 are the highest-leverage
 edge-and-safety fixes; F-059/F-061 mean the operator currently *cannot read the
 true P&L or the gate Sharpe off the system*; the rest are hygiene.
 
+**Status (2026-07-07):** all **18** findings (F-049–F-066) are fixed, each
+independently reviewed, and pushed to `main` (commit refs in every heading). A
+final whole-branch review confirmed the shared-module edits compose cleanly (the
+P&L identity chain closes, `substr` day-gating is uniform, gate-Sharpe has one
+definition) with no cross-cutting defect. Three **follow-on findings**
+(F-067–F-069, all Low, open) were surfaced *during* remediation and are recorded
+in the addendum below for a future pass.
+
 ### Breakdown
 
 | Severity | Count | IDs |
@@ -200,7 +208,7 @@ and assert the above-SMA-by->tol cases now fail.
 
 ---
 
-### F-051 — Prediction "actual return" and win labelling are gross of costs (`GAP`, Med, paper/reconcile) — ✅ Fixed 2026-07-03
+### F-051 — Prediction "actual return" and win labelling are gross of costs (`GAP`, Med, paper/reconcile) — ✅ Fixed 2026-07-03 (`c261ed0`)
 
 **Where** `src/trading/paper/reconcile.py:102-117` (`evaluate_matured_predictions`);
 interacts with the calibration consumer in `strategy/calibration.py` +
@@ -229,7 +237,7 @@ exactly how "won" is derived before sizing the fix (hence "Likely", not
 
 ---
 
-### F-052 — MTM marks a missing-quote symbol at entry price, overstating losers (`GAP`, Low, paper/reconcile) — ✅ Fixed 2026-07-03
+### F-052 — MTM marks a missing-quote symbol at entry price, overstating losers (`GAP`, Low, paper/reconcile) — ✅ Fixed 2026-07-03 (`629ab4e`)
 
 **Where** `src/trading/paper/reconcile.py:232` (`compute_portfolio_snapshot`);
 analogous fallback in `backtest/engine.py:362-363` (`_mark_to_market`).
@@ -267,7 +275,7 @@ prior mark exists, mark at entry and flag the row estimated.
 
 ---
 
-### F-053 — Dead `days_between` calendar-day helper can silently reintroduce F-024 (`DEBT`, Low, paper/ledger) — ✅ Fixed 2026-07-03
+### F-053 — Dead `days_between` calendar-day helper can silently reintroduce F-024 (`DEBT`, Low, paper/ledger) — ✅ Fixed 2026-07-03 (`a34c2e2`)
 
 **Where** `src/trading/paper/ledger.py:182-193` (`days_between`).
 
@@ -381,7 +389,7 @@ Add an embargo of `max_days` (25) trading days on the training side: either adva
 
 ---
 
-### F-057 — Five Nifty-50 candidates are missing from `sector_map.csv`, exempting them from the sector concentration cap (`GAP`, Med, data/sector) — ✅ Fixed 2026-07-03
+### F-057 — Five Nifty-50 candidates are missing from `sector_map.csv`, exempting them from the sector concentration cap (`GAP`, Med, data/sector) — ✅ Fixed 2026-07-03 (`11ac946`)
 
 **Where** `data/static/sector_map.csv` (no rows for `BHARTIARTL`, `ETERNAL`, `INDIGO`, `TITAN`, `TRENT`); consumed via `src/trading/data/sector.py` (`load_sector_map`) → `src/trading/jobs/open_fills.py:137,147` → `src/trading/strategy/daily_budget.py:105-138` (a `sector=None` candidate is **never** gated by the max-2-lots-per-sector cap, F-048).
 
@@ -397,7 +405,7 @@ On a broad risk-on day, `BHARTIARTL`, `INDIGO` and `TITAN` (and `ETERNAL`/`TRENT
 
 ---
 
-### F-058 — Quote-staleness gate (and several date defaults) use the host's local clock, not the canonical IST clock (`RISK`, Med, data/quotes_snapshot) — ✅ Fixed 2026-07-03
+### F-058 — Quote-staleness gate (and several date defaults) use the host's local clock, not the canonical IST clock (`RISK`, Med, data/quotes_snapshot) — ✅ Fixed 2026-07-03 (`a88f7b7`, `e57b7a0`)
 
 **Where** `src/trading/data/quotes_snapshot.py:68-72` (`capture_ts` naive from filename; `age = datetime.now() - capture_ts`); same anti-pattern in `src/trading/ops/logging_setup.py:116` and CLI ad-hoc date defaults (`cli.py` funds-add/top-up, refresh-ohlcv, ingest-news, macro-*). `clock.py` exists precisely so nothing re-derives the IST offset locally — the original **F-004**.
 
@@ -413,7 +421,7 @@ Run the workflow on a non-IST host (a UTC-defaulted sandbox/container): dependin
 
 ---
 
-### F-059 — Paper-Portfolio "Total P&L" / "Today's P&L" tiles exclude all realised P&L (`INACC`, Med, ui/paper) — ✅ Fixed 2026-07-03
+### F-059 — Paper-Portfolio "Total P&L" / "Today's P&L" tiles exclude all realised P&L (`INACC`, Med, ui/paper) — ✅ Fixed 2026-07-03 (`e0b1874`, `78cec4a`)
 
 **Where** `src/trading/paper/positions.py:117` (`compute_positions` filters `pt.ts_exit IS NULL` — open lots only) → `:162-166` (`compute_summary`: `total_pnl = current_value − invested`, `today_pnl = Σ p.today_pnl`, both over that open-only list) → `src/trading/ui/pages/4_Paper_Portfolio.py:54,60` (tiles labelled plainly "Total P&L" / "Today's P&L"). Realised P&L already lives correctly in `cash`/`account_value` (`reconcile.compute_paper_cash` credits every closed trade's proceeds).
 
@@ -429,7 +437,7 @@ Close one paper trade for +₹5,000 with nothing else open: the page shows **Tot
 
 ---
 
-### F-060 — Slack webhook URL logged in cleartext on any post failure (`VULN`, Med, ops/notify) — ✅ Fixed 2026-07-03
+### F-060 — Slack webhook URL logged in cleartext on any post failure (`VULN`, Med, ops/notify) — ✅ Fixed 2026-07-03 (`a817c80`)
 
 **Where** `src/trading/ops/notify.py:44-49` (`post_slack`: `resp.raise_for_status()` inside `try`; `except requests.RequestException as e: logger.warning(f"Slack post failed: {e}")`); the WARN is persisted by the INFO-level rotating-file + stderr sinks in `ops/logging_setup.py`.
 
@@ -445,7 +453,7 @@ Any non-2xx or network hiccup (rotated/revoked hook, rate-limit, transient DNS) 
 
 ---
 
-### F-061 — Three inconsistent "Sharpe" definitions; the daily-annualised gate Sharpe is never computed on the live paper equity (`INACC`, Med, backtest/ui) — ✅ Fixed 2026-07-03
+### F-061 — Three inconsistent "Sharpe" definitions; the daily-annualised gate Sharpe is never computed on the live paper equity (`INACC`, Med, backtest/ui) — ✅ Fixed 2026-07-03 (`9bb5670`)
 
 **Where**
 - Ranker/factor: `src/trading/ranking/ranker_train.py:212,292,315` and `backtest/factor_eval.py:106` call `metrics.sharpe(..., periods_per_year=12)` on **per-trade** returns → stored as `RegistryRow.oos_sharpe`, printed "OOS Sharpe (pooled)".
@@ -464,7 +472,7 @@ An operator eyeballing "OOS Sharpe (pooled): 1.3" or the Journal's "Sharpe 1.1" 
 
 ---
 
-### F-062 — IEP health checkpoints are permanently unsatisfiable, so `trading status` reports a false "half-run" every day (`GAP`, Med, ops/run_status) — ✅ Fixed 2026-07-03
+### F-062 — IEP health checkpoints are permanently unsatisfiable, so `trading status` reports a false "half-run" every day (`GAP`, Med, ops/run_status) — ✅ Fixed 2026-07-03 (`9ededed`)
 
 **Where** `src/trading/ops/run_status.py` (`_probe_iep_quotes`/`_probe_iep_filter` hard-depend on `_iep_quote_file` finding a pre-10:30-IST `quotes_HHMM.json`); `cli.py:1931-1933` (`status` exits 1 on `has_due_failure()`).
 
@@ -478,7 +486,7 @@ From ~09:00 IST every trading day, `trading status` prints `iep 0/2 ❌` and exi
 
 ---
 
-### F-063 — `read_macro_cross` has no freshness check, so a stale cross-file can gap-fill today's VIX (`GAP`, Low, data/macro_cross) — ✅ Fixed 2026-07-03
+### F-063 — `read_macro_cross` has no freshness check, so a stale cross-file can gap-fill today's VIX (`GAP`, Low, data/macro_cross) — ✅ Fixed 2026-07-03 (`58bdec5`)
 
 **Where** `src/trading/data/macro_cross.py:38-46` (`read_macro_cross` validates shape only, takes no `as_of`); callers `cli.py` `macro_refresh_cmd`/`macro_verify_cmd` add no date check. Contrast `kite_snapshot._validate_meta`, which raises `KiteSnapshotStaleError` on a date mismatch.
 
@@ -492,7 +500,7 @@ If `/macro-doctor` runs with (or a shell retry reuses) an off-date `--cross` pat
 
 ---
 
-### F-064 — Analyst hallucination-check silently skips any macro figure carrying a reconciliation flag (`GAP`, Low, llm/briefing) — ✅ Fixed 2026-07-03
+### F-064 — Analyst hallucination-check silently skips any macro figure carrying a reconciliation flag (`GAP`, Low, llm/briefing) — ✅ Fixed 2026-07-03 (`9f3202a`)
 
 **Where** `src/trading/llm/context.py:112-115,138-141` (annotates a mismatched macro cell as e.g. `"19.40 ⚠ kite 22.5"`); `src/trading/llm/briefing.py:93-100,132-135` (`_macro_figure_warnings`: `try: float(val_str) except ValueError: continue`).
 
@@ -506,7 +514,7 @@ Bundle shows `"19.40 ⚠ kite 22.5"`; the analyst brief cites a hallucinated "VI
 
 ---
 
-### F-065 — `negative_news_count_7d` window bounds are naive date strings compared to UTC timestamps (`INACC`, Low, store/news_store) — ✅ Fixed 2026-07-03
+### F-065 — `negative_news_count_7d` window bounds are naive date strings compared to UTC timestamps (`INACC`, Low, store/news_store) — ✅ Fixed 2026-07-03 (`de6425c`)
 
 **Where** `src/trading/store/news_store.py:126-149`; `ts` is always stored UTC-suffixed (`news.py:103-113,180-189`).
 
@@ -520,7 +528,7 @@ A negative headline near the window edge (IST early morning) is stored on the pr
 
 ---
 
-### F-066 — `run_walkforward`'s fold-stitched equity breaks CAGR / max-drawdown (`DEBT`, Low — dormant, backtest/walkforward) — ✅ Fixed 2026-07-03
+### F-066 — `run_walkforward`'s fold-stitched equity breaks CAGR / max-drawdown (`DEBT`, Low — dormant, backtest/walkforward) — ✅ Fixed 2026-07-03 (`d61b9c4`, `21fbbbf`)
 
 **Where** `src/trading/backtest/walkforward.py:94-120` (fold loop + `equity_curve[~…duplicated(keep="last")]`); each fold's `run_backtest` resets `cash = initial_capital` (`engine.py:180`); default `WalkForwardConfig` has `test_months=6 > step_months=3` → overlapping test windows.
 
@@ -531,6 +539,39 @@ A negative headline near the window edge (IST early morning) is stored on the pr
 **Currently dormant** — production wires only the single-window `run_backtest` (`cli.py:530`); `ranker_train` runs its own fold loop rather than calling `run_walkforward`. It would silently produce a wrong CAGR/max-drawdown headline the moment someone wires the multi-fold report the module's docstring anticipates. Filed so that wiring doesn't ship the bug.
 
 **Fix** Rebase each fold to a cumulative-return series (start 1.0) before concatenating, or compute CAGR/max-drawdown per-fold and aggregate; for overlapping windows, drop the earlier fold's overlapping days rather than splicing a zero return.
+
+---
+
+## Follow-on findings (surfaced during remediation)
+
+These three were noticed while fixing F-049–F-066 and **confirmed by the final
+whole-branch review** as real but Minor. None blocked closing the batch; all are
+**open** and filed here so the next audit pass doesn't rediscover them cold. All
+are Low.
+
+### F-067 — Paper "Today's P&L" tile can mix two as-of dates intraday (`INACC`, Low, paper/positions+reconcile)
+
+**Where** `positions._marks` sources the open-leg `today_pnl` from `portfolio_snapshots ORDER BY date DESC LIMIT 2` (positional), while `reconcile._realised_today_pnl` prices the realised leg from `_prev_close_marks` (date-aware: latest snapshot strictly `< as_of`).
+
+**What / Impact** At the canonical post-close read (after today's snapshot is written) both resolve to "yesterday" and agree. They diverge only intraday, *before* today's snapshot exists — the open leg then marks against a newer close than the realised leg. Cosmetic and narrow: the page is labelled "marks as of last close," and the realised leg is non-zero only if a trade actually closed today. Not a correctness risk to any stored value or trading decision.
+
+**Fix** Have both legs resolve their "prior close" through the same date-aware helper so a single tile is always as-of one date.
+
+### F-068 — Backdated `as_of` marks positions at the latest snapshot, not the as-of snapshot (`INACC`, Low, paper/positions)
+
+**Where** `compute_positions` selects the position *set* date-aware, but `_marks` still reads the mark from `ORDER BY date DESC LIMIT 2` regardless of `as_of`.
+
+**What / Impact** `funds balance --date <past>` prints `total_pnl` using *today's* marks over a historical holdings set. Pre-existing (the F-059 follow-up only made the *selection* date-aware, which slightly widened the visible mismatch). Confined to on-demand diagnostic tiles — `portfolio_snapshots` marks from the passed-in `bars`, not `_marks`, so nothing persisted or fed to decisions is affected.
+
+**Fix** Pass `as_of` into `_marks`/`_per_share` so a backdated read prices against the snapshot as of that date.
+
+### F-069 — Mixed naive/aware ISO timestamps now permanent in the ledger DB (`DEBT`, Low — latent, store/schema)
+
+**Where** Post-F-058 the code writes tz-aware stamps (`now_ist().isoformat()`, `+05:30`) alongside legacy naive rows in the same timestamp columns.
+
+**What / Impact** No live defect: every comparison in the changed flow is format-agnostic — day-gating is `substr`/string-slice, `mtm._days_held` reduces both operands via `.date()`, and the matured-prediction join reuses one timestamp for both sides in lockstep. The hazard is *latent*: future code that naively `fromisoformat`-compares two such columns would raise `TypeError: can't subtract offset-naive and offset-aware datetimes`.
+
+**Fix** Documentation guard-rail — note the mixed-format reality in the schema/timestamp docs, and prefer `substr`/`.date()` (never raw datetime subtraction) for any new cross-row timestamp comparison.
 
 ---
 
