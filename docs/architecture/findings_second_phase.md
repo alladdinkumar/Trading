@@ -506,7 +506,7 @@ Bundle shows `"19.40 ⚠ kite 22.5"`; the analyst brief cites a hallucinated "VI
 
 ---
 
-### F-065 — `negative_news_count_7d` window bounds are naive date strings compared to UTC timestamps (`INACC`, Low, store/news_store) — Open
+### F-065 — `negative_news_count_7d` window bounds are naive date strings compared to UTC timestamps (`INACC`, Low, store/news_store) — ✅ Fixed 2026-07-03
 
 **Where** `src/trading/store/news_store.py:126-149`; `ts` is always stored UTC-suffixed (`news.py:103-113,180-189`).
 

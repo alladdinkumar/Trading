@@ -107,6 +107,25 @@ def test_negative_news_count_7d_zero_when_news_but_none_negative(conn: sqlite3.C
     assert negative_news_count_7d(conn, "RELIANCE", date(2026, 5, 20)) == 0
 
 
+def test_negative_news_count_7d_includes_ist_early_morning_edge(
+    conn: sqlite3.Connection,
+) -> None:
+    """F-065: a negative headline in the IST early morning of the window's start
+    day is stored on the *previous* UTC date. With IST-derived UTC bounds it must
+    still fall inside the trailing-7d window, not drop out.
+
+    as_of = 2026-05-20 (IST). Window start = IST midnight 2026-05-13, which is
+    2026-05-12T18:30:00+00:00 in UTC. A headline at 01:00 IST on 2026-05-13 is
+    stored as 2026-05-12T19:30:00+00:00 — inside the IST window, but *before* a
+    naive "2026-05-13" date-string bound.
+    """
+    insert_news_items(
+        conn,
+        [_neg_item("RELIANCE", "2026-05-12T19:30:00+00:00", -0.5)],
+    )
+    assert negative_news_count_7d(conn, "RELIANCE", date(2026, 5, 20)) == 1
+
+
 def _news(headline: str, *, source: str = "mc", url: str | None = "https://x/1") -> NewsItem:
     return NewsItem(
         ts="2026-05-13T10:00:00+00:00",

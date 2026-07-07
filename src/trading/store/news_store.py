@@ -12,8 +12,9 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
+from trading.clock import IST
 from trading.domain import NewsItem
 
 # Sentiment at or below this is "negative" for the news-veto / ranker feature.
@@ -123,6 +124,16 @@ def list_critical_for_symbol(
     return [_row_to_news_item(r) for r in rows]
 
 
+def _ist_midnight_utc(d: date) -> str:
+    """UTC-suffixed ISO 8601 for IST midnight of `d` — a news-window edge (F-065).
+
+    `news_items.ts` is stored in UTC, but window edges are anchored to the IST
+    trading day; converting IST midnight to UTC keeps the boundary from shifting
+    5.5h off the intended IST day.
+    """
+    return datetime.combine(d, time.min, tzinfo=IST).astimezone(UTC).isoformat()
+
+
 def negative_news_count_7d(
     conn: sqlite3.Connection, symbol: str, as_of: date
 ) -> int | None:
@@ -134,15 +145,21 @@ def negative_news_count_7d(
 
     Returns ``None`` when no news rows fall in the window (caller propagates as
     NaN), and ``0`` when news rows exist but none are negative.
+
+    `as_of` is the IST trading date; `ts` is UTC-suffixed ISO 8601. The window
+    edges are the IST-midnight boundaries of the trailing 7 days converted to
+    UTC (half-open `[start, end)`), so an IST early-morning headline stored on
+    the previous UTC date is still counted (F-065). String comparison is valid
+    because both bounds and `ts` are same-format UTC ISO 8601.
     """
-    start = (as_of - timedelta(days=7)).isoformat()
-    end_ts = f"{as_of.isoformat()}T23:59:59"
+    start = _ist_midnight_utc(as_of - timedelta(days=7))
+    end = _ist_midnight_utc(as_of + timedelta(days=1))
     row = conn.execute(
         "SELECT COUNT(*) AS c, "
         "       SUM(CASE WHEN sentiment < ? THEN 1 ELSE 0 END) AS n "
         "FROM news_items "
-        "WHERE symbol = ? AND ts >= ? AND ts <= ?",
-        (NEGATIVE_SENTIMENT_THRESHOLD, symbol, start, end_ts),
+        "WHERE symbol = ? AND ts >= ? AND ts < ?",
+        (NEGATIVE_SENTIMENT_THRESHOLD, symbol, start, end),
     ).fetchone()
     if row is None or row["c"] == 0:
         return None
