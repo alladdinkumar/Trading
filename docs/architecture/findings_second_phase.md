@@ -520,7 +520,7 @@ A negative headline near the window edge (IST early morning) is stored on the pr
 
 ---
 
-### F-066 — `run_walkforward`'s fold-stitched equity breaks CAGR / max-drawdown (`DEBT`, Low — dormant, backtest/walkforward) — Open
+### F-066 — `run_walkforward`'s fold-stitched equity breaks CAGR / max-drawdown (`DEBT`, Low — dormant, backtest/walkforward) — ✅ Fixed 2026-07-03
 
 **Where** `src/trading/backtest/walkforward.py:94-120` (fold loop + `equity_curve[~…duplicated(keep="last")]`); each fold's `run_backtest` resets `cash = initial_capital` (`engine.py:180`); default `WalkForwardConfig` has `test_months=6 > step_months=3` → overlapping test windows.
 

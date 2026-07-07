@@ -5,8 +5,10 @@ the `train_*` window isn't consumed (no model to fit); the structure is in
 place for Phase 16 (LightGBM ranker), which will refit on each train slice.
 
 `run_walkforward` runs the engine on each out-of-sample test window with
-the same initial capital and concatenates the per-fold trades. The equity
-curve is stitched fold-by-fold (each fold restarts at `initial_capital`).
+the same initial capital and concatenates the per-fold trades. Because each
+fold restarts at `initial_capital`, the aggregated equity curve is rebuilt as
+a single *compounding* series — fold N's growth chained onto fold N-1's end —
+rather than a naive concat of levels that would sawtooth at every reset (F-066).
 """
 
 from __future__ import annotations
@@ -86,10 +88,13 @@ def run_walkforward(
 ) -> tuple[BacktestResult, list[Window]]:
     """Run the engine on each test window, concatenate results.
 
-    Each fold restarts at `bt_config.initial_capital`. The aggregated equity
-    curve is the per-fold curves joined end-to-end (gaps from train periods
-    are dropped). Phase 16 will retrain a model on each train slice before
-    running its test slice.
+    Each fold restarts at `bt_config.initial_capital`, so the aggregated equity
+    curve is *not* a raw concat of levels (that sawtooths at every reset and
+    breaks `cagr()`/`max_drawdown()`). Instead the per-fold day-over-day returns
+    are stitched — dropping each fold's fabricated leading zero and, on
+    overlapping windows, keeping the later fold's version of a shared day — and
+    compounded off a single `initial_capital` base (F-066). Phase 16 will
+    retrain a model on each train slice before running its test slice.
     """
     folds = windows(start, end, wf_config)
     all_trades: list[Trade] = []
@@ -114,10 +119,22 @@ def run_walkforward(
         final_cash = fold_result.final_cash  # last fold wins
 
     if equity_pieces:
-        equity_curve = pd.concat(equity_pieces)
-        equity_curve = equity_curve[~equity_curve.index.duplicated(keep="last")].sort_index()
-        daily_returns = pd.concat(daily_pieces)
+        # Each fold's `daily_returns` opens with a fabricated `fillna(0.0)` base
+        # row (pct_change of the first bar). Drop it so no zero return is spliced
+        # in at a fold boundary; `keep="last"` then lets a later, overlapping
+        # fold win a shared day (i.e. the earlier fold's overlap is dropped).
+        daily_returns = pd.concat([piece.iloc[1:] for piece in daily_pieces])
         daily_returns = daily_returns[~daily_returns.index.duplicated(keep="last")].sort_index()
+
+        # Rebuild ONE compounding equity curve off a single `initial_capital`
+        # base, anchored at the earliest fold's first date.
+        first_date = min(piece.index[0] for piece in equity_pieces if len(piece))
+        base = float(bt_config.initial_capital)
+        body = base * (1.0 + daily_returns).cumprod()
+        anchor = pd.Series({first_date: base}, dtype=float)
+        equity_curve = pd.concat([anchor, body])
+        equity_curve = equity_curve[~equity_curve.index.duplicated(keep="first")].sort_index()
+        equity_curve.name = "equity"
     else:
         equity_curve = pd.Series([], dtype=float, name="equity")
         daily_returns = pd.Series([], dtype=float)
